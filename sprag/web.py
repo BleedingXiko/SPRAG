@@ -119,6 +119,10 @@ def virtual_scroll(
 
     Optional methods: ``measure``, ``placeholder``, ``recycle`` (REQUIRED if
     ``pool_size > 0``), ``evicted``.
+
+    Decorated components get a public scroller handle at
+    ``self.virtual_scroll`` in Python authoring code (emitted as
+    ``this.virtualScroll`` in JS). Framework-private storage stays internal.
     """
     if not isinstance(chunk, int) or chunk <= 0:
         raise ValueError("virtual_scroll(chunk=...) must be a positive integer")
@@ -398,6 +402,7 @@ class Component:
     props: dict = field(default_factory=dict)
     state: dict = field(default_factory=dict)
     refs: dict = field(default_factory=dict)
+    virtual_scroll: Optional[object] = None
 
     # -- Required user override --------------------------------------------
     def render(self, props=None):

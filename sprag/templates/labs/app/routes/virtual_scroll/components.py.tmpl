@@ -41,7 +41,7 @@ class StreamingLog(Component):
         # reachable immediately when the user scrolls down.
         current = self._spr_count or 200
         self._spr_count = current + 50
-        self._sprVS.reset()
+        self.virtual_scroll.reset()
 
     def total(self):
         return self._spr_count or 200

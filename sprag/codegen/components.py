@@ -198,7 +198,9 @@ def compile_component_class(component_class) -> str:
     unmount_prologue: list[str] = []
     unmount_epilogue: list[str] = []
     if vs_config is not None:
-        unmount_prologue.append("        if (this._sprVS) { this._sprVS.unmount(); this._sprVS = null; }")
+        unmount_prologue.append(
+            "        if (this.virtualScroll) { this.virtualScroll.unmount(); this.virtualScroll = null; this._sprVS = null; }"
+        )
     if animate_config:
         class_name = json.dumps(animate_config["class_name"])
         unmount_epilogue.extend(
@@ -411,10 +413,11 @@ def _emit_virtual_scroll_setup(cfg: dict, component_class) -> list[str]:
 
     options_block = ",\n            ".join(pairs)
     return [
-        "        this._sprVS = new VirtualScroller({",
+        "        this.virtualScroll = new VirtualScroller({",
         f"            {options_block}",
         "        });",
-        "        this._sprVS.mount(this.element);",
+        "        this._sprVS = this.virtualScroll;",
+        "        this.virtualScroll.mount(this.element);",
     ]
 
 
