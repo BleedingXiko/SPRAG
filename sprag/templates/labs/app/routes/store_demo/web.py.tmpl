@@ -1,0 +1,30 @@
+from sprag import Screen, hydrate, ui
+
+from app._shared import shell
+
+from .components import StoreCard
+from .modules import StoreDemoModule
+
+
+class StoreDemoScreen(Screen):
+    modules = [StoreDemoModule]
+
+    def render(self, data):
+        store = self.module(StoreDemoModule)
+        # Hydrate the module with the current store snapshot so SSR and
+        # the first hydrated paint match. ``set_state`` is a real Python
+        # operation on the server side.
+        store.set_state({"count": data["count"]})
+        return shell(
+            ui.section(
+                ui.span("store()", class_="badge"),
+                ui.h1("Store Demo"),
+                ui.p(
+                    "A cross-runtime store: declared once in app/stores.py, "
+                    "read and written on the server from the Controller "
+                    "action, mirrored onto the Ragot store in the browser."
+                ),
+                class_="hero",
+            ),
+            hydrate(StoreCard, module=store),
+        )

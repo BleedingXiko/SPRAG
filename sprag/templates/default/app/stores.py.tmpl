@@ -1,0 +1,17 @@
+"""Cross-route shared state.
+
+Stores declared here exist on both runtimes:
+
+- on the server, they're real Specter stores backing this Python object
+- inside a browser-side Module/Component, they compile to a Ragot
+  ``createStateStore`` import from the generated ``stores.js`` shim
+
+A single ``store(...)`` declaration is enough — SPRAG handles the rest.
+"""
+
+from sprag import store
+
+
+# Visit counter — incremented every time the home page renders.
+# Demonstrates server-side store usage from a Controller.
+visits = store("visits", initial={"count": 0})

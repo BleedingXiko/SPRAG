@@ -1,0 +1,44 @@
+import gevent
+
+from sprag import QueueService, bus
+
+
+class LabJobQueue(QueueService):
+    def __init__(self):
+        super().__init__(
+            "lab_jobs",
+            worker_count=1,
+            maxsize=32,
+            initial_state={
+                "completed": 0,
+                "last_job": None,
+            },
+        )
+
+    def handle_item(self, item):
+        gevent.sleep(1)
+        completed = self.state.get("completed", 0) + 1
+        result = {
+            "id": item["id"],
+            "label": item["label"],
+            "completed": completed,
+        }
+        self.set_state(
+            {
+                "completed": completed,
+                "last_job": result,
+            }
+        )
+        bus.emit(
+            "sprag:broadcast",
+            {
+                "event": "lab:job.done",
+                "payload": {
+                    **result,
+                    "queue_size": self.pending_count(),
+                },
+            },
+        )
+
+
+job_queue = LabJobQueue()

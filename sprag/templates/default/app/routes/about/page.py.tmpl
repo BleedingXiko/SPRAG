@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import AboutController
+from .web import AboutScreen
+
+
+about = page(
+    path="/about",
+    controller=AboutController,
+    screen=AboutScreen,
+    mode="document",
+    metadata={"title": "About — {{project_name}}"},
+)

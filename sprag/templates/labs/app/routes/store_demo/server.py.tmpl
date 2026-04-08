@@ -1,0 +1,25 @@
+from sprag import Controller, Schema, action
+
+from app.stores import lab_tally
+
+
+class StoreDemoController(Controller):
+    route = "/store-demo"
+
+    def load(self):
+        # Read the cross-runtime store from the server side.
+        snapshot = lab_tally.get_state()
+        return {"count": snapshot["count"]}
+
+    @action(schema=Schema("bump", {}))
+    def bump(self):
+        # Mutate the shared store on the server. A real app could also
+        # read this from a /counter route, a Service, or a QueueService
+        # handler — same Python object, same get_state/update API.
+        new_state = lab_tally.update(lambda s: {"count": s["count"] + 1})
+        return {"count": new_state["count"]}
+
+    @action(schema=Schema("reset", {}))
+    def reset(self):
+        lab_tally.set_state({"count": 0})
+        return {"count": 0}

@@ -1,0 +1,12 @@
+from sprag import Screen, ssr
+
+from .components import {{class_name}}Content
+
+
+class {{class_name}}Screen(Screen):
+    def render(self, data):
+        return ssr(
+            {{class_name}}Content,
+            heading=data["heading"],
+            body=data["body"],
+        )

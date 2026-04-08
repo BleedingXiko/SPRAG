@@ -1,0 +1,7 @@
+from sprag import App
+
+from app.services.job_queue import job_queue
+from app.services.pulse import pulse_service
+
+
+app = App(routes="app.routes", services=[job_queue, pulse_service])

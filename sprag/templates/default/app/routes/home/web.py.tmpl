@@ -1,0 +1,17 @@
+from sprag import Screen, ssr
+
+from app._shared import shell
+
+from .components import Landing
+
+
+class HomeScreen(Screen):
+    def render(self, data):
+        return shell(
+            ssr(
+                Landing,
+                title=data["title"],
+                tagline=data["tagline"],
+                visits=data["visits"],
+            ),
+        )

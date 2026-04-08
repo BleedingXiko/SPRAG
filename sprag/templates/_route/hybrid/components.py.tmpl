@@ -1,0 +1,14 @@
+from sprag import Component, ui
+
+
+class {{class_name}}Card(Component):
+    def render(self, props=None):
+        return ui.div(
+            ui.h1("{{class_name}}"),
+            ui.p(
+                "Count: ",
+                ui.span(str(self.state["count"])),
+            ),
+            ui.button("Bump", type="button", data_role="bump"),
+            class_="{{var_name}}-card",
+        )

@@ -1,0 +1,15 @@
+from sprag import Controller
+
+
+class HomeController(Controller):
+    route = "/"
+
+    def load(self):
+        return {
+            "title": "SPRAG Labs",
+            "tagline": (
+                "One entry per framework primitive. Each card below is a "
+                "focused demo that exercises one slice of the Specter + "
+                "Ragot surface SPRAG exposes."
+            ),
+        }

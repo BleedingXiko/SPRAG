@@ -1,0 +1,25 @@
+from sprag import Component, animate, ui
+
+
+@animate("is-visible")
+class AnimationCard(Component):
+    def render(self, props=None):
+        return ui.div(
+            ui.h2("Animation"),
+            ui.p(
+                "@animate wraps the Component lifecycle. The Module also calls "
+                "Ragot's animateOut and animateIn helpers through sprag.dom."
+            ),
+            ui.div(
+                ui.span("Replays"),
+                ui.strong(str(self.state.get("plays", 0))),
+                class_="metric",
+            ),
+            ui.p(self.state.get("message", ""), class_="status-line"),
+            ui.div(
+                ui.button("Replay animation", type="button", class_="btn", data_role="replay"),
+                class_="animation-actions",
+            ),
+            class_="demo-card animated-card",
+            data_role="animated-card",
+        )

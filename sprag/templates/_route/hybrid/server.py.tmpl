@@ -1,0 +1,12 @@
+from sprag import Controller, Field, Schema, action
+
+
+class {{class_name}}Controller(Controller):
+    route = "{{route_path}}"
+
+    def load(self):
+        return {"count": 0}
+
+    @action(schema=Schema("bump", {"count": Field(int, required=True)}))
+    def bump(self, count):
+        return {"count": count + 1}

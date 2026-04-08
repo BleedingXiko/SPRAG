@@ -1,0 +1,98 @@
+# {{project_name}}
+
+A SPRAG application.
+
+SPRAG is a Python web framework that mirrors two runtimes 1:1:
+
+- **Specter** powers the server (controllers, services, stores, bus)
+- **Ragot** powers the browser (modules, components, dom, animation)
+
+You write one Python source tree. SPRAG compiles the browser-facing
+parts to JavaScript at build time, leaving the server-facing parts to
+run on Specter as plain Python.
+
+## Quick Start
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+sprag dev --port 8000
+```
+
+Open <http://127.0.0.1:8000/>.
+
+If you're testing against a local SPRAG checkout, install it editable
+into the project venv instead of from PyPI:
+
+```bash
+pip install -e /path/to/SPRAG
+```
+
+## What's In This Project
+
+```
+{{project_name}}/
+├── app/
+│   ├── __init__.py        # App() — registers routes
+│   ├── _shared.py         # shell() layout helper + theme CSS
+│   ├── stores.py          # cross-route shared state
+│   └── routes/
+│       ├── home/          # /         landing page (document mode)
+│       ├── counter/       # /counter  interactive demo (hybrid mode)
+│       └── about/         # /about    info page (document mode)
+├── requirements.txt
+└── README.md
+```
+
+Each route directory follows the same six-file convention:
+
+| File           | Runs on  | Purpose                                       |
+|----------------|----------|-----------------------------------------------|
+| `server.py`    | server   | `Controller` — `load()` data, `@action`s      |
+| `web.py`       | both     | `Screen` — composes the page tree             |
+| `components.py`| both     | `Component` subclasses — render UI            |
+| `modules.py`   | browser  | `Module` subclasses — DOM events, state       |
+| `page.py`      | server   | `page(...)` declaration tying it all together |
+| `__init__.py`  | server   | makes the route a Python package              |
+
+## Two Render Modes
+
+A `page(...)` is declared with `mode="document"` or `mode="hybrid"`.
+
+- **document** — pure SSR. Fast, cacheable, no JavaScript bundle is
+  needed for that page. Use for marketing, docs, content.
+- **hybrid** — SSR for the first paint, then Ragot hydrates the
+  registered modules in the browser so they can listen to DOM events,
+  call actions, mutate state, and re-render. Use for anything
+  interactive.
+
+## Common Commands
+
+```bash
+sprag dev --port 8000      # build into .sprag/, hot rebuild on change
+sprag build                # produce a deployable dist/ artifact
+sprag add <route_name>     # scaffold a new route under app/routes/
+sprag routes               # list every route the app exposes
+```
+
+## Adding Backend Dependencies
+
+Add packages to `requirements.txt`. They'll be carried into
+`dist/requirements.txt` on `sprag build`. The `sprag` package itself is
+swapped out there in favour of `specter-runtime`, which is the runtime
+half of the framework.
+
+```
+sprag
+requests
+supabase
+```
+
+## Where To Go Next
+
+1. Open `app/routes/counter/modules.py` — that's the cross-runtime
+   authoring model in one screen.
+2. Open `app/stores.py` — that's how you share state across routes.
+3. Read the SPRAG README in the framework checkout for the full
+   reference.

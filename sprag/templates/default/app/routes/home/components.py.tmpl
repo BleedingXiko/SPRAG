@@ -1,0 +1,42 @@
+from sprag import Component, ui
+
+
+class Landing(Component):
+    """Hero + demo cards. Pure SSR — no Module needed."""
+
+    def render(self, props=None):
+        props = props or self.props
+        return ui.div(
+            ui.section(
+                ui.span("SPRAG", class_="badge"),
+                ui.h1(props["title"]),
+                ui.p(props["tagline"]),
+                ui.p(
+                    "This page has been rendered ",
+                    ui.span(str(props["visits"]), class_="stat"),
+                    " times since the server started — proof that the cross-route store is wired up.",
+                ),
+                class_="hero",
+            ),
+            ui.section(
+                ui.a(
+                    ui.h3("Counter →"),
+                    ui.p("An interactive demo. Module + Component + @action, all in Python."),
+                    href="/counter",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("About →"),
+                    ui.p("A pure SSR page describing the framework's two-runtime model."),
+                    href="/about",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Add a route"),
+                    ui.p("Run sprag add <name> to scaffold another route in seconds."),
+                    href="/",
+                    class_="card",
+                ),
+                class_="cards",
+            ),
+        )

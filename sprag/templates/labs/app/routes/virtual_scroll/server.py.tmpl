@@ -1,0 +1,10 @@
+from sprag import Controller
+
+
+class VirtualScrollController(Controller):
+    route = "/virtual-scroll"
+
+    def load(self):
+        # The component owns its own (growing) dataset on the client.
+        # No server-supplied total — virtual scroll does not need one.
+        return {}

@@ -1,0 +1,26 @@
+from sprag import Screen, hydrate, ssr, ui
+
+from app._shared import shell
+
+from .components import CounterCard
+from .modules import CounterModule
+
+
+class CounterScreen(Screen):
+    modules = [CounterModule]
+
+    def render(self, data):
+        counter = self.module(CounterModule)
+        return shell(
+            ui.section(
+                ui.span("HYBRID MODE", class_="badge"),
+                ui.h1("Counter"),
+                ui.p(
+                    "Click the button. The action runs on the server, "
+                    "the result patches the Component, and the Module "
+                    "owns the DOM events — all from one Python file each."
+                ),
+                class_="hero",
+            ),
+            hydrate(CounterCard, module=counter),
+        )

@@ -1,0 +1,17 @@
+from sprag import Controller
+
+from app.stores import visits
+
+
+class HomeController(Controller):
+    route = "/"
+
+    def load(self):
+        # Bump the cross-route visit counter every time someone hits /.
+        # ``visits`` is a SPRAG store — same object, both runtimes.
+        snapshot = visits.update(lambda s: {"count": s["count"] + 1})
+        return {
+            "title": "{{project_name}}",
+            "tagline": "A SPRAG application.",
+            "visits": snapshot["count"],
+        }

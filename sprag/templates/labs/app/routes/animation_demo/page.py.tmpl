@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import AnimationDemoController
+from .web import AnimationDemoScreen
+
+
+animation_demo = page(
+    path="/animation-demo",
+    controller=AnimationDemoController,
+    screen=AnimationDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Animation — SPRAG Labs"},
+)

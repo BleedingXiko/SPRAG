@@ -1,0 +1,23 @@
+from sprag import Module
+
+
+class CounterModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(screen=screen, state=state or {"count": 0})
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='increment']", self.on_increment)
+        self.delegate(self.element, "click", "[data-role='reset']", self.on_reset)
+
+    def on_increment(self, event):
+        event.prevent_default()
+        self.call_action("increment", {"count": self.state["count"]}).then(self.on_result)
+
+    def on_reset(self, event):
+        event.prevent_default()
+        self.call_action("reset", {}).then(self.on_result)
+
+    def on_result(self, result):
+        # Module owns the lifecycle; adoptComponent's sync propagates
+        # state to the Component automatically.
+        self.set_state(result.value)

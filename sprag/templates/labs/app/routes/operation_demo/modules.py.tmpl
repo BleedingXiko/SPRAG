@@ -1,0 +1,58 @@
+from sprag import Module
+
+
+class OperationDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state or {
+                "status": "idle",
+                "message": "Run a valid input, then force the OperationError path.",
+                "result": None,
+                "error": None,
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='run-valid']", self.on_run_valid)
+        self.delegate(self.element, "click", "[data-role='run-invalid']", self.on_run_invalid)
+
+    def on_run_valid(self, event):
+        event.prevent_default()
+        self.submit("Quiet Signal")
+
+    def on_run_invalid(self, event):
+        event.prevent_default()
+        self.submit("x")
+
+    async def submit(self, label):
+        self.set_state(
+            {
+                "status": "running",
+                "message": "Running operation for " + label + "...",
+                "result": None,
+                "error": None,
+            }
+        )
+        try:
+            result = await self.call_action("normalize", {"label": label})
+            data = result.value
+            self.set_state(
+                {
+                    "status": "ok",
+                    "message": "Operation accepted " + data["normalized"] + ".",
+                    "result": data,
+                    "error": None,
+                }
+            )
+        except Exception as error:
+            response = error.response
+            message = response["error"] if response else error.message
+            self.set_state(
+                {
+                    "status": "error",
+                    "message": "Operation rejected the input.",
+                    "result": None,
+                    "error": message,
+                }
+            )

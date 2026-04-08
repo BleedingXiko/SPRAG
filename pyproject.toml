@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sprag"
+version = "0.1.0"
+description = "Python-first application framework over SPECTER and RAGOT"
+requires-python = ">=3.9"
+dependencies = [
+    "specter-runtime",
+]
+
+[project.scripts]
+sprag = "sprag.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sprag", "sprag.*"]
+
+[tool.setuptools.package-data]
+sprag = ["assets/*", "templates/**/*.tmpl"]

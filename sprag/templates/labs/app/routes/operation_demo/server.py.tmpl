@@ -1,0 +1,34 @@
+from sprag import Controller, Field, Operation, OperationError, Schema, action
+
+
+class NormalizeLabel(Operation):
+    name = "normalize_label"
+
+    def validate(self, label):
+        if len(label.strip()) < 3:
+            raise OperationError("Use at least three characters.", status=400)
+
+    def perform(self, label):
+        normalized = " ".join(label.strip().lower().split())
+        return {
+            "input": label,
+            "normalized": normalized,
+            "slug": normalized.replace(" ", "-"),
+            "length": len(normalized),
+        }
+
+
+class OperationDemoController(Controller):
+    route = "/operation-demo"
+
+    def load(self):
+        return {
+            "status": "idle",
+            "message": "Run a valid input, then force the OperationError path.",
+            "result": None,
+            "error": None,
+        }
+
+    @action(schema=Schema("normalize", {"label": Field(str, required=True)}))
+    def normalize(self, label):
+        return NormalizeLabel().run(label)

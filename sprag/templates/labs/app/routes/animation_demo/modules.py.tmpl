@@ -1,0 +1,32 @@
+from sprag import Module, dom, ref
+
+
+class AnimationDemoModule(Module):
+    card = ref("[data-role='animated-card']")
+
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state or {
+                "plays": 0,
+                "message": "@animate runs on mount; the button replays dom.animate_out/in.",
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='replay']", self.on_replay)
+
+    def on_replay(self, event):
+        event.prevent_default()
+        card = self.refs.card
+        self.set_state(
+            {
+                "plays": self.state["plays"] + 1,
+                "message": "Replaying animation...",
+            }
+        )
+        dom.animate_out(card, "is-visible").then(lambda: dom.animate_in(card, "is-visible"))
+        self.timeout(self.finish_replay, 0.35)
+
+    def finish_replay(self):
+        self.set_state({"message": "Animation replayed."})

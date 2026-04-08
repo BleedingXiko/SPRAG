@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import OperationDemoController
+from .web import OperationDemoScreen
+
+
+operation_demo = page(
+    path="/operation-demo",
+    controller=OperationDemoController,
+    screen=OperationDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Operation — SPRAG Labs"},
+)

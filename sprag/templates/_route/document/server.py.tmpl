@@ -1,0 +1,11 @@
+from sprag import Controller
+
+
+class {{class_name}}Controller(Controller):
+    route = "{{route_path}}"
+
+    def load(self):
+        return {
+            "heading": "{{class_name}}",
+            "body": "This is the {{route_name}} route.",
+        }

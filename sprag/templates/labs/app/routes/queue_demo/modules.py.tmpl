@@ -1,0 +1,42 @@
+from sprag import Module
+
+
+class QueueDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state or {
+                "pending": 0,
+                "completed": 0,
+                "last_job": None,
+                "message": "Queue a short background job.",
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='enqueue']", self.on_enqueue)
+        self.listen("lab:job.done", self.on_job_done)
+
+    def on_enqueue(self, event):
+        event.prevent_default()
+        label = "Job " + str(self.state["completed"] + self.state["pending"] + 1)
+        self.set_state({"pending": self.state["pending"] + 1, "message": "Queued " + label + "..."})
+        self.call_action("enqueue", {"label": label}).then(self.on_enqueued)
+
+    def on_enqueued(self, result):
+        data = result.value
+        if not data["accepted"]:
+            self.set_state(data)
+
+    def on_job_done(self, payload):
+        self.set_state(
+            {
+                "pending": payload["queue_size"],
+                "completed": payload["completed"],
+                "last_job": {
+                    "id": payload["id"],
+                    "label": payload["label"],
+                },
+                "message": "Completed " + payload["label"] + ".",
+            }
+        )

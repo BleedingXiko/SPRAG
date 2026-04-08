@@ -1,0 +1,19 @@
+from sprag import Component, ui
+
+
+class CounterCard(Component):
+    """The interactive counter UI.
+
+    ``self.state`` is owned by the Component — when the Module calls
+    ``self.component.set_state(...)`` after an action, this render runs
+    again and Ragot's morphdom-style reconciler patches the DOM.
+    """
+
+    def render(self, props=None):
+        return ui.div(
+            ui.p("CURRENT COUNT", class_="counter-label"),
+            ui.div(str(self.state["count"]), class_="counter-display"),
+            ui.button("Increment", type="button", class_="btn", data_role="increment"),
+            ui.button("Reset", type="button", class_="btn", data_role="reset", style="margin-left:0.5rem;background:transparent;color:var(--muted);border:1px solid var(--border);"),
+            class_="counter-card",
+        )

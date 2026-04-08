@@ -1,0 +1,23 @@
+from sprag import Screen, hydrate
+
+from app._shared import shell
+
+from .components import QueueCard
+from .modules import QueueDemoModule
+
+
+class QueueDemoScreen(Screen):
+    modules = [QueueDemoModule]
+
+    def render(self, data):
+        queue = self.module(QueueDemoModule)
+        queue.set_state(
+            {
+                "pending": data["pending"],
+                "completed": data["completed"],
+                "last_job": data["last_job"],
+            }
+        )
+        return shell(
+            hydrate(QueueCard, module=queue),
+        )

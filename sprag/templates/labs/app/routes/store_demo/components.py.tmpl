@@ -1,0 +1,20 @@
+from sprag import Component, ui
+
+
+class StoreCard(Component):
+    def render(self, props=None):
+        return ui.div(
+            ui.h2("Store Demo"),
+            ui.p(
+                "A single store(...) declaration backs both runtimes. "
+                "The Controller mutates it in Python; refresh the page "
+                "or come back later — the value persists across routes."
+            ),
+            ui.div(str(self.state["count"]), class_="demo-display"),
+            ui.div(
+                ui.button("Bump tally", type="button", class_="btn", data_role="bump"),
+                ui.button("Reset", type="button", class_="btn btn-ghost", data_role="reset"),
+                style="text-align:center;",
+            ),
+            class_="demo-card",
+        )

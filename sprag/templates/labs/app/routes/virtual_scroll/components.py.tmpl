@@ -1,0 +1,55 @@
+from sprag import Component, ui, virtual_scroll
+
+
+@virtual_scroll(chunk=50, max_chunks=5, initial_chunks=2)
+class StreamingLog(Component):
+    """Streaming log: total grows over time, DOM stays bounded.
+
+    Ragot's VirtualScroller takes ``totalItems`` as a **callback**,
+    not a fixed value. ``total()`` is re-asked on every cycle, so
+    if the underlying dataset grows the scroller picks up the new
+    rows on its next reset. The rendered DOM never exceeds
+    ``max_chunks * chunk_size`` items regardless of how large the
+    dataset becomes — that is the whole point of virtual scrolling,
+    and it has nothing to do with knowing the total upfront.
+
+    This entry deliberately starts with a small batch and streams
+    in more rows on an interval to make the unboundedness obvious.
+    Same primitive works equally well for a 10-row list, a 10M-row
+    list, or an infinite stream that never settles.
+    """
+
+    def render(self, props=None):
+        return ui.div(class_="vs-outer")
+
+    def on_start(self):
+        # Seed the initial dataset, then stream 50 new rows every 600ms.
+        # The interval is registered through Ragot's lifecycle so it's
+        # auto-cancelled on unmount.
+        self.set_state({"count": 200})
+        self.interval(self.tick, 0.6)
+
+    def tick(self):
+        # Grow the dataset. The scroller does NOT need to be told the
+        # new size — it will ask total() again on its next cycle.
+        # reset() nudges that cycle to happen now instead of on the
+        # next intersection event, so freshly-streamed rows become
+        # reachable immediately when the user scrolls down.
+        current = self.state.get("count", 200)
+        self.set_state({"count": current + 50})
+        self._sprVS.reset()
+
+    def total(self):
+        return self.state.get("count", 200)
+
+    def chunk(self, i):
+        start = i * 50
+        rows = [
+            ui.div(
+                ui.span("#" + str(start + j), class_="idx"),
+                "row " + str(start + j),
+                class_="vs-row",
+            )
+            for j in range(50)
+        ]
+        return ui.div(rows, class_="vs-chunk")

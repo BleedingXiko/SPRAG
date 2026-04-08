@@ -1,0 +1,23 @@
+from sprag import Module
+
+
+class StoreDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(screen=screen, state=state or {"count": 0})
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='bump']", self.on_bump)
+        self.delegate(self.element, "click", "[data-role='reset']", self.on_reset)
+
+    def on_bump(self, event):
+        event.prevent_default()
+        self.call_action("bump", {}).then(self.on_result)
+
+    def on_reset(self, event):
+        event.prevent_default()
+        self.call_action("reset", {}).then(self.on_result)
+
+    def on_result(self, result):
+        # The adopted StoreCard re-renders automatically via the
+        # Module -> Component state sync wired by adoptComponent.
+        self.set_state(result.value)

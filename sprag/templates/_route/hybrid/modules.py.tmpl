@@ -1,0 +1,18 @@
+from sprag import Module
+
+
+class {{class_name}}Module(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(screen=screen, state=state or {"count": 0})
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='bump']", self.on_bump)
+
+    def on_bump(self, event):
+        event.prevent_default()
+        self.call_action("bump", {"count": self.state["count"]}).then(self.on_result)
+
+    def on_result(self, result):
+        # Module is the lifecycle owner — its adoptComponent sync pushes
+        # state to the Component automatically. One call is enough.
+        self.set_state(result.value)

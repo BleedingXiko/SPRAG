@@ -1,0 +1,9 @@
+from sprag import Controller
+
+
+class WatcherDemoController(Controller):
+    route = "/watcher-demo"
+
+    def load(self):
+        pulse = self.service("lab_pulse")
+        return pulse.get_state()

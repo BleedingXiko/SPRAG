@@ -1,0 +1,335 @@
+"""High-level emitters for the SPRAG build pipeline.
+
+These functions are the public surface of the codegen package: the
+SPRAG compiler invokes them to write the Ragot runtime, the generated
+component / module sources, and the browser entry point that wires
+hydration, the action client, and the event-source bus bridge.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from ..stores import StoreBridge
+from .components import compile_component_class
+from .dependencies import used_browser_class_refs
+from .mappings import JSCodegenError
+from .modules import compile_module_class
+
+
+def emit_ragot_runtime(output_dir: Path, project_root: Path) -> None:
+    vendor_dir = output_dir / "vendor"
+    vendor_dir.mkdir(parents=True, exist_ok=True)
+    assets_dir = Path(__file__).resolve().parent.parent / "assets"
+    runtime_source = assets_dir / "ragot.esm.min.js"
+    (vendor_dir / "ragot.esm.min.js").write_text(
+        runtime_source.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (vendor_dir / "RAGOT_LICENSE").write_text(
+        (assets_dir / "RAGOT_LICENSE").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (vendor_dir / "RAGOT_NOTICE").write_text(
+        (assets_dir / "RAGOT_NOTICE").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+
+def emit_generated_files(output_dir: Path, hydration_entries: list[dict]) -> None:
+    generated_dir = output_dir / "generated"
+    components_dir = generated_dir / "components"
+    modules_dir = generated_dir / "modules"
+    components_dir.mkdir(parents=True, exist_ok=True)
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    component_classes = {}
+    module_classes = {}
+    for entry in hydration_entries:
+        component_class = entry.get("component_class")
+        module_class = entry.get("module_class")
+        if component_class:
+            _register_browser_class(component_classes, component_class, "Component")
+        if module_class:
+            _register_browser_class(module_classes, module_class, "Module")
+
+    _collect_browser_dependencies(component_classes, module_classes)
+
+    for name, component_class in component_classes.items():
+        (components_dir / f"{name}.js").write_text(
+            compile_component_class(component_class),
+            encoding="utf-8",
+        )
+
+    for name, module_class in module_classes.items():
+        (modules_dir / f"{name}.js").write_text(
+            compile_module_class(module_class),
+            encoding="utf-8",
+        )
+
+    (generated_dir / "index.js").write_text(
+        _registry_source(sorted(component_classes), sorted(module_classes)),
+        encoding="utf-8",
+    )
+
+
+def _collect_browser_dependencies(component_classes: dict[str, type], module_classes: dict[str, type]) -> None:
+    """Recursively include shared browser classes referenced by generated classes."""
+    from ..web import Component, Module
+
+    queue = list(component_classes.values()) + list(module_classes.values())
+    seen = set()
+    while queue:
+        cls = queue.pop(0)
+        if cls in seen:
+            continue
+        seen.add(cls)
+        for dep in used_browser_class_refs(cls).values():
+            if issubclass(dep, Component):
+                should_visit = dep.__name__ not in component_classes
+                _register_browser_class(component_classes, dep, "Component")
+                if should_visit:
+                    queue.append(dep)
+            elif issubclass(dep, Module):
+                should_visit = dep.__name__ not in module_classes
+                _register_browser_class(module_classes, dep, "Module")
+                if should_visit:
+                    queue.append(dep)
+
+
+def _register_browser_class(target: dict[str, type], cls: type, kind: str) -> None:
+    existing = target.get(cls.__name__)
+    if existing is not None and existing is not cls:
+        raise JSCodegenError(
+            f"Generated {kind} name collision: {cls.__name__!r} is defined by "
+            f"{existing.__module__}.{existing.__name__} and {cls.__module__}.{cls.__name__}. "
+            "Use unique browser class names until SPRAG grows module-qualified JS output names."
+        )
+    target[cls.__name__] = cls
+
+
+def emit_stores_shim(output_dir: Path, stores: list[StoreBridge]) -> None:
+    """Emit ``generated/stores.js`` — one ``createStateStore`` per declared store.
+
+    Each entry hydrates from ``window.__SPRAG_STORES__[name]`` if present
+    (the SSR snapshot) or falls back to the declared initial state. The
+    shim exports each store under its declared name so generated
+    Module/Component files can ``import { counter } from '../stores.js';``
+    and use it directly.
+
+    The shim is always written, even when no stores are declared, so the
+    browser entry can ``import './generated/stores.js'`` unconditionally.
+    """
+    generated_dir = output_dir / "generated"
+    generated_dir.mkdir(parents=True, exist_ok=True)
+
+    if not stores:
+        (generated_dir / "stores.js").write_text(
+            "// No SPRAG stores declared.\nexport {};\n", encoding="utf-8"
+        )
+        return
+
+    lines = ["import { createStateStore } from '../vendor/ragot.esm.min.js';", ""]
+    lines.append("const _hydrated = (typeof window !== 'undefined' && window.__SPRAG_STORES__) || {};")
+    lines.append("")
+    for bridge in stores:
+        name_js = json.dumps(bridge.name)
+        initial_js = json.dumps(bridge.initial, sort_keys=True)
+        lines.append(
+            f"export const {bridge.name} = createStateStore("
+            f"_hydrated[{name_js}] !== undefined ? _hydrated[{name_js}] : {initial_js}, "
+            f"{{ name: {name_js} }}"
+            f");"
+        )
+    lines.append("")
+    (generated_dir / "stores.js").write_text("\n".join(lines), encoding="utf-8")
+
+
+def build_browser_entry(manifest: dict) -> str:
+    serializable = _serializable_manifest(manifest)
+    return f"""import {{ componentRegistry, moduleRegistry }} from './generated/index.js';
+import {{ bus, ragotRegistry }} from './vendor/ragot.esm.min.js';
+// Side-effect import: ``stores.js`` reads window.__SPRAG_STORES__ at module
+// load and creates one Ragot createStateStore per declared SPRAG store.
+import './generated/stores.js';
+
+const manifest = {json.dumps(serializable, indent=2, sort_keys=True)};
+window.__SPRAG_MANIFEST__ = manifest;
+const route = window.__SPRAG_PAGE__ || {{}};
+
+function createActionClient(currentRoute) {{
+    const knownActions = new Set(currentRoute.actions || []);
+    const endpoint = currentRoute.action_endpoint || '/__sprag__/actions';
+
+    return {{
+        async call(name, payload = {{}}) {{
+            if (!name) {{
+                throw new Error('[SPRAG] Action name is required.');
+            }}
+            if (knownActions.size && !knownActions.has(name)) {{
+                throw new Error(`[SPRAG] Unknown action "${{name}}" for route "${{currentRoute.path || 'unknown'}}".`);
+            }}
+
+            const response = await fetch(endpoint, {{
+                method: 'POST',
+                headers: {{
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                }},
+                body: JSON.stringify({{
+                    route: currentRoute.path,
+                    action: name,
+                    payload
+                }})
+            }});
+
+            const contentType = response.headers.get('content-type') || '';
+            const result = contentType.includes('application/json')
+                ? await response.json()
+                : {{
+                    ok: false,
+                    error: `[SPRAG] Expected JSON response for action "${{name}}" but received status ${{response.status}}.`
+                }};
+
+            if (!response.ok || !result.ok) {{
+                const error = new Error(result.error || `[SPRAG] Action "${{name}}" failed.`);
+                error.status = response.status;
+                error.response = result;
+                throw error;
+            }}
+
+            return result;
+        }}
+    }};
+}}
+
+const actionClient = createActionClient(route);
+window.__SPRAG_ACTIONS__ = actionClient;
+
+function mountHydrationEntry(entry) {{
+    const target = document.querySelector(`[data-sprag-hydrate-id="${{entry.id}}"]`);
+    if (!target) return;
+
+    const ComponentClass = componentRegistry[entry.component];
+    if (!ComponentClass) {{
+        console.warn('[SPRAG] Missing generated component for', entry.component);
+        return;
+    }}
+
+    const moduleName = entry.module;
+    const ModuleClass = moduleName ? moduleRegistry[moduleName] : null;
+    const component = new ComponentClass(entry.state || {{}}, {{
+        props: entry.props || {{}},
+        module: null, // filled in below once the module exists
+    }});
+
+    // Clear the SSR'd inner HTML so the component's mount can append its
+    // own element. (Component.mount appends — it does not replace.)
+    target.innerHTML = '';
+
+    if (ModuleClass) {{
+        // Ragot's canonical hybrid pattern: the Module is the lifecycle
+        // owner; it adopts the Component and wires a state-sync callback.
+        // ``adoptComponent`` mounts the component immediately and registers
+        // a ``watchState`` subscription, so every ``module.setState(...)``
+        // automatically flows into ``component.setState(...)``.
+        const module = new ModuleClass(entry.module_state || {{}});
+        module.actions = actionClient;
+        module.route = route;
+        module.component = component;          // back-ref for imperative access
+        module.element = target;               // self.element inside Module == hydrate container
+        component.module = module;              // Component -> Module back-ref
+        // Users may define ``sync_component(self, component, state)`` on their
+        // Module for custom state routing. Default: push the full module state
+        // into the component (shallow merge via Component.setState).
+        const syncFn = typeof module.syncComponent === 'function'
+            ? (c, s) => module.syncComponent(c, s)
+            : (c, s) => c.setState(s);
+        module.adoptComponent(component, {{
+            startArgs: [target],
+            sync: syncFn,
+        }});
+        module.start();
+        ragotRegistry.provide(entry.module + ':' + entry.id, module);
+    }} else {{
+        component.mount(target);
+    }}
+    ragotRegistry.provide(entry.component + ':' + entry.id, component);
+}}
+
+function connectBusBridge(route) {{
+    const endpoint = route.events_endpoint || '/__sprag__/events';
+    const source = new EventSource(endpoint);
+    source.onmessage = (event) => {{
+        try {{
+            const data = JSON.parse(event.data);
+            const eventName = data.event || 'server:message';
+            bus.emit(eventName, data.payload !== undefined ? data.payload : data);
+        }} catch (e) {{
+            bus.emit('server:message', event.data);
+        }}
+    }};
+    source.onerror = () => {{
+        bus.emit('server:connection:error');
+    }};
+    window.__SPRAG_EVENT_SOURCE__ = source;
+}}
+
+function boot() {{
+    // Stores hydrate via the side-effect import of './generated/stores.js'
+    // above — each createStateStore reads window.__SPRAG_STORES__[name] at
+    // module-load time, so by the time boot() runs every store is live.
+    const hydration = window.__SPRAG_HYDRATION__ || [];
+    hydration.forEach(mountHydrationEntry);
+    connectBusBridge(route);
+}}
+
+if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', boot, {{ once: true }});
+}} else {{
+    boot();
+}}
+"""
+
+
+def _registry_source(component_names, module_names) -> str:
+    component_imports = "\n".join(
+        f"import {{ {name} }} from './components/{name}.js';" for name in component_names
+    )
+    module_imports = "\n".join(
+        f"import {{ {name} }} from './modules/{name}.js';" for name in module_names
+    )
+    component_pairs = ",\n    ".join(f"{name}" for name in component_names)
+    module_pairs = ",\n    ".join(f"{name}" for name in module_names)
+    return f"""{component_imports}
+{module_imports}
+
+export const componentRegistry = {{
+    {component_pairs}
+}};
+
+export const moduleRegistry = {{
+    {module_pairs}
+}};
+"""
+
+
+def _serializable_manifest(manifest):
+    routes = []
+    for route in manifest.get("routes", []):
+        next_route = dict(route)
+        next_route["hydration"] = []
+        for entry in route.get("hydration", []):
+            next_route["hydration"].append(
+                {
+                    "id": entry["id"],
+                    "component": entry["component"],
+                    "module": entry["module"],
+                    "props": entry["props"],
+                    "state": entry["state"],
+                    "module_state": entry["module_state"],
+                }
+            )
+        routes.append(next_route)
+    return {"errors": manifest.get("errors", []), "routes": routes}

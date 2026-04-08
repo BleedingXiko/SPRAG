@@ -1,0 +1,10 @@
+from sprag import Controller
+
+
+class AboutController(Controller):
+    route = "/about"
+
+    def load(self):
+        return {
+            "project": "{{project_name}}",
+        }

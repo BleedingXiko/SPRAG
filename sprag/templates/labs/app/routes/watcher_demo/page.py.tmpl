@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import WatcherDemoController
+from .web import WatcherDemoScreen
+
+
+watcher_demo = page(
+    path="/watcher-demo",
+    controller=WatcherDemoController,
+    screen=WatcherDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Watcher — SPRAG Labs"},
+)

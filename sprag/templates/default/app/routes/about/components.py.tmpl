@@ -1,0 +1,48 @@
+from sprag import Component, ui
+
+
+class AboutContent(Component):
+    def render(self, props=None):
+        props = props or self.props
+        return ui.div(
+            ui.section(
+                ui.span("DOCUMENT MODE", class_="badge"),
+                ui.h1("About " + props["project"]),
+                ui.p(
+                    "This page is rendered entirely on the server. "
+                    "No JavaScript runtime is needed for the page itself — "
+                    "it's pure HTML, fast and cacheable."
+                ),
+                class_="hero",
+            ),
+            ui.section(
+                ui.h2("One language, two runtimes"),
+                ui.p(
+                    "SPRAG is a Python framework that compiles its "
+                    "browser-facing surface to JavaScript at build time. "
+                    "You write Controllers and Services for the server, "
+                    "Modules and Components for the browser, and a single "
+                    "Screen that composes them. The same Python primitives "
+                    "(", ui.code("self.set_state"), ", ", ui.code("self.listen"),
+                    ", ", ui.code("self.timeout"), ") work on both sides.",
+                ),
+                ui.h2("Render modes"),
+                ui.p(
+                    "A page is declared with either ", ui.code("mode='document'"),
+                    " for pure SSR, or ", ui.code("mode='hybrid'"),
+                    " when the page needs interactivity. Hybrid pages SSR first, "
+                    "then hand control to Ragot in the browser, which hydrates "
+                    "the registered Modules in place.",
+                ),
+                ui.h2("Shared state"),
+                ui.p(
+                    "A ", ui.code("store(...)"), " declared in ",
+                    ui.code("app/stores.py"),
+                    " is one Python object that exists on both runtimes. "
+                    "Server code mutates it as a normal Python object; "
+                    "browser code imports it from the generated stores shim "
+                    "and gets the same API.",
+                ),
+                class_="prose",
+            ),
+        )

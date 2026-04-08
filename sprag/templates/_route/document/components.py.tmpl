@@ -1,0 +1,11 @@
+from sprag import Component, ui
+
+
+class {{class_name}}Content(Component):
+    def render(self, props=None):
+        props = props or self.props
+        return ui.section(
+            ui.h1(props["heading"]),
+            ui.p(props["body"]),
+            class_="hero",
+        )

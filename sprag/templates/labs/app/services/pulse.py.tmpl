@@ -1,0 +1,57 @@
+from sprag import Service, Watcher, bus
+
+
+class LabPulseService(Service):
+    def __init__(self):
+        super().__init__(
+            "lab_pulse",
+            initial_state={
+                "ticks": 0,
+                "label": "waiting for the watcher",
+                "watcher_running": False,
+            },
+        )
+        self._ticks = 0
+        self._watcher = None
+
+    def on_start(self):
+        self._ticks = self.state.get("ticks", 0)
+        self._watcher = self.own(
+            Watcher(
+                "lab-pulse",
+                poll=self._poll,
+                interval=0.4,
+                dedupe=False,
+            )
+        )
+        self._watcher.subscribe(self._on_pulse)
+        self._watcher.start()
+        self.set_state({"watcher_running": self._watcher.running})
+
+    def on_stop(self):
+        self.set_state({"watcher_running": False})
+
+    def _poll(self):
+        self._ticks += 1
+        return {
+            "ticks": self._ticks,
+            "label": f"pulse {self._ticks}",
+        }
+
+    def _on_pulse(self, value, watcher):
+        payload = {
+            "ticks": value["ticks"],
+            "label": value["label"],
+            "watcher_running": watcher.running,
+        }
+        self.set_state(payload)
+        bus.emit(
+            "sprag:broadcast",
+            {
+                "event": "lab:pulse",
+                "payload": payload,
+            },
+        )
+
+
+pulse_service = LabPulseService()

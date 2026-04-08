@@ -1,0 +1,27 @@
+from sprag import Screen, hydrate, ui
+
+from app._shared import shell
+
+from .components import StreamingLog
+
+
+class VirtualScrollScreen(Screen):
+    modules = []
+
+    def render(self, data):
+        return shell(
+            ui.section(
+                ui.span("@virtual_scroll", class_="badge"),
+                ui.h1("Virtual Scroll"),
+                ui.p(
+                    "A streaming log backed by Ragot's VirtualScroller. "
+                    "The dataset starts small and grows on an interval — "
+                    "total() is a callback, not a fixed number. The "
+                    "rendered DOM stays bounded regardless of how large "
+                    "the underlying data becomes. Same primitive works "
+                    "for fixed lists, growing streams, or infinite feeds."
+                ),
+                class_="hero",
+            ),
+            hydrate(StreamingLog),
+        )

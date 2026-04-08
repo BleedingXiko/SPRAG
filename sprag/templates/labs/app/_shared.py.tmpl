@@ -1,0 +1,245 @@
+"""Shared layout shell for the labs showcase."""
+
+from sprag import ui
+
+
+BRAND = "SPRAG Labs"
+
+
+def shell(*body):
+    return ui.div(
+        ui.style(THEME_CSS),
+        ui.header(
+            ui.div(
+                ui.a(
+                    ui.span("●", class_="dot"),
+                    ui.span(BRAND, class_="brand-name"),
+                    href="/",
+                    class_="brand",
+                ),
+                ui.nav(
+                    ui.a("Home", href="/"),
+                    ui.a("Counter", href="/counter"),
+                    ui.a("Virtual Scroll", href="/virtual-scroll"),
+                    ui.a("Store", href="/store-demo"),
+                    ui.a("Queue", href="/queue-demo"),
+                    ui.a("Watcher", href="/watcher-demo"),
+                    ui.a("Operation", href="/operation-demo"),
+                    ui.a("Animation", href="/animation-demo"),
+                    class_="nav-links",
+                ),
+                class_="nav-inner",
+            ),
+            class_="nav",
+        ),
+        ui.main(*body, class_="page"),
+        ui.footer(
+            ui.p("SPRAG Labs — one entry per primitive"),
+            class_="footer",
+        ),
+        class_="shell",
+    )
+
+
+THEME_CSS = """
+:root {
+  --bg: #0b0d12;
+  --fg: #e6e8ef;
+  --muted: #8a8f9c;
+  --accent: #7c5cff;
+  --accent-soft: rgba(124, 92, 255, 0.15);
+  --card: #14171f;
+  --border: #1f2330;
+  --radius: 12px;
+  --maxw: 960px;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 100vh;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+.nav { border-bottom: 1px solid var(--border); }
+.nav-inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 0.5rem; color: var(--fg); }
+.brand:hover { text-decoration: none; }
+.dot { color: var(--accent); font-size: 1.1rem; }
+.brand-name { font-weight: 600; letter-spacing: 0.02em; }
+.nav-links a { margin-left: 1.25rem; color: var(--muted); font-size: 0.95rem; }
+.nav-links a:hover { color: var(--fg); text-decoration: none; }
+
+.page { flex: 1; max-width: var(--maxw); width: 100%; margin: 0 auto; padding: 3rem 1.5rem; }
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.footer p { margin: 0; }
+
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+}
+
+.hero { padding: 1rem 0 2rem; }
+.hero h1 { font-size: 2.5rem; margin: 0 0 0.75rem; letter-spacing: -0.02em; }
+.hero p {
+  font-size: 1.1rem;
+  color: var(--muted);
+  margin: 0 0 1.5rem;
+  max-width: 38rem;
+  line-height: 1.6;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+  display: block;
+  color: inherit;
+}
+.card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+.card h3 { margin: 0 0 0.5rem; font-size: 1.05rem; color: var(--fg); }
+.card p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+.card .tag {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.demo-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  max-width: 32rem;
+  margin: 2rem auto;
+}
+.demo-card h2 { margin: 0 0 0.5rem; font-size: 1.25rem; }
+.demo-card p { color: var(--muted); margin: 0 0 1.25rem; line-height: 1.5; }
+.demo-display {
+  font-size: 3rem;
+  font-weight: 700;
+  margin: 0.5rem 0 1.5rem;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.btn {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  padding: 0.7rem 1.35rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.btn:hover { opacity: 0.9; }
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  margin-left: 0.5rem;
+}
+.metric {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.metric span { color: var(--muted); }
+.metric strong { font-variant-numeric: tabular-nums; color: var(--accent); }
+.status-line { min-height: 1.25rem; }
+.error-line { color: #ff8b8b; }
+.queue-actions { text-align: center; margin-top: 1.25rem; }
+.operation-actions,
+.animation-actions {
+  text-align: center;
+  margin-top: 1.25rem;
+}
+.pulse-wrap { display: flex; justify-content: center; margin-top: 1.5rem; }
+.pulse-dot {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 0.8s ease-in-out infinite;
+}
+.animated-card {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+.animated-card.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.45; }
+  50% { transform: scale(1.25); opacity: 1; }
+}
+
+.vs-outer {
+  height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.vs-row {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+.vs-row:last-child { border-bottom: 0; }
+.vs-row .idx { color: var(--muted); display: inline-block; width: 5rem; }
+"""

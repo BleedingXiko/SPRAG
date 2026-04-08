@@ -1,0 +1,19 @@
+from sprag import Component, ui
+
+
+class CounterCard(Component):
+    def render(self, props=None):
+        return ui.div(
+            ui.h2("Counter"),
+            ui.p(
+                "@action round trip. Click runs server-side, the Module "
+                "dispatches the result, and the Component re-renders."
+            ),
+            ui.div(str(self.state["count"]), class_="demo-display"),
+            ui.div(
+                ui.button("Increment", type="button", class_="btn", data_role="increment"),
+                ui.button("Reset", type="button", class_="btn btn-ghost", data_role="reset"),
+                style="text-align:center;",
+            ),
+            class_="demo-card",
+        )

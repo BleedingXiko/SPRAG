@@ -1,0 +1,26 @@
+from sprag import Component, ui
+
+
+class WatcherCard(Component):
+    def render(self, props=None):
+        running = "running" if self.state.get("watcher_running") else "stopped"
+        return ui.div(
+            ui.h2("Watcher"),
+            ui.p(
+                "A Specter Watcher polls on the server, is owned by a SPRAG "
+                "Service, and broadcasts each observation over the SSE bus bridge."
+            ),
+            ui.div(
+                ui.span("Status"),
+                ui.strong(running),
+                class_="metric",
+            ),
+            ui.div(
+                ui.span("Ticks"),
+                ui.strong(str(self.state.get("ticks", 0))),
+                class_="metric",
+            ),
+            ui.p(self.state.get("label", "waiting for the watcher"), class_="status-line"),
+            ui.div(ui.span("", class_="pulse-dot"), class_="pulse-wrap"),
+            class_="demo-card watcher-card",
+        )

@@ -1,0 +1,12 @@
+from sprag import Screen, ssr
+
+from app._shared import shell
+
+from .components import AboutContent
+
+
+class AboutScreen(Screen):
+    def render(self, data):
+        return shell(
+            ssr(AboutContent, project=data["project"]),
+        )

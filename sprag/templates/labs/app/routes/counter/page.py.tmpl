@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import CounterController
+from .web import CounterScreen
+
+
+counter = page(
+    path="/counter",
+    controller=CounterController,
+    screen=CounterScreen,
+    mode="hybrid",
+    metadata={"title": "Counter — SPRAG Labs"},
+)

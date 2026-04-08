@@ -1,0 +1,11 @@
+from sprag import Controller
+
+
+class AnimationDemoController(Controller):
+    route = "/animation-demo"
+
+    def load(self):
+        return {
+            "plays": 0,
+            "message": "@animate runs on mount; the button replays dom.animate_out/in.",
+        }

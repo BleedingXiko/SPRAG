@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import VirtualScrollController
+from .web import VirtualScrollScreen
+
+
+virtual_scroll = page(
+    path="/virtual-scroll",
+    controller=VirtualScrollController,
+    screen=VirtualScrollScreen,
+    mode="hybrid",
+    metadata={"title": "Virtual Scroll — SPRAG Labs"},
+)

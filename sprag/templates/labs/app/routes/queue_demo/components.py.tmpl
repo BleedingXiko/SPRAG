@@ -1,0 +1,37 @@
+from sprag import Component, ui
+
+
+class QueueCard(Component):
+    def render(self, props=None):
+        last = self.state.get("last_job")
+        last_label = (
+            f"#{last['id']} {last['label']} completed"
+            if last
+            else "No jobs completed yet."
+        )
+        message = self.state.get("message", "Queue a short background job.")
+        return ui.div(
+            ui.h2("Queue"),
+            ui.p(
+                "A controller action enqueues work into a server QueueService. "
+                "The worker emits a bus event, SSE carries it to the browser, "
+                "and the Module updates this Component."
+            ),
+            ui.div(
+                ui.span("Pending"),
+                ui.strong(str(self.state["pending"])),
+                class_="metric",
+            ),
+            ui.div(
+                ui.span("Completed"),
+                ui.strong(str(self.state["completed"])),
+                class_="metric",
+            ),
+            ui.p(message, class_="status-line"),
+            ui.p(last_label, class_="status-line"),
+            ui.div(
+                ui.button("Enqueue job", type="button", class_="btn", data_role="enqueue"),
+                class_="queue-actions",
+            ),
+            class_="demo-card queue-card",
+        )

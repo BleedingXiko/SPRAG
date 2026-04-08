@@ -1,0 +1,37 @@
+from sprag import Controller, Field, Schema, action
+
+
+class QueueDemoController(Controller):
+    route = "/queue-demo"
+
+    def load(self):
+        queue = self.service("lab_jobs")
+        snapshot = queue.get_state()
+        return {
+            "pending": queue.pending_count(),
+            "completed": snapshot.get("completed", 0),
+            "last_job": snapshot.get("last_job"),
+        }
+
+    @action(schema=Schema("enqueue", {"label": Field(str, required=True)}))
+    def enqueue(self, label):
+        queue = self.service("lab_jobs")
+        snapshot = queue.get_state()
+        job_id = snapshot.get("completed", 0) + queue.pending_count() + 1
+        accepted = queue.enqueue({"id": job_id, "label": label})
+        snapshot = queue.get_state()
+        if not accepted:
+            return {
+                "accepted": False,
+                "pending": queue.pending_count(),
+                "completed": snapshot.get("completed", 0),
+                "last_job": snapshot.get("last_job"),
+                "message": "Queue is full.",
+            }
+        return {
+            "accepted": True,
+            "pending": queue.pending_count(),
+            "completed": snapshot.get("completed", 0),
+            "last_job": snapshot.get("last_job"),
+            "message": f"Queued {label}.",
+        }

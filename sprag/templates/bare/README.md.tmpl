@@ -1,0 +1,29 @@
+# {{project_name}}
+
+A bare SPRAG application. No routes yet — start by adding one.
+
+## Quick Start
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+sprag add index
+sprag dev --port 8000
+```
+
+Open <http://127.0.0.1:8000/>.
+
+## Project Layout
+
+```
+{{project_name}}/
+├── app/
+│   ├── __init__.py        # App() — registers routes
+│   └── routes/            # empty — add routes with `sprag add`
+├── requirements.txt
+└── README.md
+```
+
+Scaffold routes with `sprag add <name>` (see `sprag add --help` for
+mode and other flags).

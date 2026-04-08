@@ -1,0 +1,10 @@
+.venv/
+.sandbox/
+.sprag/
+dist/
+sprag.egg-info/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+PLAN.md

@@ -1,0 +1,19 @@
+from sprag import Module
+
+
+class WatcherDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state or {
+                "ticks": 0,
+                "label": "waiting for the watcher",
+                "watcher_running": False,
+            },
+        )
+
+    def on_start(self):
+        self.listen("lab:pulse", self.on_pulse)
+
+    def on_pulse(self, payload):
+        self.set_state(payload)

@@ -1,0 +1,89 @@
+from sprag import Component, ui
+
+
+class Landing(Component):
+    def render(self, props=None):
+        props = props or self.props
+        return ui.div(
+            ui.section(
+                ui.span("LABS", class_="badge"),
+                ui.h1(props["title"]),
+                ui.p(props["tagline"]),
+                class_="hero",
+            ),
+            ui.section(
+                ui.a(
+                    ui.h3("Counter →"),
+                    ui.p(
+                        "Component + Module + @action. The cross-runtime "
+                        "authoring loop in one route."
+                    ),
+                    ui.span("hybrid", class_="tag"),
+                    href="/counter",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Virtual Scroll →"),
+                    ui.p(
+                        "Ten thousand rows through a @virtual_scroll "
+                        "decorated Component. Forces the VirtualScroller "
+                        "bridge."
+                    ),
+                    ui.span("hybrid · @virtual_scroll", class_="tag"),
+                    href="/virtual-scroll",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Store Demo →"),
+                    ui.p(
+                        "A store(...) declared once is written by a "
+                        "Controller action and read by a Component — "
+                        "same Python object, both runtimes."
+                    ),
+                    ui.span("hybrid · store()", class_="tag"),
+                    href="/store-demo",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Queue Demo →"),
+                    ui.p(
+                        "A QueueService runs background work on the server, "
+                        "then broadcasts completion over the SSE bus bridge."
+                    ),
+                    ui.span("hybrid · QueueService", class_="tag"),
+                    href="/queue-demo",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Watcher Demo →"),
+                    ui.p(
+                        "A server Watcher polls under Service ownership and "
+                        "streams observations to a hydrated Module."
+                    ),
+                    ui.span("hybrid · Watcher", class_="tag"),
+                    href="/watcher-demo",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Operation Demo →"),
+                    ui.p(
+                        "A Controller action delegates to Operation.run, "
+                        "including the OperationError failure path."
+                    ),
+                    ui.span("hybrid · Operation", class_="tag"),
+                    href="/operation-demo",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Animation Demo →"),
+                    ui.p(
+                        "@animate wraps Component mount behavior, while "
+                        "sprag.dom calls Ragot's animation helpers directly."
+                    ),
+                    ui.span("hybrid · @animate", class_="tag"),
+                    href="/animation-demo",
+                    class_="card",
+                ),
+                class_="cards",
+            ),
+        )

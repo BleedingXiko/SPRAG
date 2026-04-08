@@ -1,0 +1,450 @@
+"""Compile Python AST expression nodes into JavaScript expression strings.
+
+This module owns the recursive ``_compile_expr`` and the two namespace
+dispatchers ``_compile_ui_call`` (for ``ui.tag(...)`` factory calls) and
+``_compile_dom_call`` (for ``dom.helper(...)`` calls).
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+
+from ..attrs import normalize_attr_key
+from ..stores import STORE_METHOD_JS
+from .mappings import (
+    JSCodegenError,
+    _DOM_METHOD_MAP,
+    _compile_binop,
+    _compile_cmpop,
+    _map_name,
+)
+
+
+def _compile_expr(node, env, method_names=None):
+    method_names = method_names or set()
+    if isinstance(node, ast.Constant):
+        return json.dumps(node.value)
+    if isinstance(node, ast.Name):
+        if node.id == "self":
+            return "this"
+        # Store references resolve to their JS store name (the same name
+        # the generated stores.js shim exports). This is what makes
+        # ``self.subscribe(counter, fn)`` compile cleanly: the ``counter``
+        # arg becomes the JS variable ``counter`` imported from stores.js.
+        store_refs = env.get("__sprag_stores__") or {}
+        if node.id in store_refs:
+            return store_refs[node.id]
+        return env.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        return f"{_compile_expr(node.value, env, method_names=method_names)}.{_map_name(node.attr)}"
+    if isinstance(node, ast.Subscript):
+        return (
+            f"{_compile_expr(node.value, env, method_names=method_names)}"
+            f"[{_compile_slice(node.slice, env, method_names=method_names)}]"
+        )
+    if isinstance(node, ast.BinOp):
+        operator = _compile_binop(node.op)
+        return (
+            f"({_compile_expr(node.left, env, method_names=method_names)} "
+            f"{operator} "
+            f"{_compile_expr(node.right, env, method_names=method_names)})"
+        )
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+        return " || ".join(
+            f"({_compile_expr(value, env, method_names=method_names)})" for value in node.values
+        )
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+        return " && ".join(
+            f"({_compile_expr(value, env, method_names=method_names)})" for value in node.values
+        )
+    if isinstance(node, ast.IfExp):
+        return (
+            f"({_compile_expr(node.test, env, method_names=method_names)} ? "
+            f"{_compile_expr(node.body, env, method_names=method_names)} : "
+            f"{_compile_expr(node.orelse, env, method_names=method_names)})"
+        )
+    if isinstance(node, ast.List):
+        return (
+            "["
+            + ", ".join(_compile_expr(item, env, method_names=method_names) for item in node.elts)
+            + "]"
+        )
+    if isinstance(node, ast.Tuple):
+        return (
+            "["
+            + ", ".join(_compile_expr(item, env, method_names=method_names) for item in node.elts)
+            + "]"
+        )
+    if isinstance(node, ast.Dict):
+        chunks = []
+        for key, value in zip(node.keys, node.values):
+            # ``{**other, ...}`` -> ``{...other, ...}``. ast represents the
+            # spread as a key of None whose value is the spread expression.
+            if key is None:
+                spread_expr = _compile_expr(value, env, method_names=method_names)
+                chunks.append(f"...{spread_expr}")
+                continue
+            key_expr = _compile_expr(key, env, method_names=method_names)
+            if key_expr.startswith('"'):
+                chunks.append(f"{key_expr}: {_compile_expr(value, env, method_names=method_names)}")
+            else:
+                chunks.append(
+                    f"[{key_expr}]: {_compile_expr(value, env, method_names=method_names)}"
+                )
+        return "{ " + ", ".join(chunks) + " }"
+    if isinstance(node, ast.ListComp):
+        if len(node.generators) != 1:
+            raise JSCodegenError("Only one-generator list comprehensions are supported.")
+        generator = node.generators[0]
+        target_js, target_names = _compile_comp_target(generator.target)
+        next_env = dict(env)
+        for name in target_names:
+            next_env[name] = name
+        iter_expr = _compile_expr(generator.iter, env, method_names=method_names)
+        chain = f"(({iter_expr}) || [])"
+        if generator.ifs:
+            conds = " && ".join(
+                f"({_compile_expr(cond, next_env, method_names=method_names)})"
+                for cond in generator.ifs
+            )
+            chain = f"{chain}.filter(({target_js}) => {conds})"
+        elt_js = _compile_expr(node.elt, next_env, method_names=method_names)
+        return f"{chain}.map(({target_js}) => {elt_js})"
+    if isinstance(node, ast.DictComp):
+        if len(node.generators) != 1:
+            raise JSCodegenError("Only one-generator dict comprehensions are supported.")
+        generator = node.generators[0]
+        target_js, target_names = _compile_comp_target(generator.target)
+        next_env = dict(env)
+        for name in target_names:
+            next_env[name] = name
+        iter_expr = _compile_expr(generator.iter, env, method_names=method_names)
+        chain = f"(({iter_expr}) || [])"
+        if generator.ifs:
+            conds = " && ".join(
+                f"({_compile_expr(cond, next_env, method_names=method_names)})"
+                for cond in generator.ifs
+            )
+            chain = f"{chain}.filter(({target_js}) => {conds})"
+        key_js = _compile_expr(node.key, next_env, method_names=method_names)
+        value_js = _compile_expr(node.value, next_env, method_names=method_names)
+        return (
+            f"Object.fromEntries({chain}.map(({target_js}) => "
+            f"[{key_js}, {value_js}]))"
+        )
+    if isinstance(node, ast.Call):
+        # Python builtins that map to JS equivalents. These are compiled
+        # before the generic callee path so the user can write idiomatic
+        # Python (``len(xs)``, ``str(x)``, ``print(x)``) and have it land
+        # on the right JS shape. ``isinstance`` is intentionally omitted --
+        # Python's type system and JS's don't line up cleanly, and there's
+        # no one-liner that's correct in every case.
+        if isinstance(node.func, ast.Name) and node.func.id in _BUILTIN_CALLS:
+            return _compile_builtin_call(node, env, method_names=method_names)
+        if isinstance(node.func, ast.Name) and node.func.id in (env.get("__sprag_classes__") or {}):
+            args = []
+            for arg in node.args:
+                compiled = _compile_expr(arg, env, method_names=method_names)
+                if _is_bound_method_reference(arg, method_names):
+                    compiled = f"{compiled}.bind(this)"
+                args.append(compiled)
+            for keyword in node.keywords:
+                args.append(_compile_expr(keyword.value, env, method_names=method_names))
+            return f"new {node.func.id}({', '.join(args)})"
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "ui"
+        ):
+            return _compile_ui_call(node, env, method_names=method_names)
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "dom"
+        ):
+            return _compile_dom_call(node, env, method_names=method_names)
+        # self.timeout(fn, seconds) / self.interval(fn, seconds): the Python
+        # signature is in seconds; Ragot's timeout/interval take ms. Convert
+        # at the call site so the user never has to think about it.
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("timeout", "interval")
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "self"
+            and len(node.args) == 2
+        ):
+            fn_arg = node.args[0]
+            sec_arg = node.args[1]
+            # Wrap method-reference callbacks in an arrow so the user can
+            # write self.timeout(self.tick, 0.5) and get the natural shape.
+            if _is_bound_method_reference(fn_arg, method_names):
+                callee_method = _compile_expr(fn_arg, env, method_names=method_names)
+                fn_js = f"() => {callee_method}()"
+            else:
+                fn_js = _compile_expr(fn_arg, env, method_names=method_names)
+            # Numeric literal: fold the ×1000 at compile time.
+            if isinstance(sec_arg, ast.Constant) and isinstance(sec_arg.value, (int, float)):
+                ms_js = str(int(sec_arg.value * 1000))
+            else:
+                ms_js = f"({_compile_expr(sec_arg, env, method_names=method_names)} * 1000)"
+            js_method = node.func.attr  # timeout / interval map identity
+            return f"this.{js_method}({fn_js}, {ms_js})"
+        # Store method translation: <store>.set/get_state/update/subscribe(...)
+        # The Python local name is mapped to the JS store name via env, and
+        # the SPRAG method name is translated to its Ragot counterpart via
+        # the STORE_METHOD_JS table that ships with sprag/stores.py.
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and (env.get("__sprag_stores__") or {}).get(node.func.value.id)
+            and node.func.attr in STORE_METHOD_JS
+        ):
+            store_refs = env["__sprag_stores__"]
+            store_js_name = store_refs[node.func.value.id]
+            js_method = STORE_METHOD_JS[node.func.attr]
+            args = []
+            for arg in node.args:
+                compiled = _compile_expr(arg, env, method_names=method_names)
+                if _is_bound_method_reference(arg, method_names):
+                    compiled = f"{compiled}.bind(this)"
+                args.append(compiled)
+            for keyword in node.keywords:
+                args.append(_compile_expr(keyword.value, env, method_names=method_names))
+            return f"{store_js_name}.{js_method}({', '.join(args)})"
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+            obj = _compile_expr(node.func.value, env, method_names=method_names)
+            key = _compile_expr(node.args[0], env, method_names=method_names)
+            default = (
+                _compile_expr(node.args[1], env, method_names=method_names)
+                if len(node.args) > 1
+                else "undefined"
+            )
+            return f"(({obj}[{key}] ?? {default}))"
+        callee = _compile_expr(node.func, env, method_names=method_names)
+        args = []
+        for arg in node.args:
+            compiled = _compile_expr(arg, env, method_names=method_names)
+            if _is_bound_method_reference(arg, method_names):
+                compiled = f"{compiled}.bind(this)"
+            args.append(compiled)
+        for keyword in node.keywords:
+            args.append(_compile_expr(keyword.value, env, method_names=method_names))
+        return f"{callee}({', '.join(args)})"
+    if isinstance(node, ast.Await):
+        return f"await {_compile_expr(node.value, env, method_names=method_names)}"
+    if isinstance(node, ast.Lambda):
+        params = [arg.arg for arg in node.args.args]
+        body = _compile_expr(node.body, env, method_names=method_names)
+        # An arrow returning an object literal must be paren-wrapped, or
+        # JS parses ``{ ... }`` as a block (yielding undefined).
+        if isinstance(node.body, ast.Dict):
+            body = f"({body})"
+        return f"({', '.join(params)}) => {body}"
+    if isinstance(node, ast.Compare):
+        result = _compile_expr(node.left, env, method_names=method_names)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _compile_expr(comparator, env, method_names=method_names)
+            if isinstance(op, ast.In):
+                result = f"{right}.includes({result})"
+            elif isinstance(op, ast.NotIn):
+                result = f"!{right}.includes({result})"
+            else:
+                result = f"({result} {_compile_cmpop(op)} {right})"
+        return result
+    if isinstance(node, ast.UnaryOp):
+        operand = _compile_expr(node.operand, env, method_names=method_names)
+        if isinstance(node.op, ast.Not):
+            return f"!({operand})"
+        if isinstance(node.op, ast.USub):
+            return f"-({operand})"
+        if isinstance(node.op, ast.UAdd):
+            return f"+({operand})"
+        raise JSCodegenError(f"Unsupported unary operator: {ast.dump(node.op)}")
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value.replace("`", "\\`").replace("${", "\\${"))
+            else:
+                expr = value.value if isinstance(value, ast.FormattedValue) else value
+                parts.append(f"${{{_compile_expr(expr, env, method_names=method_names)}}}")
+        return "`" + "".join(parts) + "`"
+    raise JSCodegenError(f"Unsupported expression: {ast.dump(node)}")
+
+
+_PRIMITIVE_TAGS = {"For", "Grid", "LazyImage"}
+
+# Python builtins that compile to a JS expression shape. Each entry is a
+# callable that takes the list of compiled argument strings and returns the
+# JS expression. Only the common cases are covered -- anything weirder
+# should be written imperatively.
+_BUILTIN_CALLS = {
+    "len": lambda args: f"({args[0]}).length",
+    "str": lambda args: f"String({args[0]})",
+    "int": lambda args: f"Math.trunc(Number({args[0]}))",
+    "float": lambda args: f"Number({args[0]})",
+    "bool": lambda args: f"Boolean({args[0]})",
+    "abs": lambda args: f"Math.abs({args[0]})",
+    "min": lambda args: f"Math.min({', '.join(args)})",
+    "max": lambda args: f"Math.max({', '.join(args)})",
+    "round": lambda args: f"Math.round({args[0]})",
+    "print": lambda args: f"console.log({', '.join(args)})",
+    "range": lambda args: _range_to_js(args),
+}
+
+
+def _range_to_js(args):
+    # ``range(n)`` / ``range(a, b)`` / ``range(a, b, step)``. Materialises
+    # a JS array so the result is iterable in the same places a list would
+    # be -- slower than a generator, but matches Python semantics closely
+    # enough for the small loops that survive into browser-side code.
+    if len(args) == 1:
+        return (
+            f"Array.from({{ length: ({args[0]}) }}, (_, __i) => __i)"
+        )
+    if len(args) == 2:
+        return (
+            f"Array.from({{ length: (({args[1]}) - ({args[0]})) }}, "
+            f"(_, __i) => ({args[0]}) + __i)"
+        )
+    if len(args) == 3:
+        return (
+            f"Array.from({{ length: Math.max(0, Math.ceil((({args[1]}) - ({args[0]})) / ({args[2]}))) }}, "
+            f"(_, __i) => ({args[0]}) + __i * ({args[2]}))"
+        )
+    raise JSCodegenError("range() expects 1-3 arguments")
+
+
+def _compile_builtin_call(node, env, *, method_names):
+    handler = _BUILTIN_CALLS[node.func.id]
+    args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
+    return handler(args)
+
+
+def _compile_comp_target(target):
+    """Compile a comprehension/for target into (JS pattern, list of bound names).
+
+    Supports plain ``x`` and simple tuple/list unpacking ``(x, y)`` /
+    ``[x, y]`` (one level deep). Nested unpacking is rejected loudly so
+    the user gets a clean error rather than broken JS.
+    """
+    if isinstance(target, ast.Name):
+        return target.id, [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names = []
+        for el in target.elts:
+            if not isinstance(el, ast.Name):
+                raise JSCodegenError("Nested unpacking is not supported.")
+            names.append(el.id)
+        return "[" + ", ".join(names) + "]", names
+    raise JSCodegenError(f"Unsupported target: {ast.dump(target)}")
+
+
+def _compile_ui_call(node, env, *, method_names=None):
+    tag = node.func.attr
+
+    # Phase 2 rendering primitives are special: they don't compile to a
+    # createElement call directly. Instead they emit a placeholder element
+    # carrying ``data-sprag-mount=N`` and register a side-effect with the
+    # render context (the ``__sprag_mounts__`` collector on env). The
+    # corresponding renderList / renderGrid / createLazyLoader call is
+    # synthesised into the component's onStart by ``compile_component_class``.
+    if tag in _PRIMITIVE_TAGS:
+        ctx = env.get("__sprag_mounts__")
+        if ctx is None:
+            raise JSCodegenError(
+                f"ui.{tag}(...) is only valid inside a Component.render() body."
+            )
+        mount_index = len(ctx)
+        # Store the raw AST nodes -- compile_component_class will re-compile
+        # them in the onStart env (where ``props`` resolves to ``this.props``).
+        entry = {
+            "tag": tag,
+            "index": mount_index,
+            "node": node,
+        }
+        ctx.append(entry)
+
+        if tag == "LazyImage":
+            # ui.LazyImage(src, placeholder=..., **attrs) -> a real <img>
+            # element so the SSR pre-paint and the runtime morphDOM diff
+            # both see an <img>. The single createLazyLoader install is
+            # registered once per component (regardless of LazyImage count)
+            # by compile_component_class.
+            return _compile_lazy_image(node, env, method_names=method_names)
+
+        # ui.For / ui.Grid -> placeholder div with data-sprag-mount=N
+        kind = "grid" if tag == "Grid" else "list"
+        return (
+            f'createElement("div", {{ '
+            f'"data-sprag-mount": "{mount_index}", '
+            f'"data-sprag-mount-kind": "{kind}" }})'
+        )
+
+    child_args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
+    option_chunks = []
+    for keyword in node.keywords:
+        key = normalize_attr_key(keyword.arg)
+        option_chunks.append(
+            f'"{key}": {_compile_expr(keyword.value, env, method_names=method_names)}'
+        )
+    options = "{ " + ", ".join(option_chunks) + " }" if option_chunks else "{}"
+    return f'createElement("{tag}", {options}, {", ".join(child_args)})'
+
+
+def _compile_lazy_image(node, env, *, method_names=None):
+    """Compile ``ui.LazyImage(src, placeholder=..., **attrs)`` into an <img>.
+
+    The ``src`` argument becomes ``data-src`` (the lazy loader swaps it in
+    on intersect); the optional ``placeholder`` becomes the immediate ``src``
+    so users see something during the lazy phase.
+    """
+    if not node.args:
+        raise JSCodegenError("ui.LazyImage requires a src argument")
+    src_expr = _compile_expr(node.args[0], env, method_names=method_names)
+
+    placeholder_expr = None
+    other_attrs = []
+    for kw in node.keywords:
+        if kw.arg == "placeholder":
+            placeholder_expr = _compile_expr(kw.value, env, method_names=method_names)
+        else:
+            value_expr = _compile_expr(kw.value, env, method_names=method_names)
+            other_attrs.append(f'"{normalize_attr_key(kw.arg)}": {value_expr}')
+
+    attr_parts = [f'"data-src": {src_expr}']
+    if placeholder_expr is not None:
+        attr_parts.append(f'"src": {placeholder_expr}')
+    attr_parts.extend(other_attrs)
+    return 'createElement("img", { ' + ", ".join(attr_parts) + " })"
+
+
+def _compile_dom_call(node, env, *, method_names=None):
+    """Compile ``dom.X(...)`` into a bare Ragot helper call."""
+    attr = node.func.attr
+    js_name = _DOM_METHOD_MAP.get(attr, attr)
+    pos_args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
+    option_chunks = []
+    for keyword in node.keywords:
+        option_chunks.append(
+            f"{keyword.arg}: {_compile_expr(keyword.value, env, method_names=method_names)}"
+        )
+    if option_chunks:
+        pos_args.append("{ " + ", ".join(option_chunks) + " }")
+    return f"{js_name}({', '.join(pos_args)})"
+
+
+def _compile_slice(node, env, *, method_names=None):
+    if isinstance(node, ast.Constant):
+        return json.dumps(node.value)
+    return _compile_expr(node, env, method_names=method_names)
+
+
+def _is_bound_method_reference(node, method_names):
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+        and _map_name(node.attr) in method_names
+    )

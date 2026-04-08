@@ -1,0 +1,34 @@
+from sprag import Module
+
+
+class CounterModule(Module):
+    """Browser-side behaviour for the counter card.
+
+    The Module is the lifecycle owner: it adopts the ``CounterCard``
+    component and Ragot's ``adoptComponent`` wires a ``watchState``
+    sync so that ``self.set_state(...)`` automatically propagates to
+    the component's state (and triggers a re-render). We never call
+    ``self.component.set_state(...)`` by hand.
+
+    ``self.element`` is the hydration container that hosts the adopted
+    component — the right target for delegated DOM events.
+    """
+
+    def __init__(self, screen=None, state=None):
+        super().__init__(screen=screen, state=state or {"count": 0})
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='increment']", self.on_increment)
+        self.delegate(self.element, "click", "[data-role='reset']", self.on_reset)
+
+    def on_increment(self, event):
+        event.prevent_default()
+        self.call_action("increment", {"count": self.state["count"]}).then(self.on_result)
+
+    def on_reset(self, event):
+        event.prevent_default()
+        self.call_action("reset", {}).then(self.on_result)
+
+    def on_result(self, result):
+        # One call — the adoptComponent sync propagates to the component.
+        self.set_state(result.value)

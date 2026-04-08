@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import QueueDemoController
+from .web import QueueDemoScreen
+
+
+queue_demo = page(
+    path="/queue-demo",
+    controller=QueueDemoController,
+    screen=QueueDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Queue Demo — SPRAG Labs"},
+)

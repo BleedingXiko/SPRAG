@@ -1,0 +1,33 @@
+# {{project_name}} — SPRAG Labs
+
+A showcase app that exercises SPRAG's framework primitives one
+entry at a time. Each route is a focused demonstration of a single
+Specter + Ragot feature, runnable in isolation.
+
+The labs skeleton is a living regression canary: every entry that
+scaffolds + builds + renders cleanly proves the primitive still
+works end-to-end. Adding a new entry is the easiest way to stress
+a specific slice of the framework.
+
+## Running
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+sprag dev --port 8000
+```
+
+Open <http://127.0.0.1:8000/>.
+
+## Entries
+
+| Route              | Mode     | What it exercises                          |
+|--------------------|----------|--------------------------------------------|
+| `/`                | document | Landing — links to every entry             |
+| `/counter`         | hybrid   | `@action` + `Module` + `Component` loop    |
+| `/virtual-scroll`  | hybrid   | `@virtual_scroll` on a large list          |
+| `/store-demo`      | hybrid   | `store(...)` as cross-runtime shared state |
+
+More entries (queue, watcher, operation, socket, model, animation)
+are planned follow-ups — each is a forcing function for one gap.

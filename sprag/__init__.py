@@ -1,0 +1,133 @@
+"""Public SPRAG framework surface."""
+
+__version__ = "0.1.0"
+
+from . import dom
+from .actions import action
+from .app import App
+from .page import Page, page
+from .request import Request
+from .server import (
+    # Core (already exposed)
+    Controller,
+    Field,
+    Outcome,
+    Schema,
+    Service,
+    registry,
+    # HTTP / routing
+    HTTPError,
+    Router,
+    expect_json,
+    json_endpoint,
+    require_fields,
+    route,
+    # Operations
+    Operation,
+    OperationError,
+    # State
+    Cache,
+    Model,
+    Store,
+    create_cache,
+    create_model,
+    create_store,
+    # Communication
+    bus,
+    # Workers
+    QueueService,
+    # Realtime
+    Handler,
+    SocketIngress,
+    # System
+    ManagedProcess,
+    Watcher,
+    WatcherError,
+    start_process,
+    # Orchestration
+    ServiceManager,
+    boot,
+)
+from .stores import StoreBridge, declared_stores, store
+from .ui import ui
+from .web import (
+    Component,
+    Module,
+    Screen,
+    animate,
+    debounce,
+    hydrate,
+    infinite_scroll,
+    ref,
+    ssr,
+    throttle,
+    virtual_scroll,
+)
+
+__all__ = [
+    "__version__",
+    # App
+    "App",
+    "Page",
+    "Request",
+    "action",
+    "page",
+    # Web authoring
+    "Component",
+    "Module",
+    "Screen",
+    "dom",
+    "hydrate",
+    "ssr",
+    "ui",
+    # State bridge (one declaration, two runtimes)
+    "StoreBridge",
+    "declared_stores",
+    "store",
+    # Client-side decorators (justified — see sprag/web.py)
+    "animate",
+    "debounce",
+    "infinite_scroll",
+    "ref",
+    "throttle",
+    "virtual_scroll",
+    # Core server
+    "Controller",
+    "Field",
+    "Outcome",
+    "Schema",
+    "Service",
+    "registry",
+    # HTTP / routing
+    "HTTPError",
+    "Router",
+    "expect_json",
+    "json_endpoint",
+    "require_fields",
+    "route",
+    # Operations
+    "Operation",
+    "OperationError",
+    # State
+    "Cache",
+    "Model",
+    "Store",
+    "create_cache",
+    "create_model",
+    "create_store",
+    # Communication
+    "bus",
+    # Workers
+    "QueueService",
+    # Realtime
+    "Handler",
+    "SocketIngress",
+    # System
+    "ManagedProcess",
+    "Watcher",
+    "WatcherError",
+    "start_process",
+    # Orchestration
+    "ServiceManager",
+    "boot",
+]

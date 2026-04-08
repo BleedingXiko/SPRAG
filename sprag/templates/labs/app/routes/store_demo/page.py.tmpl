@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import StoreDemoController
+from .web import StoreDemoScreen
+
+
+store_demo = page(
+    path="/store-demo",
+    controller=StoreDemoController,
+    screen=StoreDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Store Demo — SPRAG Labs"},
+)

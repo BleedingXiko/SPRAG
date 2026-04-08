@@ -1,0 +1,34 @@
+from sprag import Component, ui
+
+
+class OperationCard(Component):
+    def render(self, props=None):
+        result = self.state.get("result")
+        result_text = (
+            f"{result['slug']} ({result['length']} chars)"
+            if result
+            else "No operation result yet."
+        )
+        error = self.state.get("error") or "No error yet."
+        return ui.div(
+            ui.h2("Operation"),
+            ui.p(
+                "A Controller action delegates to a Specter Operation. Success "
+                "returns an Outcome value; validation failure returns an "
+                "OperationError through the action bridge."
+            ),
+            ui.div(
+                ui.span("Status"),
+                ui.strong(self.state.get("status", "idle")),
+                class_="metric",
+            ),
+            ui.p(self.state.get("message", ""), class_="status-line"),
+            ui.p(result_text, class_="status-line"),
+            ui.p(error, class_="status-line error-line"),
+            ui.div(
+                ui.button("Run valid", type="button", class_="btn", data_role="run-valid"),
+                ui.button("Force error", type="button", class_="btn btn-ghost", data_role="run-invalid"),
+                class_="operation-actions",
+            ),
+            class_="demo-card operation-card",
+        )

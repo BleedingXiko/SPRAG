@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import {{class_name}}Controller
+from .web import {{class_name}}Screen
+
+
+{{var_name}} = page(
+    path="{{route_path}}",
+    controller={{class_name}}Controller,
+    screen={{class_name}}Screen,
+    mode="document",
+    metadata={"title": "{{class_name}}"},
+)

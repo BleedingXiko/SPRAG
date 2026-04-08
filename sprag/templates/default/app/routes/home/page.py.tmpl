@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import HomeController
+from .web import HomeScreen
+
+
+home = page(
+    path="/",
+    controller=HomeController,
+    screen=HomeScreen,
+    mode="document",
+    metadata={"title": "{{project_name}}"},
+)

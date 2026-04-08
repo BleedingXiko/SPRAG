@@ -1,0 +1,14 @@
+"""Cross-route shared state for the labs app.
+
+Every store declared here is one Python object that exists on both
+runtimes: on the server it backs a Specter store, and in the browser
+it compiles to a ``createStateStore`` import from the generated
+``stores.js`` shim.
+"""
+
+from sprag import store
+
+
+# Shared tally used by the /store-demo entry. Bumping the tally from
+# the Controller action is visible anywhere the store is read.
+lab_tally = store("lab_tally", initial={"count": 0})
