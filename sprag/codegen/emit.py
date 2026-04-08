@@ -37,7 +37,8 @@ def emit_ragot_runtime(output_dir: Path, project_root: Path) -> None:
     )
 
 
-def emit_generated_files(output_dir: Path, hydration_entries: list[dict]) -> None:
+def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mount_entries=None) -> None:
+    mount_entries = mount_entries or []
     generated_dir = output_dir / "generated"
     components_dir = generated_dir / "components"
     modules_dir = generated_dir / "modules"
@@ -49,6 +50,14 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict]) -> Non
     for entry in hydration_entries:
         component_class = entry.get("component_class")
         module_class = entry.get("module_class")
+        if component_class:
+            _register_browser_class(component_classes, component_class, "Component")
+        if module_class:
+            _register_browser_class(module_classes, module_class, "Module")
+
+    for entry in mount_entries:
+        component_class = entry.get("root_component_class")
+        module_class = entry.get("root_module_class")
         if component_class:
             _register_browser_class(component_classes, component_class, "Component")
         if module_class:
@@ -157,6 +166,7 @@ import './generated/stores.js';
 const manifest = {json.dumps(serializable, indent=2, sort_keys=True)};
 window.__SPRAG_MANIFEST__ = manifest;
 const route = window.__SPRAG_PAGE__ || {{}};
+const mount = window.__SPRAG_MOUNT__ || null;
 
 function createActionClient(currentRoute) {{
     const knownActions = new Set(currentRoute.actions || []);
@@ -258,6 +268,46 @@ function mountHydrationEntry(entry) {{
     ragotRegistry.provide(entry.component + ':' + entry.id, component);
 }}
 
+function mountClientApp(entry) {{
+    const target = document.querySelector('#app-root');
+    if (!target) return;
+
+    const ComponentClass = componentRegistry[entry.component];
+    if (!ComponentClass) {{
+        console.warn('[SPRAG] Missing generated component for mount', entry.component);
+        return;
+    }}
+
+    const boot = window.__SPRAG_BOOT__ || {{}};
+    const ModuleClass = entry.module ? moduleRegistry[entry.module] : null;
+    const component = new ComponentClass(boot || {{}}, {{
+        props: boot || {{}},
+        module: null,
+    }});
+    target.innerHTML = '';
+
+    if (ModuleClass) {{
+        const module = new ModuleClass(boot || {{}});
+        module.actions = actionClient;
+        module.route = entry;
+        module.component = component;
+        module.element = target;
+        component.module = module;
+        const syncFn = typeof module.syncComponent === 'function'
+            ? (c, s) => module.syncComponent(c, s)
+            : (c, s) => c.setState(s);
+        module.adoptComponent(component, {{
+            startArgs: [target],
+            sync: syncFn,
+        }});
+        module.start();
+        ragotRegistry.provide(entry.module + ':' + entry.path, module);
+    }} else {{
+        component.mount(target);
+    }}
+    ragotRegistry.provide(entry.component + ':' + entry.path, component);
+}}
+
 function connectBusBridge(route) {{
     const endpoint = route.events_endpoint || '/__sprag__/events';
     const source = new EventSource(endpoint);
@@ -280,6 +330,11 @@ function boot() {{
     // Stores hydrate via the side-effect import of './generated/stores.js'
     // above — each createStateStore reads window.__SPRAG_STORES__[name] at
     // module-load time, so by the time boot() runs every store is live.
+    if (mount) {{
+        mountClientApp(mount);
+        connectBusBridge(mount);
+        return;
+    }}
     const hydration = window.__SPRAG_HYDRATION__ || [];
     hydration.forEach(mountHydrationEntry);
     connectBusBridge(route);
@@ -332,4 +387,13 @@ def _serializable_manifest(manifest):
                 }
             )
         routes.append(next_route)
-    return {"errors": manifest.get("errors", []), "routes": routes}
+    mounts = []
+    for mount in manifest.get("mounts", []):
+        mounts.append(
+            {
+                key: value
+                for key, value in mount.items()
+                if key not in {"root_component_class", "root_module_class"}
+            }
+        )
+    return {"errors": manifest.get("errors", []), "mounts": mounts, "routes": routes}

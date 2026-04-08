@@ -19,6 +19,7 @@ from .scaffold import (
     ROUTE_MODES,
     available_templates,
     scaffold_project,
+    scaffold_mount,
     scaffold_route,
 )
 
@@ -64,13 +65,20 @@ def _build_parser():
     )
     new_parser.set_defaults(func=cmd_new)
 
-    add_parser = subparsers.add_parser("add", help="Add a new route to the current project")
-    add_parser.add_argument("route_name", help="Route name, e.g. 'dashboard' or 'admin/users'")
+    add_parser = subparsers.add_parser("add", help="Add a route or mount to the current project")
+    add_parser.add_argument(
+        "kind_or_name",
+        help=(
+            "Use 'route <name>' or 'mount <name>'. Back-compat: a bare name "
+            "is treated as 'route <name>'."
+        ),
+    )
+    add_parser.add_argument("name", nargs="?", help="Route or mount name, e.g. 'dashboard' or 'admin/users'")
     add_parser.add_argument("--project-root", default=os.getcwd())
     add_parser.add_argument(
         "--mode",
         choices=ROUTE_MODES,
-        default=DEFAULT_ROUTE_MODE,
+        default=None,
         help=(
             f"Render mode for the new route (default: {DEFAULT_ROUTE_MODE!r}). "
             "'document' scaffolds a pure SSR route; 'hybrid' adds a Module "
@@ -88,6 +96,7 @@ def cmd_routes(args):
 
     app_target, app = _load_cli_app(args)
     pages = app.pages()
+    mounts = app.mounts()
     print(f"[SPRAG] app: {app_target}")
 
     warnings = []
@@ -115,6 +124,24 @@ def cmd_routes(args):
             warnings.append(
                 f"  {module_name}: controller.route={controller_route!r} does not match page.path={page.path!r}"
             )
+
+    for module_name, mount in mounts:
+        boot_name = mount.boot.__name__ if mount.boot else "(none)"
+        module_name_js = mount.module.__name__ if mount.module else "(none)"
+        print(f"{mount.path} [mount] -> {mount.component.__name__} / {module_name_js} / {boot_name}")
+        if mount.boot is not None:
+            actions = mount.boot.sprag_actions()
+            for action_name, action_fn in sorted(actions.items()):
+                meta = getattr(action_fn, "_sprag_action_meta", None) or {}
+                schema = meta.get("schema")
+                if schema is not None:
+                    fields_desc = ", ".join(
+                        f"{fname}: {f.type.__name__}{' [required]' if f.required else ''}"
+                        for fname, f in schema._fields.items()
+                    ) if hasattr(schema, "_fields") else ""
+                    print(f"  @{action_name}({fields_desc})")
+                else:
+                    print(f"  @{action_name}()")
 
     if warnings:
         print()
@@ -149,6 +176,7 @@ def cmd_dev(args):
     watcher.start()
 
     pages = app.pages()
+    mounts = app.mounts()
     banner = [
         f"[SPRAG] app: {app_target}",
         f"[SPRAG] dev server running at http://127.0.0.1:{args.port}/",
@@ -161,6 +189,17 @@ def cmd_dev(args):
         for _module_name, pg in pages:
             banner.append(
                 f"    {pg.path.ljust(path_width)}  [{pg.mode.ljust(mode_width)}]  -> {pg.controller.__name__}"
+            )
+    else:
+        banner.append("    (none)")
+    banner.append("")
+    banner.append("  Mounts:")
+    if mounts:
+        path_width = max(len(mt.path) for _m, mt in mounts)
+        for _module_name, mt in mounts:
+            module_name_js = mt.module.__name__ if mt.module else "(none)"
+            banner.append(
+                f"    {mt.path.ljust(path_width)}  [mount]  -> {mt.component.__name__} / {module_name_js}"
             )
     else:
         banner.append("    (none)")
@@ -198,9 +237,29 @@ def cmd_add(args):
             f"[SPRAG] not inside a SPRAG project (no app/__init__.py at {project_root})"
         )
 
-    created = scaffold_route(project_root, args.route_name, mode=args.mode)
-    normalized = args.route_name.strip("/")
-    print(f"[SPRAG] created {args.mode}-mode route '{normalized}' at app/routes/{normalized}/")
+    kind, name = _parse_add_target(args)
+    normalized = name.strip("/")
+
+    if kind == "mount":
+        if args.mode is not None:
+            raise SystemExit("[SPRAG] --mode is only valid for 'sprag add route', not 'sprag add mount'.")
+        created = scaffold_mount(project_root, name)
+        print(f"[SPRAG] created mount '{normalized}' at app/mounts/{normalized}/")
+        for path in created:
+            print(f"  {path.relative_to(project_root)}")
+        print()
+        print("Edit your mount:")
+        print(f"  app/mounts/{normalized}/server.py   # boot data")
+        print(f"  app/mounts/{normalized}/web.py      # root Component")
+        print(f"  app/mounts/{normalized}/modules.py  # root Module")
+        print(f"  app/mounts/{normalized}/mount.py    # mount manifest")
+        print()
+        print("Then run: sprag dev")
+        return
+
+    mode = args.mode or DEFAULT_ROUTE_MODE
+    created = scaffold_route(project_root, name, mode=mode)
+    print(f"[SPRAG] created {mode}-mode route '{normalized}' at app/routes/{normalized}/")
     for path in created:
         print(f"  {path.relative_to(project_root)}")
     print()
@@ -208,10 +267,23 @@ def cmd_add(args):
     print(f"  app/routes/{normalized}/server.py      # controller logic")
     print(f"  app/routes/{normalized}/web.py         # screen layout")
     print(f"  app/routes/{normalized}/components.py  # UI components")
-    if args.mode == "hybrid":
+    if mode == "hybrid":
         print(f"  app/routes/{normalized}/modules.py     # browser-side Module")
     print()
     print("Then run: sprag dev")
+
+
+def _parse_add_target(args):
+    if args.kind_or_name in {"route", "mount"}:
+        if not args.name:
+            raise SystemExit(f"[SPRAG] missing name for 'sprag add {args.kind_or_name}'.")
+        return args.kind_or_name, args.name
+    if args.name is not None:
+        raise SystemExit(
+            "[SPRAG] expected 'sprag add route <name>' or 'sprag add mount <name>'. "
+            "For backward compatibility, 'sprag add <name>' is also accepted."
+        )
+    return "route", args.kind_or_name
 
 
 def _load_cli_app(args):
@@ -227,7 +299,7 @@ def _build_once(app, output_dir):
     manifest = app.build(output_dir)
     elapsed = time.monotonic() - start
     print(
-        f"[SPRAG] built {len(manifest['routes'])} route(s)"
+        f"[SPRAG] built {len(manifest['routes'])} route(s), {len(manifest.get('mounts', []))} mount(s)"
         f" with {len(manifest['errors'])} error(s) into {output_dir}"
         f" ({elapsed:.2f}s)"
     )

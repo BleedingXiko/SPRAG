@@ -14,7 +14,7 @@ from gevent.pool import Pool
 from gevent.pywsgi import WSGIServer
 
 from .request import Request
-from .runtime import render_page
+from .runtime import render_mount, render_page
 from .server import ActionDispatchError, bus, dispatch_controller_action
 
 
@@ -40,6 +40,9 @@ class SpragWSGIApp:
             page = self._match_page(route_path)
             if page is not None:
                 return self._handle_page(environ, start_response, page)
+            mount = self._match_mount(route_path)
+            if mount is not None:
+                return self._handle_mount(environ, start_response, mount)
             return self._handle_static(environ, start_response, path)
 
         return self._respond(start_response, 405, "text/plain", b"Method Not Allowed")
@@ -50,6 +53,12 @@ class SpragWSGIApp:
         for _module_name, page in self._sprag_app.pages():
             if page.path == route_path:
                 return page
+        return None
+
+    def _match_mount(self, route_path):
+        for _module_name, mount in self._sprag_app.mounts():
+            if mount.path == route_path:
+                return mount
         return None
 
     def _handle_page(self, environ, start_response, page):
@@ -81,6 +90,39 @@ class SpragWSGIApp:
             print(f"[SPRAG] render error on {page.path}: {result.render_error}", file=sys.stderr)
         if result.data_error:
             print(f"[SPRAG] data error on {page.path}: {result.data_error}", file=sys.stderr)
+
+        body = result.html.encode("utf-8")
+        return self._respond(start_response, 200, "text/html; charset=utf-8", body)
+
+    # -- Mount rendering ----------------------------------------------------
+
+    def _handle_mount(self, environ, start_response, mount):
+        parsed_path = environ.get("PATH_INFO", "/")
+        parsed_qs = environ.get("QUERY_STRING", "")
+        query = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed_qs).items()}
+        headers = self._extract_headers(environ)
+
+        request = Request(
+            path=parsed_path,
+            query=query,
+            headers=headers,
+            method="GET",
+        )
+
+        try:
+            result = render_mount(mount, request=request, app=self._sprag_app)
+        except Exception:
+            tb = traceback.format_exc()
+            print(f"[SPRAG] mount crash on {mount.path}:\n{tb}", file=sys.stderr)
+            body = (
+                f"<!DOCTYPE html><html><body>"
+                f"<h1>SPRAG Mount Error</h1><pre>{tb}</pre>"
+                f"</body></html>"
+            ).encode("utf-8")
+            return self._respond(start_response, 500, "text/html; charset=utf-8", body)
+
+        if result.data_error:
+            print(f"[SPRAG] mount data error on {mount.path}: {result.data_error}", file=sys.stderr)
 
         body = result.html.encode("utf-8")
         return self._respond(start_response, 200, "text/html; charset=utf-8", body)
@@ -125,6 +167,7 @@ class SpragWSGIApp:
                 payload=payload,
                 request=request,
                 app=self._sprag_app,
+                mounts=self._sprag_app.mounts(),
             )
         except ActionDispatchError as exc:
             return self._json_response(

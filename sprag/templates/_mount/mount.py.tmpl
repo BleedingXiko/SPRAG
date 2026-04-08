@@ -1,0 +1,14 @@
+from sprag import mount
+
+from .modules import {{class_name}}Module
+from .server import {{class_name}}Boot
+from .web import {{class_name}}App
+
+
+{{var_name}} = mount(
+    path="{{mount_path}}",
+    component={{class_name}}App,
+    module={{class_name}}Module,
+    boot={{class_name}}Boot,
+    metadata={"title": "{{class_name}}"},
+)

@@ -182,15 +182,15 @@ class ActionDispatchError(RuntimeError):
         self.status_code = status_code
 
 
-def dispatch_controller_action(pages, *, route_path, action_name, payload=None, request=None, app=None):
-    """Dispatch a declared controller action for a discovered SPRAG route."""
+def dispatch_controller_action(pages, *, route_path, action_name, payload=None, request=None, app=None, mounts=None):
+    """Dispatch a declared controller action for a discovered SPRAG surface."""
     if not route_path:
         raise ActionDispatchError("Missing SPRAG route path.", status_code=400)
     if not action_name:
         raise ActionDispatchError("Missing SPRAG action name.", status_code=400)
 
-    page = _resolve_route_page(pages, route_path)
-    actions = page.controller.sprag_actions()
+    controller_class = _resolve_surface_controller(pages, mounts or [], route_path)
+    actions = controller_class.sprag_actions()
     action = actions.get(action_name)
     if action is None:
         raise ActionDispatchError(
@@ -198,7 +198,7 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
             status_code=404,
         )
 
-    controller = page.controller()
+    controller = controller_class()
     controller.request = request
     controller.app = app
     bound_action = getattr(controller, action_name)
@@ -235,6 +235,16 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
     if isinstance(result, Outcome):
         return result
     return Outcome.success(result)
+
+
+def _resolve_surface_controller(pages, mounts, route_path):
+    for _module_name, page in pages:
+        if page.path == route_path:
+            return page.controller
+    for _module_name, mount in mounts:
+        if mount.path == route_path and mount.boot is not None:
+            return mount.boot
+    raise ActionDispatchError(f"Unknown route {route_path!r}.", status_code=404)
 
 
 def _resolve_route_page(pages, route_path):

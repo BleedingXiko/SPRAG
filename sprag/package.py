@@ -22,11 +22,12 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
     if did_boot:
         app.boot()
     try:
-        manifest = build_web_preview(app.pages(), public_dir, app=app)
+        manifest = build_web_preview(app.pages(), public_dir, app=app, mounts=app.mounts())
     finally:
         if did_boot:
             app.shutdown()
     serializable_routes = _serializable_routes(manifest["routes"])
+    serializable_mounts = _serializable_mounts(manifest.get("mounts", []))
 
     app_package = _app_package_name(app)
     app_project_root = Path(project_root).resolve() if project_root else _project_root_for_package(app_package)
@@ -50,6 +51,7 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
                 "public_dir": "public",
                 "server_entry": "server.py",
                 "routes": serializable_routes,
+                "mounts": serializable_mounts,
                 "errors": manifest["errors"],
             },
             indent=2,
@@ -63,6 +65,7 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
         "public_dir": str(public_dir),
         "server": str(output_dir / "server.py"),
         "routes": serializable_routes,
+        "mounts": serializable_mounts,
         "errors": manifest["errors"],
         "packages": package_names,
     }
@@ -125,6 +128,17 @@ def _serializable_routes(routes):
             )
         serializable.append(next_route)
     return serializable
+
+
+def _serializable_mounts(mounts):
+    return [
+        {
+            key: value
+            for key, value in mount.items()
+            if key not in {"root_component_class", "root_module_class"}
+        }
+        for mount in mounts
+    ]
 
 
 def _dist_server_source(app_target):

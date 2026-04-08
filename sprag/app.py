@@ -9,26 +9,36 @@ from typing import Optional
 from specter import registry
 
 from .compiler import build_web_preview
-from .discovery import discover_pages
+from .discovery import discover_surfaces
 
 
 @dataclass
 class App:
     services: list = field(default_factory=list)
     routes: str = "app.routes"
+    mounts_package: str = "app.mounts"
     project_root: Optional[str] = None
 
     def __post_init__(self):
         self._pages = None
+        self._mounts = None
         self._booted = False
 
     def pages(self):
-        if self._pages is None:
-            self._pages = discover_pages(self.routes)
+        self._ensure_surfaces()
         return self._pages
+
+    def mounts(self):
+        self._ensure_surfaces()
+        return self._mounts
+
+    def _ensure_surfaces(self):
+        if self._pages is None or self._mounts is None:
+            self._pages, self._mounts = discover_surfaces(self.routes, self.mounts_package)
 
     def invalidate_pages(self):
         self._pages = None
+        self._mounts = None
 
     def boot(self):
         """Provide services into Specter's registry and start them."""
@@ -58,7 +68,7 @@ class App:
             self.boot()
         try:
             pages = self.pages()
-            return build_web_preview(pages, output_path, app=self)
+            return build_web_preview(pages, output_path, app=self, mounts=self.mounts())
         finally:
             if did_boot:
                 self.shutdown()

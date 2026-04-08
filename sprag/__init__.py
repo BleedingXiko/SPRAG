@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 from . import dom
 from .actions import action
 from .app import App
+from .mount import Mount, mount
 from .page import Page, page
 from .request import Request
 from .server import (
@@ -68,9 +69,11 @@ __all__ = [
     "__version__",
     # App
     "App",
+    "Mount",
     "Page",
     "Request",
     "action",
+    "mount",
     "page",
     # Web authoring
     "Component",

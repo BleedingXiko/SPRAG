@@ -1,0 +1,24 @@
+from sprag import Module
+
+
+class {{class_name}}Module(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state or {
+                "view": "home",
+                "clicks": 0,
+                "message": "{{class_name}} is running client-side.",
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-view]", self.on_view)
+
+    def on_view(self, event):
+        event.prevent_default()
+        view = event.target.dataset.view
+        self.set_state({
+            "view": view,
+            "clicks": self.state["clicks"] + 1,
+        })

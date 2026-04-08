@@ -1,0 +1,28 @@
+from sprag import Component, ui
+
+
+class {{class_name}}App(Component):
+    def render(self, props=None):
+        view = self.state["view"]
+        clicks = self.state["clicks"]
+        message = self.state["message"]
+
+        return ui.main(
+            ui.h1("{{class_name}}"),
+            ui.p(message),
+            ui.nav(
+                ui.button("Home", type="button", data_view="home"),
+                ui.button("Reports", type="button", data_view="reports"),
+                ui.button("Settings", type="button", data_view="settings"),
+                class_="{{var_name}}-tabs",
+            ),
+            ui.section(
+                ui.h2(view),
+                ui.p(
+                    "This view is owned by the browser Module. Switch count: ",
+                    str(clicks),
+                ),
+                class_="{{var_name}}-panel",
+            ),
+            class_="{{var_name}}-app",
+        )

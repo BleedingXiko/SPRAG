@@ -1,0 +1,12 @@
+from sprag import Controller
+
+
+class {{class_name}}Boot(Controller):
+    route = "{{mount_path}}"
+
+    def load(self):
+        return {
+            "view": "home",
+            "clicks": 0,
+            "message": "{{class_name}} is running client-side.",
+        }
