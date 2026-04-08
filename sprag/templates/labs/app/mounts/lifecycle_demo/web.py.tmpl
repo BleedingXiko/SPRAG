@@ -1,0 +1,168 @@
+from sprag import Component, ui
+
+
+class LifecycleDemoApp(Component):
+    def render(self, props=None):
+        view = self.state.get("view", "overview")
+        return ui.div(
+            ui.section(
+                ui.span("MOUNT", class_="badge"),
+                ui.h1("SPRAG Workspace Mount"),
+                ui.p(
+                    "A client-side workspace with one root Module, persistent "
+                    "chrome, dynamic child views, and explicit teardown on "
+                    "every view switch."
+                ),
+                class_="hero",
+            ),
+            ui.section(
+                ui.nav(
+                    ui.button(
+                        "Overview",
+                        type="button",
+                        data_view="overview",
+                        class_=(
+                            "lifecycle-tab is-active"
+                            if view == "overview"
+                            else "lifecycle-tab"
+                        ),
+                        aria_selected=(view == "overview"),
+                    ),
+                    ui.button(
+                        "Activity",
+                        type="button",
+                        data_view="activity",
+                        class_=(
+                            "lifecycle-tab is-active"
+                            if view == "activity"
+                            else "lifecycle-tab"
+                        ),
+                        aria_selected=(view == "activity"),
+                    ),
+                    ui.button(
+                        "Settings",
+                        type="button",
+                        data_view="settings",
+                        class_=(
+                            "lifecycle-tab is-active"
+                            if view == "settings"
+                            else "lifecycle-tab"
+                        ),
+                        aria_selected=(view == "settings"),
+                    ),
+                    class_="lifecycle-sidebar",
+                ),
+                ui.section(
+                    ui.div(
+                        LifecycleOverviewView({"switches": 0}).render(),
+                        data_sprag_view_slot="true",
+                        class_="lifecycle-slot",
+                    ),
+                    class_="lifecycle-stage",
+                ),
+                ui.aside(
+                    ui.h2("Lifecycle"),
+                    ui.div(
+                        ui.span("Root owner"),
+                        ui.strong("running", data_sprag_owner_status="true"),
+                        class_="lifecycle-metric",
+                    ),
+                    ui.div(
+                        ui.span("Mounted view"),
+                        ui.strong(view, data_sprag_view_status="true"),
+                        class_="lifecycle-metric",
+                    ),
+                    ui.div(
+                        ui.span("Switches"),
+                        ui.strong("0", data_sprag_switch_count="true"),
+                        class_="lifecycle-metric",
+                    ),
+                    ui.p(
+                        "The shell stays mounted. Only the child view inside "
+                        "the center slot is replaced."
+                    ),
+                    ui.div(
+                        "boot -> mount overview",
+                        data_sprag_lifecycle_log="true",
+                        class_="lifecycle-log",
+                    ),
+                    class_="lifecycle-inspector",
+                ),
+                class_="lifecycle-demo",
+            ),
+        )
+
+
+class LifecycleOverviewView(Component):
+    def render(self, props=None):
+        switches = self.state.get("switches", 0)
+        return ui.article(
+            ui.h2("Overview"),
+            ui.p(
+                "This is the first child Component mounted by the workspace "
+                "Module. It owns this content block and is torn down when "
+                "you pick another view."
+            ),
+            ui.ul(
+                ui.li("SSR handed boot data to the mount document."),
+                ui.li("The root Module mounted the shell once."),
+                ui.li("The child view mounted into the center slot."),
+                class_="lifecycle-list",
+            ),
+            ui.div(
+                ui.span("child Component", class_="lifecycle-pill"),
+                ui.span("switches: " + str(switches), class_="lifecycle-pill"),
+                class_="lifecycle-pills",
+            ),
+            class_="lifecycle-view",
+        )
+
+
+class LifecycleActivityView(Component):
+    def render(self, props=None):
+        switches = self.state.get("switches", 0)
+        return ui.article(
+            ui.h2("Activity"),
+            ui.p(
+                "This view replaces Overview. The previous child was "
+                "unmounted before Activity was mounted, while the root shell "
+                "and inspector stayed alive."
+            ),
+            ui.ul(
+                ui.li("Unmount previous child view."),
+                ui.li("Clear the arbitrary DOM slot."),
+                ui.li("Mount Activity into the same owned slot."),
+                class_="lifecycle-list",
+            ),
+            ui.div(
+                ui.span("explicit teardown", class_="lifecycle-pill"),
+                ui.span("switches: " + str(switches), class_="lifecycle-pill"),
+                class_="lifecycle-pills",
+            ),
+            class_="lifecycle-view",
+        )
+
+
+class LifecycleSettingsView(Component):
+    def render(self, props=None):
+        switches = self.state.get("switches", 0)
+        return ui.article(
+            ui.h2("Settings"),
+            ui.p(
+                "Settings proves this is one client app mount, not separate "
+                "routes. The same root Module owns the delegate listener, "
+                "the shell, and the active child lifecycle."
+            ),
+            ui.ul(
+                ui.li("Root Module handles all tab clicks."),
+                ui.li("Child view changes do not remount the shell."),
+                ui.li("Root stop tears down whichever child is active."),
+                class_="lifecycle-list",
+            ),
+            ui.div(
+                ui.span("root Module", class_="lifecycle-pill"),
+                ui.span("switches: " + str(switches), class_="lifecycle-pill"),
+                class_="lifecycle-pills",
+            ),
+            class_="lifecycle-view",
+        )

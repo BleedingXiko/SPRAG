@@ -94,7 +94,7 @@ def validate_surface_paths(
 
     for mount_module, mt in mounts:
         for route_module, pg in pages:
-            if _paths_overlap(mt.path, pg.path):
+            if _mount_claims_route(mt.path, pg.path):
                 raise ValueError(
                     f"SPRAG path conflict: mount {mt.path!r} in {mount_module} "
                     f"overlaps route {pg.path!r} in {route_module}."
@@ -119,6 +119,14 @@ def _paths_overlap(left: str, right: str) -> bool:
     if right == "/":
         return True
     return right.startswith(left + "/") or left.startswith(right + "/")
+
+
+def _mount_claims_route(mount_path: str, route_path: str) -> bool:
+    mount_path = mount_path.rstrip("/") or "/"
+    route_path = route_path.rstrip("/") or "/"
+    if mount_path == "/":
+        return True
+    return route_path == mount_path or route_path.startswith(mount_path + "/")
 
 
 def _package_exists(package_name: str) -> bool:

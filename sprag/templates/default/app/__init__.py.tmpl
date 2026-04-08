@@ -1,4 +1,7 @@
-from sprag import App
+from sprag import App, shell
 
 
-app = App(routes="app.routes")
+app_shell = shell(template="app/shell.html", css=["app/shell.css"])
+
+
+app = App(routes="app.routes", shell=app_shell)

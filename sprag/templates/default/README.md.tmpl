@@ -35,7 +35,8 @@ pip install -e /path/to/SPRAG
 {{project_name}}/
 ├── app/
 │   ├── __init__.py        # App() — registers routes
-│   ├── _shared.py         # shell() layout helper + theme CSS
+│   ├── shell.html         # app shell chrome
+│   ├── shell.css          # app shell and base styles
 │   ├── stores.py          # cross-route shared state
 │   └── routes/
 │       ├── home/          # /         landing page (document mode)
@@ -55,6 +56,11 @@ Each route directory follows the same six-file convention:
 | `modules.py`   | browser  | `Module` subclasses — DOM events, state       |
 | `page.py`      | server   | `page(...)` declaration tying it all together |
 | `__init__.py`  | server   | makes the route a Python package              |
+
+The app shell is plain HTML and CSS. `app/__init__.py` wires it with
+`sprag.shell(template="app/shell.html", css=["app/shell.css"])`, and
+SPRAG wraps document routes, hybrid routes, and mounts with the same
+shell slot.
 
 ## Two Render Modes
 

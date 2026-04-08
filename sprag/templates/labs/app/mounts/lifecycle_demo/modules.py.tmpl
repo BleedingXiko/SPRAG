@@ -1,13 +1,13 @@
 from sprag import Module, dom
 
 from .web import (
-    {{class_name}}HomeView,
-    {{class_name}}ReportsView,
-    {{class_name}}SettingsView,
+    LifecycleActivityView,
+    LifecycleOverviewView,
+    LifecycleSettingsView,
 )
 
 
-class {{class_name}}Module(Module):
+class LifecycleDemoModule(Module):
     def __init__(self, screen=None, state=None):
         super().__init__(screen=screen, state=state or {})
         self._active_view = None
@@ -17,9 +17,12 @@ class {{class_name}}Module(Module):
     def on_start(self):
         self._switches = self.state.get("switches", 0)
         self.delegate(self.element, "click", "[data-view]", self.on_view)
-        self.show_view(self.state.get("view", "home"))
+        self.show_view(self.state.get("view", "overview"))
 
     def on_stop(self):
+        owner_status = self.component.element.query_selector("[data-sprag-owner-status]")
+        if owner_status:
+            owner_status.text_content = "stopping"
         self.teardown_view()
 
     def on_view(self, event, target):
@@ -39,18 +42,19 @@ class {{class_name}}Module(Module):
         if self._active_view_name is not None:
             self._switches += 1
 
+        previous = self._active_view_name or "none"
         next_view = view
-        if next_view == "reports":
-            self._active_view = {{class_name}}ReportsView({"switches": self._switches})
+        if next_view == "activity":
+            self._active_view = LifecycleActivityView({"switches": self._switches})
         elif next_view == "settings":
-            self._active_view = {{class_name}}SettingsView({"switches": self._switches})
+            self._active_view = LifecycleSettingsView({"switches": self._switches})
         else:
-            next_view = "home"
-            self._active_view = {{class_name}}HomeView({"switches": self._switches})
+            next_view = "overview"
+            self._active_view = LifecycleOverviewView({"switches": self._switches})
 
         self._active_view_name = next_view
         self._active_view.mount(slot)
-        self.update_shell(next_view)
+        self.update_shell(next_view, previous)
 
     def teardown_view(self):
         if self._active_view:
@@ -62,7 +66,7 @@ class {{class_name}}Module(Module):
             if slot:
                 dom.clear(slot)
 
-    def update_shell(self, view):
+    def update_shell(self, view, previous):
         for button in self.component.element.query_selector_all("[data-view]"):
             is_active = button.dataset.view == view
             button.class_list.toggle("is-active", is_active)
@@ -70,4 +74,16 @@ class {{class_name}}Module(Module):
 
         status = self.component.element.query_selector("[data-sprag-view-status]")
         if status:
-            status.text_content = "Mounted view: " + view
+            status.text_content = view
+
+        count = self.component.element.query_selector("[data-sprag-switch-count]")
+        if count:
+            count.text_content = str(self._switches)
+
+        log = self.component.element.query_selector("[data-sprag-lifecycle-log]")
+        if log:
+            log.text_content = (
+                "unmount " + previous + "\n"
+                + "mount " + view + "\n"
+                + "root Module still running"
+            )

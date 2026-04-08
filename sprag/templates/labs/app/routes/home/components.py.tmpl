@@ -84,6 +84,16 @@ class Landing(Component):
                     href="/animation-demo",
                     class_="card",
                 ),
+                ui.a(
+                    ui.h3("Lifecycle Mount →"),
+                    ui.p(
+                        "A client app mount with one root Module, arbitrary "
+                        "DOM slots, and explicit child view teardown."
+                    ),
+                    ui.span("mount · Module lifecycle", class_="tag"),
+                    href="/lifecycle-mount",
+                    class_="card",
+                ),
                 class_="cards",
             ),
         )

@@ -19,14 +19,13 @@ class AnimationDemoModule(Module):
     def on_replay(self, event):
         event.prevent_default()
         card = self.refs.card
+        dom.animate_out(card, "is-visible").then(lambda: dom.animate_in(card, "is-visible"))
+        self.timeout(self.finish_replay, 0.45)
+
+    def finish_replay(self):
         self.set_state(
             {
                 "plays": self.state["plays"] + 1,
-                "message": "Replaying animation...",
+                "message": "Animation replayed.",
             }
         )
-        dom.animate_out(card, "is-visible").then(lambda: dom.animate_in(card, "is-visible"))
-        self.timeout(self.finish_replay, 0.35)
-
-    def finish_replay(self):
-        self.set_state({"message": "Animation replayed."})

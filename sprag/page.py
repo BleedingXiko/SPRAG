@@ -12,6 +12,7 @@ class Page:
     mode: str = "hybrid"
     name: Optional[str] = None
     metadata: dict = field(default_factory=dict)
+    shell: object = None
 
     def __post_init__(self):
         if not self.path.startswith("/"):
@@ -22,7 +23,7 @@ class Page:
             )
 
 
-def page(*, path, controller, screen, mode="hybrid", name=None, metadata=None):
+def page(*, path, controller, screen, mode="hybrid", name=None, metadata=None, shell=None):
     """Create a route page manifest."""
     return Page(
         path=path,
@@ -31,4 +32,5 @@ def page(*, path, controller, screen, mode="hybrid", name=None, metadata=None):
         mode=mode,
         name=name,
         metadata=metadata or {},
+        shell=shell,
     )

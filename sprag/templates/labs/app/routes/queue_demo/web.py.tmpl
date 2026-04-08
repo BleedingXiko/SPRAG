@@ -1,7 +1,5 @@
 from sprag import Screen, hydrate
 
-from app._shared import shell
-
 from .components import QueueCard
 from .modules import QueueDemoModule
 
@@ -18,6 +16,4 @@ class QueueDemoScreen(Screen):
                 "last_job": data["last_job"],
             }
         )
-        return shell(
-            hydrate(QueueCard, module=queue),
-        )
+        return hydrate(QueueCard, module=queue)

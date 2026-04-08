@@ -9,6 +9,10 @@ scaffolds + builds + renders cleanly proves the primitive still
 works end-to-end. Adding a new entry is the easiest way to stress
 a specific slice of the framework.
 
+The shared app chrome lives in `app/shell.html` and `app/shell.css`.
+Individual routes and mounts can attach their own shell CSS without
+copying the app frame into browser Components.
+
 ## Running
 
 ```bash
@@ -28,6 +32,11 @@ Open <http://127.0.0.1:8000/>.
 | `/counter`         | hybrid   | `@action` + `Module` + `Component` loop    |
 | `/virtual-scroll`  | hybrid   | `@virtual_scroll` on a large list          |
 | `/store-demo`      | hybrid   | `store(...)` as cross-runtime shared state |
+| `/queue-demo`      | hybrid   | `QueueService` background work + SSE bus   |
+| `/watcher-demo`    | hybrid   | `Watcher` service broadcasts               |
+| `/operation-demo`  | hybrid   | `Operation.run` success and failure paths  |
+| `/animation-demo`  | hybrid   | `@animate` + `sprag.dom` animation helpers |
+| `/lifecycle-mount` | mount    | SPA-style workspace mount + child teardown |
 
-More entries (queue, watcher, operation, socket, model, animation)
-are planned follow-ups — each is a forcing function for one gap.
+More entries (socket and model bridges) are planned follow-ups — each
+is a forcing function for one gap.

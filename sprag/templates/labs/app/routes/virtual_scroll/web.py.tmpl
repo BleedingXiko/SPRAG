@@ -1,7 +1,5 @@
 from sprag import Screen, hydrate, ui
 
-from app._shared import shell
-
 from .components import StreamingLog
 
 
@@ -9,7 +7,7 @@ class VirtualScrollScreen(Screen):
     modules = []
 
     def render(self, data):
-        return shell(
+        return ui.div(
             ui.section(
                 ui.span("@virtual_scroll", class_="badge"),
                 ui.h1("Virtual Scroll"),

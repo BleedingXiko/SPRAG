@@ -1,7 +1,5 @@
 from sprag import Screen, hydrate, ssr, ui
 
-from app._shared import shell
-
 from .components import CounterCard
 from .modules import CounterModule
 
@@ -11,7 +9,7 @@ class CounterScreen(Screen):
 
     def render(self, data):
         counter = self.module(CounterModule)
-        return shell(
+        return ui.div(
             ui.section(
                 ui.span("HYBRID MODE", class_="badge"),
                 ui.h1("Counter"),

@@ -18,10 +18,13 @@ class App:
     routes: str = "app.routes"
     mounts_package: str = "app.mounts"
     project_root: Optional[str] = None
+    shell: object = None
 
     def __post_init__(self):
         self._pages = None
         self._mounts = None
+        self._controllers = {}
+        self._controller_registry_keys = []
         self._booted = False
 
     def pages(self):
@@ -37,27 +40,80 @@ class App:
             self._pages, self._mounts = discover_surfaces(self.routes, self.mounts_package)
 
     def invalidate_pages(self):
+        self._shutdown_controllers()
         self._pages = None
         self._mounts = None
 
     def boot(self):
-        """Provide services into Specter's registry and start them."""
+        """Provide services/controllers into Specter's registry and start them."""
         if self._booted:
             return
+        self._ensure_surfaces()
         for svc in self.services:
             registry.provide(svc.name, svc, owner=None)
             if not svc.running:
                 svc.start()
+        self._ensure_controllers()
         self._booted = True
 
     def shutdown(self):
-        """Stop services in reverse order and clear registry entries."""
+        """Stop controllers/services in reverse order and clear registry entries."""
+        self._shutdown_controllers()
         for svc in reversed(self.services):
             if svc.running:
                 svc.stop()
             if registry.has(svc.name):
                 registry.unregister(svc.name)
         self._booted = False
+
+    def controller_for_page(self, page):
+        """Return the lifecycle-owned controller instance for a page."""
+        return self._ensure_controller(("page", page.path), page.controller)
+
+    def controller_for_mount(self, mount):
+        """Return the lifecycle-owned boot controller instance for a mount."""
+        if mount.boot is None:
+            return None
+        return self._ensure_controller(("mount", mount.path), mount.boot)
+
+    def _ensure_controllers(self):
+        for _module_name, page in self._pages or []:
+            self.controller_for_page(page)
+        for _module_name, mount in self._mounts or []:
+            if mount.boot is not None:
+                self.controller_for_mount(mount)
+
+    def _ensure_controller(self, key, controller_cls):
+        controller = self._controllers.get(key)
+        if controller is not None:
+            return controller
+
+        controller = controller_cls()
+        if hasattr(controller, "bind_app"):
+            controller.bind_app(self)
+        else:
+            controller.app = self
+
+        registry_key = _controller_registry_key(key, controller)
+        registry.provide(registry_key, controller, owner=controller, replace=True)
+        self._controller_registry_keys.append(registry_key)
+
+        if not controller.running:
+            controller.start()
+
+        self._controllers[key] = controller
+        return controller
+
+    def _shutdown_controllers(self):
+        for controller in reversed(list(self._controllers.values())):
+            if getattr(controller, "running", False):
+                controller.stop()
+        self._controllers.clear()
+
+        for key in reversed(self._controller_registry_keys):
+            if registry.has(key):
+                registry.unregister(key)
+        self._controller_registry_keys.clear()
 
     def build(self, output_dir=".sprag"):
         output_path = Path(output_dir)
@@ -80,3 +136,9 @@ class App:
         self.boot()
         self.build(build_dir)
         serve_sprag_app(self, build_dir, host=host, port=port, max_workers=max_workers)
+
+
+def _controller_registry_key(key, controller):
+    kind, path = key
+    normalized = path.strip("/").replace("/", ".") or "root"
+    return f"sprag.controller.{kind}.{normalized}.{controller.__class__.__name__}"

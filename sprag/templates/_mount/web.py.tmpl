@@ -3,26 +3,86 @@ from sprag import Component, ui
 
 class {{class_name}}App(Component):
     def render(self, props=None):
-        view = self.state["view"]
-        clicks = self.state["clicks"]
-        message = self.state["message"]
+        title = self.state.get("title", "{{class_name}}")
+        view = self.state.get("view", "home")
+        message = self.state.get("message", "{{class_name}} is running client-side.")
 
         return ui.main(
-            ui.h1("{{class_name}}"),
+            ui.h1(title),
             ui.p(message),
             ui.nav(
-                ui.button("Home", type="button", data_view="home"),
-                ui.button("Reports", type="button", data_view="reports"),
-                ui.button("Settings", type="button", data_view="settings"),
+                ui.button(
+                    "Home",
+                    type="button",
+                    data_view="home",
+                    class_=(
+                        "{{var_name}}-tab is-active"
+                        if view == "home"
+                        else "{{var_name}}-tab"
+                    ),
+                    aria_selected=(view == "home"),
+                ),
+                ui.button(
+                    "Reports",
+                    type="button",
+                    data_view="reports",
+                    class_=(
+                        "{{var_name}}-tab is-active"
+                        if view == "reports"
+                        else "{{var_name}}-tab"
+                    ),
+                    aria_selected=(view == "reports"),
+                ),
+                ui.button(
+                    "Settings",
+                    type="button",
+                    data_view="settings",
+                    class_=(
+                        "{{var_name}}-tab is-active"
+                        if view == "settings"
+                        else "{{var_name}}-tab"
+                    ),
+                    aria_selected=(view == "settings"),
+                ),
                 class_="{{var_name}}-tabs",
             ),
             ui.section(
-                ui.h2(view),
-                ui.p(
-                    "This view is owned by the browser Module. Switch count: ",
-                    str(clicks),
-                ),
-                class_="{{var_name}}-panel",
+                data_sprag_view_slot="true",
+                class_="{{var_name}}-view-slot",
             ),
+            ui.p("Mounted view: ", ui.strong(view), data_sprag_view_status="true"),
             class_="{{var_name}}-app",
+        )
+
+
+class {{class_name}}HomeView(Component):
+    def render(self, props=None):
+        switches = self.state.get("switches", 0)
+        return ui.article(
+            ui.h2("Home"),
+            ui.p("This child view is mounted into arbitrary DOM by the root Module."),
+            ui.p("View switches since boot: ", str(switches)),
+            class_="{{var_name}}-panel",
+        )
+
+
+class {{class_name}}ReportsView(Component):
+    def render(self, props=None):
+        switches = self.state.get("switches", 0)
+        return ui.article(
+            ui.h2("Reports"),
+            ui.p("Reports owns its own Component lifecycle and DOM subtree."),
+            ui.p("View switches since boot: ", str(switches)),
+            class_="{{var_name}}-panel",
+        )
+
+
+class {{class_name}}SettingsView(Component):
+    def render(self, props=None):
+        switches = self.state.get("switches", 0)
+        return ui.article(
+            ui.h2("Settings"),
+            ui.p("Leaving this view unmounts it before the next child is mounted."),
+            ui.p("View switches since boot: ", str(switches)),
+            class_="{{var_name}}-panel",
         )

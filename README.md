@@ -4,7 +4,7 @@
 
 SPRAG is a Python web framework that mirrors a server runtime ([Specter](#under-the-hood)) and a browser runtime ([Ragot](#under-the-hood)) into a single authoring surface. You write controllers, components, browser modules, services, and shared stores in plain Python. SPRAG compiles the browser-facing parts to JavaScript at build time, leaves the server parts as Specter, and ships an SSR-then-hydrate boot path that needs zero glue from you.
 
-There is no template language, no separate JS package to install, and no client/server context switch. The same `self.set_state`, `self.listen`, `self.timeout`, `self.subscribe` calls work on either side of the wire.
+There is no app template language for your UI, no separate JS package to install, and no client/server context switch. You write UI as Python components, while shared document chrome can live in a plain HTML/CSS shell with one SPRAG slot. The same `self.set_state`, `self.listen`, `self.timeout`, `self.subscribe` calls work on either side of the wire.
 
 > **Status: pre-alpha.** The end-to-end shape works today — `sprag new` produces projects that build, dev-serve, dispatch typed actions, hydrate modules/components, hydrate stores, compose shared browser classes, serve client app mounts, and bridge bus events to the browser over SSE. The surface is still moving and the public API is not yet pinned.
 
@@ -118,7 +118,7 @@ sprag dev --port 8000
 
 Open <http://127.0.0.1:8000/>. Edit anything under `app/`, save — the dev server rebuilds and serves the new version.
 
-The default scaffold ships with three real routes (a landing page, an interactive counter, an about page), a shared layout shell, a cross-route store, and a polished CSS theme. For a smaller starting point use `sprag new myapp --template=bare`; for a broad feature canary use `sprag new labs-demo --template=labs`.
+The default scaffold ships with three real routes (a landing page, an interactive counter, an about page), a file-backed app shell, a cross-route store, and a polished CSS theme. For a smaller starting point use `sprag new myapp --template=bare`; for a broad feature canary use `sprag new labs-demo --template=labs`.
 
 When you're ready to ship:
 
@@ -174,6 +174,67 @@ sprag add mount admin/tools
 Mounts are exact app entries for now. `/dashboard` serves the mount; `/dashboard/deep` is not implicitly routed unless you add a real server surface later. This keeps mount behavior honest: SPRAG serves the app entry, Ragot owns the client app.
 
 You can mix document routes, hybrid routes, and mounts in one project.
+
+### Shells and scoped styles
+
+SPRAG shells are plain HTML and CSS wired into the surface system. The app shell owns shared document chrome and base styles:
+
+```python
+# app/__init__.py
+from sprag import App, shell
+
+
+app_shell = shell(template="app/shell.html", css=["app/shell.css"])
+
+
+app = App(routes="app.routes", shell=app_shell)
+```
+
+```html
+<!-- app/shell.html -->
+<div class="shell">
+  <header class="nav">
+    <a href="/">My App</a>
+    <a href="/counter">Counter</a>
+  </header>
+
+  <main class="page">
+    {{ sprag_slot }}
+  </main>
+</div>
+```
+
+`{{ sprag_slot }}` is where SPRAG inserts the current route body or the mount root. App-wide CSS belongs in `app/shell.css`; route and mount CSS can stay scoped to the surface that needs it:
+
+```python
+# app/routes/counter/page.py
+from sprag import page, shell
+
+
+counter = page(
+    path="/counter",
+    controller=CounterController,
+    screen=CounterScreen,
+    mode="hybrid",
+    shell=shell(css=["app/routes/counter/counter.css"]),
+)
+```
+
+```python
+# app/mounts/dashboard/mount.py
+from sprag import mount, shell
+
+
+dashboard = mount(
+    path="/dashboard",
+    component=DashboardApp,
+    module=DashboardModule,
+    boot=DashboardBoot,
+    shell=shell(css=["app/mounts/dashboard/dashboard.css"]),
+)
+```
+
+SPRAG combines the app shell with the surface shell, so document routes, hybrid routes, and mounts all share the same frame without copying layout into browser `Component` code.
 
 ### A route in five or six files
 
@@ -321,9 +382,9 @@ The server's current snapshot is shipped in the document as `window.__SPRAG_STOR
 
 SPRAG ships more than one scaffold:
 
-- `default` — the normal starter app with home, counter, about, shared layout, and a cross-route store.
+- `default` — the normal starter app with home, counter, about, a file-backed shell, and a cross-route store.
 - `bare` — only the minimal package skeleton. Use this when you want to design the app shape yourself.
-- `labs` — a runnable framework canary with routes for actions, stores, queues, watchers, operations, animation, and virtual scrolling.
+- `labs` — a runnable framework canary with routes and mounts for actions, stores, queues, watchers, operations, animation, virtual scrolling, and lifecycle teardown.
 
 Local exploratory apps should live under `.sandbox/` while developing SPRAG itself. Template-generated sandboxes can be deleted and regenerated; hand-built sandboxes like a mini app are fine too, but they are test artifacts, not framework source.
 
@@ -388,8 +449,9 @@ A scaffolded SPRAG app:
 ```
 myapp/
 ├── app/
-│   ├── __init__.py      # exposes `app = App(routes="app.routes")`
-│   ├── _shared.py       # shell() layout helper + theme CSS
+│   ├── __init__.py      # exposes `app = App(routes="app.routes", shell=...)`
+│   ├── shell.html       # shared document chrome with {{ sprag_slot }}
+│   ├── shell.css        # app shell and base styles
 │   ├── stores.py        # cross-route store declarations
 │   ├── mounts/          # optional client app mounts
 │   └── routes/
@@ -421,14 +483,14 @@ The end-to-end shape works today. The current focus is **deepening the integrati
 
 What's landing next, in priority order:
 
-1. **First-class shell primitive.** Today routes and mounts both get an HTML document wrapper, but the wrapper itself is still generated internally or hand-rolled in shared helpers. Shell should become a SPRAG primitive for document HTML, shared CSS, SSR wrappers, and mount roots.
+1. **Shell follow-through.** The first-class HTML/CSS shell primitive is in place; next is polishing asset handling around it, including linked CSS output and tighter per-surface head metadata.
 2. **Specter symmetry pass round 2.** The `Service` ↔ `Module` cross-runtime API is in place. Next: making sure every Specter primitive (`QueueService`, `Watcher`, `Operation`, `SocketIngress`) is reachable through the same `from sprag import ...` surface and doesn't require users to know about Specter at all.
 3. **Model bridge.** Specter has a path-style `Model`; Ragot has a path-style state API. A `model("name")` factory that mirrors them the same way `store("name")` does today.
 4. **Diagnostic CLI.** `sprag doctor` (project health), `sprag inspect <route>` (compiled-JS introspection), `sprag generate component|store|service` (targeted scaffolds).
 5. **Hot reload across both runtimes.** Today the dev server rebuilds on change; the next step is preserving browser state across rebuilds where possible.
 6. **Packaging polish.** Versioning, PyPI release, runtime version pinning between SPRAG, Specter, and the vendored Ragot bundle.
 
-What is **not** on the roadmap, by design: a template language, a CSS-in-JS solution, a virtual DOM, a router DSL, or a build system separate from `sprag build`. SPRAG's job is to make Python the only thing you need.
+What is **not** on the roadmap, by design: a general-purpose app template language, a CSS-in-JS solution, a virtual DOM, a router DSL, or a build system separate from `sprag build`. SPRAG's job is to make Python own behavior and UI logic while plain HTML/CSS owns document shell chrome.
 
 ---
 

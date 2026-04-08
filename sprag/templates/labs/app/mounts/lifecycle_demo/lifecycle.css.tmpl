@@ -1,0 +1,99 @@
+.lifecycle-demo {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 220px;
+  gap: 1rem;
+  align-items: stretch;
+}
+.lifecycle-sidebar,
+.lifecycle-stage,
+.lifecycle-inspector {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.lifecycle-sidebar {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.lifecycle-tab {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.7rem 0.8rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.lifecycle-tab:hover,
+.lifecycle-tab.is-active {
+  color: var(--fg);
+  background: var(--accent-soft);
+  border-color: rgba(124, 92, 255, 0.35);
+}
+.lifecycle-stage { min-height: 360px; overflow: hidden; }
+.lifecycle-slot { min-height: 100%; }
+.lifecycle-view { min-height: 360px; padding: 2rem; }
+.lifecycle-view h2,
+.lifecycle-inspector h2 { margin: 0 0 0.75rem; }
+.lifecycle-view p,
+.lifecycle-inspector p { color: var(--muted); line-height: 1.5; }
+.lifecycle-list {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.lifecycle-list li {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #10131a;
+}
+.lifecycle-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+.lifecycle-pill {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.lifecycle-inspector { padding: 1.25rem; }
+.lifecycle-metric {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.lifecycle-metric strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.lifecycle-log {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  min-height: 4.25rem;
+  border-radius: 8px;
+  background: #10131a;
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+@media (max-width: 860px) {
+  .lifecycle-demo { grid-template-columns: 1fr; }
+  .lifecycle-sidebar { flex-direction: row; flex-wrap: wrap; }
+  .lifecycle-tab { width: auto; }
+}

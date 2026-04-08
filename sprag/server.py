@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from specter import Controller as SPECTERController
 from specter import Field, Outcome, Schema
@@ -32,6 +34,23 @@ from specter import ManagedProcess, Watcher, WatcherError, start_process
 
 # -- Orchestration -----------------------------------------------------------
 from specter import ServiceManager, boot
+
+
+_UNSET = object()
+_current_request = ContextVar("sprag_current_request", default=_UNSET)
+_current_app = ContextVar("sprag_current_app", default=_UNSET)
+
+
+@contextmanager
+def controller_context(*, request=None, app=None):
+    """Expose per-request state to lifecycle-owned controllers safely."""
+    request_token = _current_request.set(request)
+    app_token = _current_app.set(app)
+    try:
+        yield
+    finally:
+        _current_app.reset(app_token)
+        _current_request.reset(request_token)
 
 
 def _server_only(name):
@@ -150,9 +169,43 @@ class Controller(SPECTERController):
     route = None
 
     def __init__(self, **kwargs):
+        if "name" not in kwargs:
+            kwargs["name"] = getattr(self.__class__, "name", self.__class__.__name__)
         super().__init__(**kwargs)
-        self.request = None
-        self.app = None
+        self._sprag_request_override = None
+        self._sprag_app = None
+
+    @property
+    def request(self):
+        """Current request scoped to this load/action call."""
+        request = _current_request.get()
+        if request is not _UNSET:
+            return request
+        return self._sprag_request_override
+
+    @request.setter
+    def request(self, value):
+        # Compatibility for manually instantiated controllers. The SPRAG
+        # runtime uses ``controller_context`` so lifecycle-owned controllers
+        # do not leak request state between concurrent requests.
+        self._sprag_request_override = value
+
+    @property
+    def app(self):
+        """Owning SPRAG app, scoped to the current call when provided."""
+        app = _current_app.get()
+        if app is not _UNSET:
+            return app
+        return self._sprag_app
+
+    @app.setter
+    def app(self, value):
+        self._sprag_app = value
+
+    def bind_app(self, app):
+        """Attach the owning SPRAG app without starting a request scope."""
+        self._sprag_app = app
+        return self
 
     @classmethod
     def sprag_actions(cls):
@@ -189,7 +242,8 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
     if not action_name:
         raise ActionDispatchError("Missing SPRAG action name.", status_code=400)
 
-    controller_class = _resolve_surface_controller(pages, mounts or [], route_path)
+    controller = _resolve_surface_controller(pages, mounts or [], route_path, app=app)
+    controller_class = controller.__class__
     actions = controller_class.sprag_actions()
     action = actions.get(action_name)
     if action is None:
@@ -198,9 +252,6 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
             status_code=404,
         )
 
-    controller = controller_class()
-    controller.request = request
-    controller.app = app
     bound_action = getattr(controller, action_name)
 
     meta = getattr(action, "_sprag_action_meta", None) or {}
@@ -223,7 +274,8 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
         ) from exc
 
     try:
-        result = bound_action(*args, **kwargs)
+        with controller_context(request=request, app=app):
+            result = bound_action(*args, **kwargs)
     except ActionDispatchError:
         raise
     except Exception as exc:
@@ -237,13 +289,17 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
     return Outcome.success(result)
 
 
-def _resolve_surface_controller(pages, mounts, route_path):
+def _resolve_surface_controller(pages, mounts, route_path, *, app=None):
     for _module_name, page in pages:
         if page.path == route_path:
-            return page.controller
+            if app is not None and hasattr(app, "controller_for_page"):
+                return app.controller_for_page(page)
+            return page.controller()
     for _module_name, mount in mounts:
         if mount.path == route_path and mount.boot is not None:
-            return mount.boot
+            if app is not None and hasattr(app, "controller_for_mount"):
+                return app.controller_for_mount(mount)
+            return mount.boot()
     raise ActionDispatchError(f"Unknown route {route_path!r}.", status_code=404)
 
 

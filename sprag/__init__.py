@@ -8,6 +8,7 @@ from .app import App
 from .mount import Mount, mount
 from .page import Page, page
 from .request import Request
+from .shell import Shell, shell
 from .server import (
     # Core (already exposed)
     Controller,
@@ -72,6 +73,7 @@ __all__ = [
     "Mount",
     "Page",
     "Request",
+    "Shell",
     "action",
     "mount",
     "page",
@@ -108,6 +110,7 @@ __all__ = [
     "json_endpoint",
     "require_fields",
     "route",
+    "shell",
     # Operations
     "Operation",
     "OperationError",

@@ -1,0 +1,11 @@
+from sprag import Controller
+
+
+class LifecycleDemoBoot(Controller):
+    route = "/lifecycle-mount"
+
+    def load(self):
+        return {
+            "view": "overview",
+            "switches": 0,
+        }

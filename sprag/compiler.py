@@ -23,6 +23,7 @@ from .runtime import (
     serializable_hydration,
     store_snapshots,
 )
+from .shell import apply_shell
 from .stores import declared_stores
 
 
@@ -43,6 +44,11 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         build_request = Request(path=page.path, method="BUILD")
         data, data_error = load_controller_data(page, request=build_request, app=app)
         body_html, hydration, render_error = render_screen(page, data)
+        body_html, shell_head = apply_shell(
+            body_html,
+            app=app,
+            surface_shell=getattr(page, "shell", None),
+        )
 
         if data_error:
             build_errors.append({"path": page.path, "stage": "load", "error": data_error})
@@ -68,6 +74,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             hydration=hydration,
             script_path=script_path,
             store_snapshot=store_snapshots(),
+            head_html=shell_head,
         )
         (page_dir / "index.html").write_text(document_html, encoding="utf-8")
         if page.path == "/":
@@ -97,6 +104,11 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         data, data_error = load_mount_data(mt, request=build_request, app=app)
         if data_error:
             build_errors.append({"path": mt.path, "stage": "mount_load", "error": data_error})
+        body_html, shell_head = apply_shell(
+            '<div id="app-root"></div>',
+            app=app,
+            surface_shell=getattr(mt, "shell", None),
+        )
 
         script_path = _relative_web_path(mount_dir, output_dir / "app.js")
         document_html = build_mount_html(
@@ -114,6 +126,8 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             boot_data=data,
             script_path=script_path,
             store_snapshot=store_snapshots(),
+            body_html=body_html,
+            head_html=shell_head,
         )
         (mount_dir / "index.html").write_text(document_html, encoding="utf-8")
         if mt.path == "/":

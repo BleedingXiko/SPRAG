@@ -1,7 +1,5 @@
 from sprag import Screen, hydrate
 
-from app._shared import shell
-
 from .components import WatcherCard
 from .modules import WatcherDemoModule
 
@@ -12,6 +10,4 @@ class WatcherDemoScreen(Screen):
     def render(self, data):
         watcher = self.module(WatcherDemoModule)
         watcher.set_state(data)
-        return shell(
-            hydrate(WatcherCard, module=watcher),
-        )
+        return hydrate(WatcherCard, module=watcher)

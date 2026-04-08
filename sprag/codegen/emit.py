@@ -217,6 +217,61 @@ function createActionClient(currentRoute) {{
 const actionClient = createActionClient(route);
 window.__SPRAG_ACTIONS__ = actionClient;
 
+const spragRoots = [];
+let spragEventSource = null;
+let spragBooted = false;
+
+function provideRuntimeRoot(key, value, owner) {{
+    ragotRegistry.provide(key, value, owner || null, {{ replace: true }});
+    return key;
+}}
+
+function registerRuntimeRoot(root) {{
+    spragRoots.push(root);
+    return root;
+}}
+
+function stopRuntimeRoot(root) {{
+    try {{
+        if (root.module && typeof root.module.stop === 'function') {{
+            root.module.stop();
+        }} else if (root.component && typeof root.component.unmount === 'function') {{
+            root.component.unmount();
+        }}
+    }} catch (error) {{
+        console.warn('[SPRAG] Error while stopping Ragot root', error);
+    }} finally {{
+        for (const key of root.registryKeys || []) {{
+            try {{
+                ragotRegistry.unregister(key);
+            }} catch (error) {{
+                console.warn('[SPRAG] Error while unregistering Ragot root', key, error);
+            }}
+        }}
+    }}
+}}
+
+function teardownSpragRuntime(reason = 'teardown') {{
+    if (!spragBooted && spragRoots.length === 0 && !spragEventSource) return;
+
+    if (spragEventSource) {{
+        spragEventSource.close();
+        if (window.__SPRAG_EVENT_SOURCE__ === spragEventSource) {{
+            window.__SPRAG_EVENT_SOURCE__ = null;
+        }}
+        spragEventSource = null;
+    }}
+
+    while (spragRoots.length > 0) {{
+        stopRuntimeRoot(spragRoots.pop());
+    }}
+
+    spragBooted = false;
+    bus.emit('sprag:teardown', {{ reason }});
+}}
+
+window.__SPRAG_TEARDOWN__ = teardownSpragRuntime;
+
 function mountHydrationEntry(entry) {{
     const target = document.querySelector(`[data-sprag-hydrate-id="${{entry.id}}"]`);
     if (!target) return;
@@ -261,11 +316,26 @@ function mountHydrationEntry(entry) {{
             sync: syncFn,
         }});
         module.start();
-        ragotRegistry.provide(entry.module + ':' + entry.id, module);
+        const moduleKey = provideRuntimeRoot(entry.module + ':' + entry.id, module, module);
+        const componentKey = provideRuntimeRoot(entry.component + ':' + entry.id, component, module);
+        registerRuntimeRoot({{
+            type: 'hydration',
+            id: entry.id,
+            module,
+            component,
+            registryKeys: [moduleKey, componentKey],
+        }});
     }} else {{
         component.mount(target);
+        const componentKey = provideRuntimeRoot(entry.component + ':' + entry.id, component, component);
+        registerRuntimeRoot({{
+            type: 'hydration',
+            id: entry.id,
+            module: null,
+            component,
+            registryKeys: [componentKey],
+        }});
     }}
-    ragotRegistry.provide(entry.component + ':' + entry.id, component);
 }}
 
 function mountClientApp(entry) {{
@@ -301,11 +371,26 @@ function mountClientApp(entry) {{
             sync: syncFn,
         }});
         module.start();
-        ragotRegistry.provide(entry.module + ':' + entry.path, module);
+        const moduleKey = provideRuntimeRoot(entry.module + ':' + entry.path, module, module);
+        const componentKey = provideRuntimeRoot(entry.component + ':' + entry.path, component, module);
+        registerRuntimeRoot({{
+            type: 'mount',
+            path: entry.path,
+            module,
+            component,
+            registryKeys: [moduleKey, componentKey],
+        }});
     }} else {{
         component.mount(target);
+        const componentKey = provideRuntimeRoot(entry.component + ':' + entry.path, component, component);
+        registerRuntimeRoot({{
+            type: 'mount',
+            path: entry.path,
+            module: null,
+            component,
+            registryKeys: [componentKey],
+        }});
     }}
-    ragotRegistry.provide(entry.component + ':' + entry.path, component);
 }}
 
 function connectBusBridge(route) {{
@@ -324,20 +409,30 @@ function connectBusBridge(route) {{
         bus.emit('server:connection:error');
     }};
     window.__SPRAG_EVENT_SOURCE__ = source;
+    spragEventSource = source;
+    return source;
 }}
 
 function boot() {{
-    // Stores hydrate via the side-effect import of './generated/stores.js'
-    // above — each createStateStore reads window.__SPRAG_STORES__[name] at
-    // module-load time, so by the time boot() runs every store is live.
-    if (mount) {{
-        mountClientApp(mount);
-        connectBusBridge(mount);
-        return;
+    if (spragBooted) return;
+    try {{
+        // Stores hydrate via the side-effect import of './generated/stores.js'
+        // above — each createStateStore reads window.__SPRAG_STORES__[name] at
+        // module-load time, so by the time boot() runs every store is live.
+        if (mount) {{
+            mountClientApp(mount);
+            connectBusBridge(mount);
+            spragBooted = true;
+            return;
+        }}
+        const hydration = window.__SPRAG_HYDRATION__ || [];
+        hydration.forEach(mountHydrationEntry);
+        connectBusBridge(route);
+        spragBooted = true;
+    }} catch (error) {{
+        teardownSpragRuntime('boot-error');
+        throw error;
     }}
-    const hydration = window.__SPRAG_HYDRATION__ || [];
-    hydration.forEach(mountHydrationEntry);
-    connectBusBridge(route);
 }}
 
 if (document.readyState === 'loading') {{
@@ -345,6 +440,13 @@ if (document.readyState === 'loading') {{
 }} else {{
     boot();
 }}
+
+window.addEventListener('pagehide', () => teardownSpragRuntime('pagehide'));
+window.addEventListener('pageshow', (event) => {{
+    if (event.persisted && !spragBooted) {{
+        boot();
+    }}
+}});
 """
 
 

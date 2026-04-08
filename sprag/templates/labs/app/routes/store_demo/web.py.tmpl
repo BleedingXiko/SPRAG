@@ -1,7 +1,5 @@
 from sprag import Screen, hydrate, ui
 
-from app._shared import shell
-
 from .components import StoreCard
 from .modules import StoreDemoModule
 
@@ -15,7 +13,7 @@ class StoreDemoScreen(Screen):
         # the first hydrated paint match. ``set_state`` is a real Python
         # operation on the server side.
         store.set_state({"count": data["count"]})
-        return shell(
+        return ui.div(
             ui.section(
                 ui.span("store()", class_="badge"),
                 ui.h1("Store Demo"),

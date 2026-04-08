@@ -1,7 +1,5 @@
 from sprag import Screen, hydrate
 
-from app._shared import shell
-
 from .components import OperationCard
 from .modules import OperationDemoModule
 
@@ -12,6 +10,4 @@ class OperationDemoScreen(Screen):
     def render(self, data):
         operation = self.module(OperationDemoModule)
         operation.set_state(data)
-        return shell(
-            hydrate(OperationCard, module=operation),
-        )
+        return hydrate(OperationCard, module=operation)

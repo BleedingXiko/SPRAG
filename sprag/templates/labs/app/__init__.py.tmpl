@@ -1,7 +1,10 @@
-from sprag import App
+from sprag import App, shell
 
 from app.services.job_queue import job_queue
 from app.services.pulse import pulse_service
 
 
-app = App(routes="app.routes", services=[job_queue, pulse_service])
+app_shell = shell(template="app/shell.html", css=["app/shell.css"])
+
+
+app = App(routes="app.routes", services=[job_queue, pulse_service], shell=app_shell)

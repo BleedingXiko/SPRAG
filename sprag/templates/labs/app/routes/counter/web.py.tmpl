@@ -1,7 +1,5 @@
 from sprag import Screen, hydrate
 
-from app._shared import shell
-
 from .components import CounterCard
 from .modules import CounterModule
 
@@ -11,6 +9,4 @@ class CounterScreen(Screen):
 
     def render(self, data):
         counter = self.module(CounterModule)
-        return shell(
-            hydrate(CounterCard, module=counter),
-        )
+        return hydrate(CounterCard, module=counter)

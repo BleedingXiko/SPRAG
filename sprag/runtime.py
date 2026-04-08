@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 
 from .render import render_tree
 from .request import Request
+from .server import controller_context
+from .shell import apply_shell
 from .stores import declared_stores
 
 
@@ -39,6 +41,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
     """Render a page through its controller and screen, returning full HTML."""
     data, data_error = load_controller_data(page, request=request, app=app)
     body_html, hydration, render_error = render_screen(page, data)
+    body_html, shell_head = apply_shell(body_html, app=app, surface_shell=getattr(page, "shell", None))
 
     route_slug = page.name or _route_slug(page.path)
     route_actions = sorted(page.controller.sprag_actions().keys())
@@ -60,6 +63,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
         hydration=hydration,
         script_path=script_path,
         store_snapshot=store_snapshots(),
+        head_html=shell_head,
     )
 
     return PageResult(
@@ -89,38 +93,50 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
         "events_endpoint": "/__sprag__/events",
     }
 
+    body_html, shell_head = apply_shell(
+        '<div id="app-root"></div>',
+        app=app,
+        surface_shell=getattr(mount, "shell", None),
+    )
+
     document = build_mount_html(
         title=mount.metadata.get("title") or mount.name or mount.path,
         mount_info=mount_info,
         boot_data=data,
         script_path=script_path,
         store_snapshot=store_snapshots(),
+        body_html=body_html,
+        head_html=shell_head,
     )
 
     return MountResult(html=document, data=data, data_error=data_error)
 
 
 def load_controller_data(page, *, request: Request | None = None, app=None) -> tuple[dict, str | None]:
-    """Instantiate a controller and call load(), returning (data, error)."""
-    controller = page.controller()
-    controller.request = request
-    controller.app = app
+    """Load route data through the lifecycle-owned page controller."""
+    if app is not None and hasattr(app, "controller_for_page"):
+        controller = app.controller_for_page(page)
+    else:
+        controller = page.controller()
     try:
-        data = controller.load()
+        with controller_context(request=request, app=app):
+            data = controller.load()
         return (data if isinstance(data, dict) else {"value": data}), None
     except Exception as exc:
         return {}, f"{exc.__class__.__name__}: {exc}"
 
 
 def load_mount_data(mount, *, request: Request | None = None, app=None) -> tuple[dict, str | None]:
-    """Instantiate a mount boot controller and call load(), returning (data, error)."""
+    """Load boot data through the lifecycle-owned mount controller."""
     if mount.boot is None:
         return {}, None
-    controller = mount.boot()
-    controller.request = request
-    controller.app = app
+    if app is not None and hasattr(app, "controller_for_mount"):
+        controller = app.controller_for_mount(mount)
+    else:
+        controller = mount.boot()
     try:
-        data = controller.load()
+        with controller_context(request=request, app=app):
+            data = controller.load()
         return (data if isinstance(data, dict) else {"value": data}), None
     except Exception as exc:
         return {}, f"{exc.__class__.__name__}: {exc}"
@@ -150,6 +166,7 @@ def build_document_html(
     hydration,
     script_path,
     store_snapshot: dict | None = None,
+    head_html: str = "",
 ):
     """Build a full HTML document for a SPRAG page.
 
@@ -165,6 +182,7 @@ def build_document_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
+  {head_html}
 </head>
 <body>
   <div id="app-root">{body_html}</div>
@@ -187,6 +205,8 @@ def build_mount_html(
     boot_data,
     script_path,
     store_snapshot: dict | None = None,
+    body_html: str | None = None,
+    head_html: str = "",
 ):
     """Build the HTML boot document for a client app mount."""
     snapshot = store_snapshot or {}
@@ -196,9 +216,10 @@ def build_mount_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
+  {head_html}
 </head>
 <body>
-  <div id="app-root"></div>
+  {body_html or '<div id="app-root"></div>'}
   <script>
     window.__SPRAG_MOUNT__ = {json.dumps(mount_info, sort_keys=True)};
     window.__SPRAG_PAGE__ = {json.dumps(mount_info, sort_keys=True)};

@@ -21,5 +21,5 @@ class StoreDemoController(Controller):
 
     @action(schema=Schema("reset", {}))
     def reset(self):
-        lab_tally.set_state({"count": 0})
+        lab_tally.set({"count": 0})
         return {"count": 0}

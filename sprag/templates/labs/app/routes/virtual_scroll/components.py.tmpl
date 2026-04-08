@@ -1,7 +1,7 @@
 from sprag import Component, ui, virtual_scroll
 
 
-@virtual_scroll(chunk=50, max_chunks=5, initial_chunks=2)
+@virtual_scroll(chunk=50, max_chunks=5, initial_chunks=2, root=".vs-outer")
 class StreamingLog(Component):
     """Streaming log: total grows over time, DOM stays bounded.
 
@@ -26,7 +26,11 @@ class StreamingLog(Component):
         # Seed the initial dataset, then stream 50 new rows every 600ms.
         # The interval is registered through Ragot's lifecycle so it's
         # auto-cancelled on unmount.
-        self.set_state({"count": 200})
+        #
+        # Keep the streaming total as an imperative field, not Component
+        # state. Calling set_state() here would re-render the host element
+        # after VirtualScroller mounts and wipe out the scroller's DOM.
+        self._spr_count = 200
         self.interval(self.tick, 0.6)
 
     def tick(self):
@@ -35,12 +39,12 @@ class StreamingLog(Component):
         # reset() nudges that cycle to happen now instead of on the
         # next intersection event, so freshly-streamed rows become
         # reachable immediately when the user scrolls down.
-        current = self.state.get("count", 200)
-        self.set_state({"count": current + 50})
+        current = self._spr_count or 200
+        self._spr_count = current + 50
         self._sprVS.reset()
 
     def total(self):
-        return self.state.get("count", 200)
+        return self._spr_count or 200
 
     def chunk(self, i):
         start = i * 50
