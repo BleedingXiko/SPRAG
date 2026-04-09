@@ -1,14 +1,37 @@
 """Cross-route shared state for the labs app.
 
 Every store declared here is one Python object that exists on both
-runtimes: on the server it backs a Specter store, and in the browser
-it compiles to a ``createStateStore`` import from the generated
-``stores.js`` shim.
+runtimes: on the server it backs a Specter ``Model`` (path-style nested
+state with selector memoization), and in the browser it compiles to a
+bridge wrapper around Ragot's ``createStateStore`` imported from the
+generated ``stores.js`` shim. The same Python ``set('user.name', value)``
+or ``patch({...})`` call works on either side.
+
+A SPRAG ``store`` is the **single** state primitive — same role
+``createStateStore`` plays in Ragot Labs, same role ``appStore`` plays in
+GhostHub. Use it for flat state, nested state, selector-narrowed
+subscribes, or memoized derived reads. There is no second "model" API.
 """
 
 from sprag import store
 
 
-# Shared tally used by the /store-demo entry. Bumping the tally from
-# the Controller action is visible anywhere the store is read.
+# Shared tally used by the /store-demo entry. The flat shape exercises
+# the simple end of the surface: ``patch`` for shallow merges and
+# ``update`` for atomic mutators.
 lab_tally = store("lab_tally", initial={"count": 0})
+
+
+# Shared session store used by the /nested-store-demo entry. The nested
+# shape exercises the rest of the surface: ``set('user.name', ...)`` for
+# path-style writes, ``select`` for memoized reads, ``subscribe`` with a
+# selector for narrowed listeners, ``delete`` for path removal, and
+# ``clear`` + ``patch`` for the reset path.
+session = store(
+    "session",
+    initial={
+        "user": {"name": "alice", "email": "alice@example.com"},
+        "prefs": {"theme": "dark", "density": "comfy"},
+        "counter": 0,
+    },
+)

@@ -1,0 +1,59 @@
+from sprag import Controller, Field, Schema, action
+
+from app.stores import session
+
+
+class NestedStoreDemoController(Controller):
+    route = "/nested-store-demo"
+
+    def load(self):
+        # Read the cross-runtime store from the server side. ``select``
+        # exercises the path-style read; the same call compiles to a
+        # memoized createSelector lookup in the browser.
+        return {
+            "name": session.select("user.name"),
+            "email": session.select("user.email"),
+            "prefs": session.get("prefs"),
+            "counter": session.select("counter"),
+            "snapshot": session.snapshot(),
+        }
+
+    @action(schema=Schema("set_name", {"name": Field(str, required=True)}))
+    def set_name(self, name):
+        # ``set(path, value)`` is the canonical path-style write.
+        session.set("user.name", name)
+        return {"name": session.select("user.name")}
+
+    @action(schema=Schema("patch_prefs", {"theme": Field(str, required=True)}))
+    def patch_prefs(self, theme):
+        # ``patch`` is a shallow merge at the *root*, so we go through
+        # update() to mutate a nested sub-tree atomically.
+        session.update(lambda s: {"prefs": {**s["prefs"], "theme": theme}})
+        return {"prefs": session.get("prefs")}
+
+    @action(schema=Schema("bump", {}))
+    def bump(self):
+        # Atomic update — single notification on both runtimes.
+        session.update(lambda s: {**s, "counter": s["counter"] + 1})
+        return {"counter": session.select("counter")}
+
+    @action(schema=Schema("delete_email", {}))
+    def delete_email(self):
+        # Path-style delete. The store still exists; only the leaf goes.
+        session.delete("user.email")
+        return {"snapshot": session.snapshot()}
+
+    @action(schema=Schema("reset", {}))
+    def reset(self):
+        # ``clear`` resets the entire store. Re-seed with the same shape
+        # the labs declaration uses so the route never lands in an empty
+        # state that the UI doesn't know how to render.
+        session.clear()
+        session.patch(
+            {
+                "user": {"name": "alice", "email": "alice@example.com"},
+                "prefs": {"theme": "dark", "density": "comfy"},
+                "counter": 0,
+            }
+        )
+        return {"snapshot": session.snapshot()}

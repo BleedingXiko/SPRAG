@@ -1,0 +1,44 @@
+from sprag import Component, ui
+
+
+class NestedStoreCard(Component):
+    def render(self, props=None):
+        return ui.div(
+            ui.h2("Nested Store Demo"),
+            ui.p(
+                "Path-style nested state. The Controller mutates one "
+                "Python object on the server; the bridged shim mirrors "
+                "the same store on the browser side."
+            ),
+            ui.div(
+                ui.div(
+                    ui.span("user.name", class_="tag"),
+                    ui.div(self.state["name"], class_="demo-display"),
+                ),
+                ui.div(
+                    ui.span("user.email", class_="tag"),
+                    ui.div(
+                        self.state["email"] if self.state["email"] else "(deleted)",
+                        class_="demo-display",
+                    ),
+                ),
+                ui.div(
+                    ui.span("prefs.theme", class_="tag"),
+                    ui.div(self.state["theme"], class_="demo-display"),
+                ),
+                ui.div(
+                    ui.span("counter", class_="tag"),
+                    ui.div(str(self.state["counter"]), class_="demo-display"),
+                ),
+                class_="cards",
+            ),
+            ui.div(
+                ui.button("Rename → bob", type="button", class_="btn", data_role="rename"),
+                ui.button("Theme → light", type="button", class_="btn", data_role="theme"),
+                ui.button("Bump counter", type="button", class_="btn", data_role="bump"),
+                ui.button("Delete email", type="button", class_="btn btn-ghost", data_role="delete"),
+                ui.button("Reset store", type="button", class_="btn btn-ghost", data_role="reset"),
+                style="text-align:center;",
+            ),
+            class_="demo-card",
+        )

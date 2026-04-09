@@ -360,19 +360,25 @@ A single declaration in `app/stores.py`:
 ```python
 from sprag import store
 
-cart = store("cart", initial={"items": [], "total": 0})
+cart = store("cart", initial={"items": {"count": 0}, "total": 0})
 ```
 
-…is one Python object that exists on both runtimes. On the server it backs a Specter store; in any browser-side `Module` or `Component`, the codegen rewrites the import to the generated `stores.js` shim and gives you a Ragot `createStateStore` with the same surface:
+…is one Python object that exists on both runtimes. On the server it backs a Specter `Model`; in any browser-side `Module` or `Component`, the codegen rewrites the import to the generated `stores.js` shim and gives you a bridge wrapper over Ragot `createStateStore` with the same method names:
 
 ```python
 # Either runtime — same Python.
-cart.set({"total": 99})
-cart.update(lambda s: {"items": s["items"] + [item]})
-cart.subscribe(lambda snapshot: print(snapshot))
+cart.set("items.count", 1)
+cart.patch({"total": 99})
+cart.update(lambda s: {**s, "total": s["total"] + 1})
+cart.select("items.count")
+cart.subscribe(
+    lambda items: print(items),
+    selector=lambda s: s["items"],
+    immediate=True,
+)
 ```
 
-The server's current snapshot is shipped in the document as `window.__SPRAG_STORES__` and the generated shim hydrates the browser store from it on first paint, so there is no flash.
+The server's current snapshot is shipped in the document as `window.__SPRAG_STORES__`, and the generated shim hydrates the browser bridge from it on first paint, so there is no flash. `store(...)` is the single SPRAG state primitive: flat state works, nested dot-path state works, selector-based reads work, and you do not need a separate `model(...)` API to graduate into richer app state.
 
 ### Bus events, bridged
 
@@ -384,7 +390,7 @@ SPRAG ships more than one scaffold:
 
 - `default` — the normal starter app with home, counter, about, a file-backed shell, and a cross-route store.
 - `bare` — only the minimal package skeleton. Use this when you want to design the app shape yourself.
-- `labs` — a runnable framework canary with routes and mounts for actions, stores, queues, watchers, operations, animation, virtual scrolling, and lifecycle teardown.
+- `labs` — a runnable framework canary with routes and mounts for actions, flat and nested stores, queues, watchers, operations, animation, virtual scrolling, and lifecycle teardown.
 
 Local exploratory apps should live under `.sandbox/` while developing SPRAG itself. Template-generated sandboxes can be deleted and regenerated; hand-built sandboxes like a mini app are fine too, but they are test artifacts, not framework source.
 
@@ -483,12 +489,12 @@ The end-to-end shape works today. The current focus is **deepening the integrati
 
 What's landing next, in priority order:
 
-1. **Shell follow-through.** The first-class HTML/CSS shell primitive is in place; next is polishing asset handling around it, including linked CSS output and tighter per-surface head metadata.
-2. **Specter symmetry pass round 2.** The `Service` ↔ `Module` cross-runtime API is in place. Next: making sure every Specter primitive (`QueueService`, `Watcher`, `Operation`, `SocketIngress`) is reachable through the same `from sprag import ...` surface and doesn't require users to know about Specter at all.
-3. **Model bridge.** Specter has a path-style `Model`; Ragot has a path-style state API. A `model("name")` factory that mirrors them the same way `store("name")` does today.
+1. **Shell follow-through.** The first-class HTML/CSS shell primitive is in place; next is linked stylesheet output, cleaner per-surface CSS ergonomics, and tighter head/meta composition.
+2. **Dynamic routes + content surfaces.** File-based slugs and catch-all routes for blogs/docs, plus a Markdown/content helper layered on top.
+3. **Registry symmetry + runtime cleanup.** Make Specter and Ragot registry provisioning a first-class contract, and collapse scattered `__SPRAG_*` globals into a cleaner boot payload.
 4. **Diagnostic CLI.** `sprag doctor` (project health), `sprag inspect <route>` (compiled-JS introspection), `sprag generate component|store|service` (targeted scaffolds).
 5. **Hot reload across both runtimes.** Today the dev server rebuilds on change; the next step is preserving browser state across rebuilds where possible.
-6. **Packaging polish.** Versioning, PyPI release, runtime version pinning between SPRAG, Specter, and the vendored Ragot bundle.
+6. **Packaging polish.** Versioning, PyPI release, runtime version pinning, linked shell assets, and later build-owned asset optimisation.
 
 What is **not** on the roadmap, by design: a general-purpose app template language, a CSS-in-JS solution, a virtual DOM, a router DSL, or a build system separate from `sprag build`. SPRAG's job is to make Python own behavior and UI logic while plain HTML/CSS owns document shell chrome.
 

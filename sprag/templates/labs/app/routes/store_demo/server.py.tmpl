@@ -8,18 +8,17 @@ class StoreDemoController(Controller):
 
     def load(self):
         # Read the cross-runtime store from the server side.
-        snapshot = lab_tally.get_state()
-        return {"count": snapshot["count"]}
+        return {"count": lab_tally.get("count")}
 
     @action(schema=Schema("bump", {}))
     def bump(self):
         # Mutate the shared store on the server. A real app could also
         # read this from a /counter route, a Service, or a QueueService
-        # handler — same Python object, same get_state/update API.
-        new_state = lab_tally.update(lambda s: {"count": s["count"] + 1})
-        return {"count": new_state["count"]}
+        # handler — same Python object, same surface.
+        lab_tally.set("count", lab_tally.get("count") + 1)
+        return {"count": lab_tally.get("count")}
 
     @action(schema=Schema("reset", {}))
     def reset(self):
-        lab_tally.set({"count": 0})
+        lab_tally.patch({"count": 0})
         return {"count": 0}

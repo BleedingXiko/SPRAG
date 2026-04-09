@@ -3,30 +3,45 @@
 A store declared via ``store(name, initial=...)`` returns a single object
 that the SPRAG codegen routes to the right runtime:
 
-- **On the server**, it wraps a Specter ``create_store(name, initial)`` and
-  delegates ``set / update / get_state / subscribe`` directly. Other
-  server-side code (Controllers, Workers, Services) uses it as plain Python.
+- **On the server**, it wraps a Specter ``create_model(name, initial)`` —
+  Specter's nested, dot-path state primitive — and delegates the bridged
+  surface directly. (Specter ``Model`` is a strict superset of ``Store``:
+  flat dicts work fine, and the same primitive carries nested ops when
+  the user wants them.) Other server-side code (Controllers, Workers,
+  Services) uses the bridge as plain Python.
 
 - **In a browser-side Module/Component**, the codegen sees the imported
   ``StoreBridge`` reference and emits a JS import from the generated
-  ``stores.js`` shim. Methods translate to Ragot's ``createStateStore``
-  surface:
+  ``stores.js`` shim. The shim wraps Ragot ``createStateStore`` in a
+  matching bridge object so the same method names work on both sides:
 
-      get_state  ->  getState
-      set        ->  patch       (Ragot's merge-patch matches Specter Store.set)
-      update     ->  batch       (atomic mutator under store lock)
-      subscribe  ->  subscribe
+      get        ->  bridge.get        (path-style or full snapshot)
+      set        ->  bridge.set        (dot-path write)
+      patch      ->  bridge.patch      (shallow merge at root)
+      update     ->  bridge.update     (atomic mutator under lock)
+      delete     ->  bridge.delete     (delete a nested path)
+      clear      ->  bridge.clear      (reset to empty)
+      snapshot   ->  bridge.snapshot   (deep snapshot of full state)
+      get_state  ->  bridge.getState   (alias of snapshot for ergonomics)
+      subscribe  ->  bridge.subscribe  (selector + immediate options)
+      select     ->  bridge.select     (memoized derived read)
 
-The bridged surface is the **intersection** of the two runtime APIs:
-shallow merge writes, atomic mutators, snapshot reads, subscribe.
-Path-based access is intentionally not bridged here — Specter ``Store`` is
-flat. A future ``model()`` factory will bridge Specter ``Model`` to
-Ragot's path-style API on the same principles.
+The bridged surface is intentionally Ragot-shaped — the JS shim fills the
+gaps Ragot's store does not expose directly (``delete``, ``clear``,
+``select``-as-memo) so the SPRAG user never has to learn Ragot's method
+names. The translation table used by the codegen is identity for the
+bridge methods; only ``get_state -> getState`` is renamed to match Ragot's
+existing ``getState``.
+
+This is the **single** SPRAG state primitive. Use a store anywhere you'd
+reach for cross-Module reactive state with selector-based memoization —
+the same role ``createStateStore`` plays in Ragot Labs and the same role
+``appStore`` plays in GhostHub.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 
 # Module-level registry of every store declared via ``store(...)``.
@@ -39,25 +54,41 @@ _STORE_BY_NAME: dict[str, "StoreBridge"] = {}
 
 
 # Translation table used by the codegen to map SPRAG store method names to
-# Ragot ``createStateStore`` method names. Kept here, next to the
-# StoreBridge definition, so the bridged surface and its JS counterpart
-# stay in lockstep — adding a method requires updating both ends in one
-# place.
+# their JS bridge counterparts. Kept here, next to the StoreBridge
+# definition, so the bridged surface and its JS shim stay in lockstep —
+# adding a method requires updating both ends in one place. The table is
+# nearly identity by design: the JS shim wraps Ragot ``createStateStore``
+# in a bridge object whose methods match these names exactly so SPRAG users
+# never have to learn Ragot's store method names.
 STORE_METHOD_JS = {
+    "get": "get",
+    "set": "set",
+    "patch": "patch",
+    "update": "update",
+    "delete": "delete",
+    "clear": "clear",
+    "snapshot": "snapshot",
     "get_state": "getState",
-    "set": "patch",
-    "update": "batch",
     "subscribe": "subscribe",
+    "select": "select",
 }
+
+
+# Methods on a StoreBridge whose call sites should compile their kwargs
+# into a trailing JS options object literal rather than positional args.
+# ``subscribe`` is the canonical case: SPRAG (and Specter) take
+# ``subscribe(fn, *, selector=None, immediate=False)`` while the JS
+# bridge takes ``subscribe(listener, options)``.
+STORE_METHODS_OPTIONS_KWARGS = {"subscribe"}
 
 
 class StoreBridge:
     """Server-side handle to a SPRAG store. Browser-side this becomes a JS import.
 
-    Methods on this object delegate to a Specter ``Store`` lazily created on
+    Methods on this object delegate to a Specter ``Model`` lazily created on
     first use. The same method calls, when seen by the codegen inside a
-    Module/Component file, are routed to the corresponding Ragot store
-    method via ``STORE_METHOD_JS``.
+    Module/Component file, are routed to the corresponding bridge method on
+    the JS side via ``STORE_METHOD_JS``.
     """
 
     __slots__ = ("name", "initial", "_impl")
@@ -69,41 +100,80 @@ class StoreBridge:
             raise TypeError("store(initial=...) must be a dict")
         self.name = name
         self.initial = dict(initial or {})
-        self._impl = None  # lazy Specter Store
+        self._impl = None  # lazy Specter Model
 
     # ---- Server-side backing store (lazy) ---------------------------------
 
     def _backing(self):
         if self._impl is None:
-            from specter import create_store
+            from specter import create_model
 
-            self._impl = create_store(self.name, dict(self.initial))
+            self._impl = create_model(self.name, dict(self.initial))
         return self._impl
 
-    # ---- Bridged surface (matches Ragot intersection) ---------------------
+    # ---- Bridged surface --------------------------------------------------
+
+    def get(self, path=None, default=None):
+        """Read a nested path or the full state. Mirrors ``bridge.get`` on the JS side."""
+        if path is None:
+            return self._backing().snapshot()
+        return self._backing().get(path, default)
 
     def get_state(self) -> dict:
-        """Return a snapshot of current state. Mirrors Ragot ``store.getState()``."""
+        """Return a full snapshot. Mirrors Ragot ``store.getState()``."""
         return self._backing().snapshot()
 
-    def set(self, partial: dict) -> dict:
-        """Shallow merge into current state. Mirrors Ragot ``store.patch(partial)``."""
-        store = self._backing()
-        store.set(partial)
-        return store.snapshot()
+    def snapshot(self) -> dict:
+        """Return a deep snapshot of the entire store. Mirrors ``bridge.snapshot``."""
+        return self._backing().snapshot()
+
+    def set(self, path, value):
+        """Set a nested path. Mirrors ``bridge.set(path, value)`` on the JS side."""
+        return self._backing().set(path, value)
+
+    def patch(self, partial: dict) -> dict:
+        """Shallow merge at the root. Mirrors ``bridge.patch(partial)`` on the JS side."""
+        return self._backing().patch(partial)
 
     def update(self, mutator: Callable[[dict], Any]) -> dict:
-        """Atomic mutate under the store lock. Mirrors Ragot ``store.batch(mutator)``."""
-        store = self._backing()
-        store.update(mutator)
-        return store.snapshot()
+        """Atomic mutate under the store lock. Mirrors ``bridge.update(mutator)`` on the JS side."""
+        return self._backing().update(mutator)
 
-    def subscribe(self, fn: Callable, *, immediate: bool = False):
-        """Listen for state changes. Callback receives ``(snapshot)``."""
+    def delete(self, path):
+        """Delete a nested path if present. Mirrors ``bridge.delete(path)`` on the JS side."""
+        return self._backing().delete(path)
+
+    def clear(self) -> None:
+        """Reset the store to an empty dict. Mirrors ``bridge.clear()`` on the JS side."""
+        self._backing().clear()
+
+    def subscribe(
+        self,
+        fn: Callable,
+        *,
+        selector: Optional[Callable] = None,
+        immediate: bool = False,
+    ):
+        """Listen for state changes, optionally narrowed by a selector.
+
+        Mirrors ``bridge.subscribe(listener, {selector, immediate})`` on
+        the JS side. When ``selector`` is provided the callback only fires
+        if the selected slice changes.
+        """
         return self._backing().subscribe(
-            lambda snapshot, store: fn(snapshot),
+            lambda snapshot, _model: fn(snapshot),
+            selector=selector,
             immediate=immediate,
         )
+
+    def select(self, selector: Union[str, Callable], default: Any = None) -> Any:
+        """Read derived state via a path string or selector callable.
+
+        Mirrors ``bridge.select`` on the JS side, which memoizes selector
+        callables via Ragot's ``createSelector`` keyed by function identity
+        so repeated reads with a stable selector reference are cheap.
+        """
+        return self._backing().select(selector, default=default)
 
     def __repr__(self):
         return f"<StoreBridge name={self.name!r}>"
@@ -117,14 +187,21 @@ def store(name: str, *, initial: Optional[dict] = None) -> StoreBridge:
         # app/stores.py
         from sprag import store
 
-        counter = store("counter", initial={"count": 0})
+        session = store("session", initial={
+            "user": {"name": "alice"},
+            "counter": 0,
+        })
 
         # later, in either a Service OR a Module — the same source compiles
-        # to a Specter Store call on the server and a Ragot store call in
+        # to a Specter Model call on the server and a Ragot bridge call in
         # the browser:
-        from app.stores import counter
-        counter.update(lambda s: {"count": s["count"] + 1})
-        counter.subscribe(lambda snapshot: print(snapshot))
+        from app.stores import session
+        session.set("user.name", "bob")
+        session.subscribe(
+            lambda user: print(user),
+            selector=lambda s: s["user"],
+            immediate=True,
+        )
 
     Re-declaring the same name with the same initial state is idempotent
     (returns the existing bridge); re-declaring with different initial state

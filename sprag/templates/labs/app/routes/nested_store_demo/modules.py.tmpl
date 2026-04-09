@@ -1,0 +1,94 @@
+from sprag import Module
+
+from app.stores import session
+
+
+class NestedStoreDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "name": "alice",
+                "email": "alice@example.com",
+                "theme": "dark",
+                "counter": 0,
+            },
+        )
+
+    def on_start(self):
+        # Wire UI delegations.
+        self.delegate(self.element, "click", "[data-role='rename']", self.on_rename)
+        self.delegate(self.element, "click", "[data-role='theme']", self.on_theme)
+        self.delegate(self.element, "click", "[data-role='bump']", self.on_bump)
+        self.delegate(self.element, "click", "[data-role='delete']", self.on_delete)
+        self.delegate(self.element, "click", "[data-role='reset']", self.on_reset)
+
+        # Subscribe to a *narrowed* slice of the session store. The
+        # selector lambda is a stable reference for the lifetime of this
+        # subscription, so the JS bridge memoizes it via createSelector
+        # and only fires the listener when ``user`` actually changes.
+        # ``immediate=True`` syncs the current value at registration.
+        session.subscribe(
+            self.on_session_user,
+            selector=lambda s: s["user"],
+            immediate=True,
+        )
+
+    def on_session_user(self, user):
+        self.set_state(
+            {
+                "name": user["name"],
+                "email": user["email"] if user["email"] else "",
+            }
+        )
+
+    def on_rename(self, event):
+        event.prevent_default()
+        self.call_action("set_name", {"name": "bob"}).then(self.on_name)
+
+    def on_theme(self, event):
+        event.prevent_default()
+        self.call_action("patch_prefs", {"theme": "light"}).then(self.on_prefs)
+
+    def on_bump(self, event):
+        event.prevent_default()
+        # Demonstrate a direct cross-runtime path-style write from the
+        # browser side: the store bridge mirrors the same set() call as
+        # the server controller. The action then re-reads via select().
+        session.set("counter", session.select("counter") + 1)
+        self.call_action("bump", {}).then(self.on_counter)
+
+    def on_delete(self, event):
+        event.prevent_default()
+        self.call_action("delete_email", {}).then(self.on_snapshot)
+
+    def on_reset(self, event):
+        event.prevent_default()
+        self.call_action("reset", {}).then(self.on_snapshot)
+
+    def on_name(self, result):
+        # Server confirmed the rename. Mirror it onto the browser store
+        # so the selector subscription fires and the UI updates.
+        session.set("user.name", result.value["name"])
+
+    def on_prefs(self, result):
+        prefs = result.value["prefs"]
+        session.set("prefs.theme", prefs["theme"])
+        self.set_state({"theme": prefs["theme"]})
+
+    def on_counter(self, result):
+        session.set("counter", result.value["counter"])
+        self.set_state({"counter": result.value["counter"]})
+
+    def on_snapshot(self, result):
+        snapshot = result.value["snapshot"]
+        session.patch(snapshot)
+        self.set_state(
+            {
+                "name": session.select("user.name"),
+                "email": session.get("user.email"),
+                "theme": session.select("prefs.theme"),
+                "counter": session.select("counter"),
+            }
+        )

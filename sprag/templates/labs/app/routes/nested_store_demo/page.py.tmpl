@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import NestedStoreDemoController
+from .web import NestedStoreDemoScreen
+
+
+nested_store_demo = page(
+    path="/nested-store-demo",
+    controller=NestedStoreDemoController,
+    screen=NestedStoreDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Nested Store Demo — SPRAG Labs"},
+)

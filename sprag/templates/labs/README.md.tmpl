@@ -31,12 +31,13 @@ Open <http://127.0.0.1:8000/>.
 | `/`                | document | Landing — links to every entry             |
 | `/counter`         | hybrid   | `@action` + `Module` + `Component` loop    |
 | `/virtual-scroll`  | hybrid   | `@virtual_scroll` on a large list          |
-| `/store-demo`      | hybrid   | `store(...)` as cross-runtime shared state |
-| `/queue-demo`      | hybrid   | `QueueService` background work + SSE bus   |
-| `/watcher-demo`    | hybrid   | `Watcher` service broadcasts               |
-| `/operation-demo`  | hybrid   | `Operation.run` success and failure paths  |
-| `/animation-demo`  | hybrid   | `@animate` + `sprag.dom` animation helpers |
-| `/lifecycle-mount` | mount    | SPA-style workspace mount + child teardown |
+| `/store-demo`        | hybrid | `store(...)` as flat cross-runtime state         |
+| `/nested-store-demo` | hybrid | The same `store(...)` with nested path-style ops |
+| `/queue-demo`        | hybrid | `QueueService` background work + SSE bus         |
+| `/watcher-demo`      | hybrid | `Watcher` service broadcasts                     |
+| `/operation-demo`    | hybrid | `Operation.run` success and failure paths        |
+| `/animation-demo`    | hybrid | `@animate` + `sprag.dom` animation helpers       |
+| `/lifecycle-mount`   | mount  | SPA-style workspace mount + child teardown       |
 
-More entries (socket and model bridges) are planned follow-ups — each
+More entries (the SocketIngress bridge) are planned follow-ups — each
 is a forcing function for one gap.

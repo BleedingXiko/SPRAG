@@ -118,13 +118,95 @@ def _register_browser_class(target: dict[str, type], cls: type, kind: str) -> No
     target[cls.__name__] = cls
 
 
+# JS source for the per-store bridge wrapper. One copy is emitted into
+# ``stores.js`` and shared by every declared store. The wrapper exposes
+# the same method names as ``sprag.stores.StoreBridge`` so the codegen's
+# Python -> JS translation table is (nearly) identity, with the wrapper
+# filling the gaps where Ragot ``createStateStore`` does not provide a
+# direct equivalent (``delete``, ``clear``, ``select``-with-memoization).
+_STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
+    const _store = createStateStore(initial, { name });
+    const _selectorCache = new WeakMap();
+
+    function _normalizePath(path) {
+        if (Array.isArray(path)) return path.map(String).filter(Boolean);
+        if (typeof path === 'string') return path.split('.').map(s => s.trim()).filter(Boolean);
+        return [];
+    }
+
+    return {
+        name,
+        get(path, fallback) {
+            if (path === undefined || path === null) return _store.getState();
+            return _store.get(path, fallback);
+        },
+        getState() {
+            return _store.getState();
+        },
+        snapshot() {
+            // JSON round-trip mirrors Specter Model.snapshot()'s deep-copy
+            // semantics so callers cannot accidentally mutate live state.
+            return JSON.parse(JSON.stringify(_store.getState()));
+        },
+        set(path, value) {
+            return _store.set(path, value);
+        },
+        patch(partial) {
+            return _store.patch(partial);
+        },
+        update(mutator) {
+            return _store.batch(mutator);
+        },
+        delete(path) {
+            const keys = _normalizePath(path);
+            if (keys.length === 0) return false;
+            const finalKey = keys[keys.length - 1];
+            const root = _store.getState();
+            let cursor = root;
+            for (let i = 0; i < keys.length - 1; i += 1) {
+                if (cursor == null) return false;
+                cursor = cursor[keys[i]];
+            }
+            if (cursor == null || !(finalKey in cursor)) return false;
+            delete cursor[finalKey];
+            return true;
+        },
+        clear() {
+            _store.batch((state) => {
+                for (const key of Object.keys(state)) {
+                    delete state[key];
+                }
+            });
+        },
+        subscribe(listener, options) {
+            return _store.subscribe(listener, options || {});
+        },
+        select(selector, fallback) {
+            if (typeof selector === 'string' || Array.isArray(selector)) {
+                return _store.get(selector, fallback);
+            }
+            if (typeof selector !== 'function') return fallback;
+            let memo = _selectorCache.get(selector);
+            if (!memo) {
+                memo = createSelector([(s) => s], (s) => selector(s));
+                _selectorCache.set(selector, memo);
+            }
+            const result = memo(_store.getState());
+            return result === undefined ? fallback : result;
+        },
+        _store
+    };
+}
+"""
+
+
 def emit_stores_shim(output_dir: Path, stores: list[StoreBridge]) -> None:
-    """Emit ``generated/stores.js`` — one ``createStateStore`` per declared store.
+    """Emit ``generated/stores.js`` — one bridge wrapper per declared store.
 
     Each entry hydrates from ``window.__SPRAG_STORES__[name]`` if present
     (the SSR snapshot) or falls back to the declared initial state. The
     shim exports each store under its declared name so generated
-    Module/Component files can ``import { counter } from '../stores.js';``
+    Module/Component files can ``import { session } from '../stores.js';``
     and use it directly.
 
     The shim is always written, even when no stores are declared, so the
@@ -139,16 +221,20 @@ def emit_stores_shim(output_dir: Path, stores: list[StoreBridge]) -> None:
         )
         return
 
-    lines = ["import { createStateStore } from '../vendor/ragot.esm.min.js';", ""]
-    lines.append("const _hydrated = (typeof window !== 'undefined' && window.__SPRAG_STORES__) || {};")
-    lines.append("")
+    lines = [
+        "import { createStateStore, createSelector } from '../vendor/ragot.esm.min.js';",
+        "",
+        _STORES_SHIM_RUNTIME,
+        "const _hydrated = (typeof window !== 'undefined' && window.__SPRAG_STORES__) || {};",
+        "",
+    ]
     for bridge in stores:
         name_js = json.dumps(bridge.name)
         initial_js = json.dumps(bridge.initial, sort_keys=True)
         lines.append(
-            f"export const {bridge.name} = createStateStore("
-            f"_hydrated[{name_js}] !== undefined ? _hydrated[{name_js}] : {initial_js}, "
-            f"{{ name: {name_js} }}"
+            f"export const {bridge.name} = createStoreBridge("
+            f"{name_js}, "
+            f"_hydrated[{name_js}] !== undefined ? _hydrated[{name_js}] : {initial_js}"
             f");"
         )
     lines.append("")
@@ -160,7 +246,7 @@ def build_browser_entry(manifest: dict) -> str:
     return f"""import {{ componentRegistry, moduleRegistry }} from './generated/index.js';
 import {{ bus, ragotRegistry }} from './vendor/ragot.esm.min.js';
 // Side-effect import: ``stores.js`` reads window.__SPRAG_STORES__ at module
-// load and creates one Ragot createStateStore per declared SPRAG store.
+// load and creates one bridge wrapper per declared SPRAG store.
 import './generated/stores.js';
 
 const manifest = {json.dumps(serializable, indent=2, sort_keys=True)};
@@ -416,9 +502,10 @@ function connectBusBridge(route) {{
 function boot() {{
     if (spragBooted) return;
     try {{
-        // Stores hydrate via the side-effect import of './generated/stores.js'
-        // above — each createStateStore reads window.__SPRAG_STORES__[name] at
-        // module-load time, so by the time boot() runs every store is live.
+        // Stores hydrate via the side-effect import of
+        // './generated/stores.js' above — each store bridge reads its
+        // window.__SPRAG_STORES__[name] entry at module-load time, so by
+        // the time boot() runs every store is live.
         if (mount) {{
             mountClientApp(mount);
             connectBusBridge(mount);

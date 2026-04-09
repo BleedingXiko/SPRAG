@@ -11,7 +11,7 @@ import ast
 import json
 
 from ..attrs import normalize_attr_key
-from ..stores import STORE_METHOD_JS
+from ..stores import STORE_METHOD_JS, STORE_METHODS_OPTIONS_KWARGS
 from .mappings import (
     JSCodegenError,
     _DOM_METHOD_MAP,
@@ -190,10 +190,18 @@ def _compile_expr(node, env, method_names=None):
                 ms_js = f"({_compile_expr(sec_arg, env, method_names=method_names)} * 1000)"
             js_method = node.func.attr  # timeout / interval map identity
             return f"this.{js_method}({fn_js}, {ms_js})"
-        # Store method translation: <store>.set/get_state/update/subscribe(...)
-        # The Python local name is mapped to the JS store name via env, and
-        # the SPRAG method name is translated to its Ragot counterpart via
-        # the STORE_METHOD_JS table that ships with sprag/stores.py.
+        # Store method translation. The Python local name is mapped to the
+        # JS bridge name via env, and the SPRAG method name is translated
+        # to its JS counterpart via the STORE_METHOD_JS table (nearly
+        # identity by design — the stores.js shim wraps Ragot
+        # ``createStateStore`` in a bridge object whose method names match
+        # SPRAG's exactly so users never have to learn Ragot's names).
+        #
+        # For methods listed in STORE_METHODS_OPTIONS_KWARGS (currently just
+        # ``subscribe``), keyword args are folded into a trailing JS options
+        # object literal so ``store.subscribe(fn, selector=sel, immediate=True)``
+        # compiles to ``store.subscribe(fn, { selector: sel, immediate: true })``
+        # — matching the JS bridge's ``(listener, options)`` shape.
         if (
             isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
@@ -209,8 +217,22 @@ def _compile_expr(node, env, method_names=None):
                 if _is_bound_method_reference(arg, method_names):
                     compiled = f"{compiled}.bind(this)"
                 args.append(compiled)
-            for keyword in node.keywords:
-                args.append(_compile_expr(keyword.value, env, method_names=method_names))
+            if node.func.attr in STORE_METHODS_OPTIONS_KWARGS:
+                if node.keywords:
+                    options_chunks = []
+                    for keyword in node.keywords:
+                        value_js = _compile_expr(
+                            keyword.value, env, method_names=method_names
+                        )
+                        if _is_bound_method_reference(keyword.value, method_names):
+                            value_js = f"{value_js}.bind(this)"
+                        options_chunks.append(f"{keyword.arg}: {value_js}")
+                    args.append("{ " + ", ".join(options_chunks) + " }")
+            else:
+                for keyword in node.keywords:
+                    args.append(
+                        _compile_expr(keyword.value, env, method_names=method_names)
+                    )
             return f"{store_js_name}.{js_method}({', '.join(args)})"
         if isinstance(node.func, ast.Attribute) and node.func.attr == "get":
             obj = _compile_expr(node.func.value, env, method_names=method_names)

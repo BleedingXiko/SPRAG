@@ -1,0 +1,36 @@
+from sprag import Screen, hydrate, ui
+
+from .components import NestedStoreCard
+from .modules import NestedStoreDemoModule
+
+
+class NestedStoreDemoScreen(Screen):
+    modules = [NestedStoreDemoModule]
+
+    def render(self, data):
+        module = self.module(NestedStoreDemoModule)
+        # Hydrate the module with the current store snapshot so SSR and
+        # the first hydrated paint match. Path-style state lands here as
+        # a flat shape the Component can render directly.
+        module.set_state(
+            {
+                "name": data["name"],
+                "email": data["email"],
+                "theme": data["prefs"]["theme"],
+                "counter": data["counter"],
+            }
+        )
+        return ui.div(
+            ui.section(
+                ui.span("store() · nested", class_="badge"),
+                ui.h1("Nested Store Demo"),
+                ui.p(
+                    "One ``store()`` declared in ``app/stores.py``, mutated "
+                    "by Controller actions through set / patch / update / "
+                    "delete / clear, and read by a Module in the browser via "
+                    "memoized select() and selector-narrowed subscribe()."
+                ),
+                class_="hero",
+            ),
+            hydrate(NestedStoreCard, module=module),
+        )

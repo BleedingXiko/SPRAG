@@ -37,7 +37,7 @@ pip install -e /path/to/SPRAG
 │   ├── __init__.py        # App() — registers routes
 │   ├── shell.html         # app shell chrome
 │   ├── shell.css          # app shell and base styles
-│   ├── stores.py          # cross-route shared state
+│   ├── stores.py          # cross-route shared state (flat or nested)
 │   └── routes/
 │       ├── home/          # /         landing page (document mode)
 │       ├── counter/       # /counter  interactive demo (hybrid mode)
@@ -99,6 +99,6 @@ supabase
 
 1. Open `app/routes/counter/modules.py` — that's the cross-runtime
    authoring model in one screen.
-2. Open `app/stores.py` — that's how you share state across routes.
+2. Open `app/stores.py` — that's how you share state across routes, including nested path-style state when you need it.
 3. Read the SPRAG README in the framework checkout for the full
    reference.

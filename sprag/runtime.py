@@ -172,10 +172,10 @@ def build_document_html(
 
     ``store_snapshot`` is a ``{store_name: snapshot}`` mapping captured at
     render time. It is injected as ``window.__SPRAG_STORES__`` so the
-    generated ``stores.js`` shim can hydrate each Ragot ``createStateStore``
-    from the same state the server just rendered against.
+    generated ``stores.js`` shim can hydrate each store bridge from the
+    same state the server just rendered against.
     """
-    snapshot = store_snapshot or {}
+    store_snap = store_snapshot or {}
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -190,7 +190,7 @@ def build_document_html(
     window.__SPRAG_PAGE__ = {json.dumps(route_info, sort_keys=True)};
     window.__SPRAG_ROUTE_DATA__ = {json.dumps(route_data, sort_keys=True)};
     window.__SPRAG_HYDRATION__ = {json.dumps(serializable_hydration(hydration), sort_keys=True)};
-    window.__SPRAG_STORES__ = {json.dumps(snapshot, sort_keys=True)};
+    window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
   </script>
   <script type="module" src="{script_path}"></script>
 </body>
@@ -209,7 +209,7 @@ def build_mount_html(
     head_html: str = "",
 ):
     """Build the HTML boot document for a client app mount."""
-    snapshot = store_snapshot or {}
+    store_snap = store_snapshot or {}
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -226,7 +226,7 @@ def build_mount_html(
     window.__SPRAG_BOOT__ = {json.dumps(boot_data, sort_keys=True)};
     window.__SPRAG_ROUTE_DATA__ = {json.dumps(boot_data, sort_keys=True)};
     window.__SPRAG_HYDRATION__ = [];
-    window.__SPRAG_STORES__ = {json.dumps(snapshot, sort_keys=True)};
+    window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
   </script>
   <script type="module" src="{script_path}"></script>
 </body>
@@ -241,7 +241,7 @@ def store_snapshots() -> dict:
     matching the exact state the server-side rendering observed. Stores that
     have never been touched still emit their declared initial state.
     """
-    return {bridge.name: bridge.get_state() for bridge in declared_stores()}
+    return {bridge.name: bridge.snapshot() for bridge in declared_stores()}
 
 
 def serializable_hydration(hydration_entries):

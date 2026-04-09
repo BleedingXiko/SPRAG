@@ -45,6 +45,18 @@ class Landing(Component):
                     class_="card",
                 ),
                 ui.a(
+                    ui.h3("Nested Store Demo →"),
+                    ui.p(
+                        "The same store(...) primitive, but with a nested "
+                        "shape — set('user.name', v), selector-narrowed "
+                        "subscribe, memoized select, delete, clear. One "
+                        "API for both flat and path-style state."
+                    ),
+                    ui.span("hybrid · store() · nested", class_="tag"),
+                    href="/nested-store-demo",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Queue Demo →"),
                     ui.p(
                         "A QueueService runs background work on the server, "
