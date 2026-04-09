@@ -32,9 +32,14 @@ def page(
     name=None,
     metadata=None,
     shell=None,
+    css=None,
     static_paths=None,
 ):
     """Create a route page manifest."""
+    if css is not None:
+        from .shell import shell as build_shell
+
+        shell = build_shell(shell, css=css)
     return Page(
         path=path,
         controller=controller,

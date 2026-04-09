@@ -26,6 +26,7 @@ from .runtime import (
 )
 from .socket_bridge import surface_socket_enabled
 from .shell import apply_shell
+from .shell import emit_shell_assets
 from .stores import declared_stores
 
 
@@ -74,11 +75,14 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             build_request = Request(path=actual_path, params=build_entry.params, method="BUILD")
             data, data_error = load_controller_data(page, request=build_request, app=app)
             body_html, hydration, render_error = render_screen(page, data)
-            body_html, shell_head = apply_shell(
+            page_meta = _resolved_surface_metadata(page.metadata, data)
+            body_html, shell_head, shell_assets = apply_shell(
                 body_html,
                 app=app,
                 surface_shell=getattr(page, "shell", None),
+                document_path=actual_path,
             )
+            emit_shell_assets(output_dir, shell_assets)
 
             if data_error:
                 build_errors.append({"path": actual_path, "stage": "load", "error": data_error})
@@ -105,6 +109,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 hydration=hydration,
                 script_path=script_path,
                 store_snapshot=store_snapshots(),
+                metadata=page_meta,
                 head_html=shell_head,
             )
             (page_dir / "index.html").write_text(document_html, encoding="utf-8")
@@ -137,15 +142,18 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         data, data_error = load_mount_data(mt, request=build_request, app=app)
         if data_error:
             build_errors.append({"path": mt.path, "stage": "mount_load", "error": data_error})
-        body_html, shell_head = apply_shell(
+        mount_meta = _resolved_surface_metadata(mt.metadata, data)
+        body_html, shell_head, shell_assets = apply_shell(
             '<div id="app-root"></div>',
             app=app,
             surface_shell=getattr(mt, "shell", None),
+            document_path=mt.path,
         )
+        emit_shell_assets(output_dir, shell_assets)
 
         script_path = _relative_web_path(mount_dir, output_dir / "app.js")
         document_html = build_mount_html(
-            title=mt.metadata.get("title") or mt.name or mt.path,
+            title=mount_meta.get("title") or mt.name or mt.path,
             mount_info={
                 "path": mt.path,
                 "name": mount_slug,
@@ -161,6 +169,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             script_path=script_path,
             store_snapshot=store_snapshots(),
             body_html=body_html,
+            metadata=mount_meta,
             head_html=shell_head,
         )
         (mount_dir / "index.html").write_text(document_html, encoding="utf-8")
@@ -282,8 +291,14 @@ def _collect_hydration_entries(routes):
 
 
 def _resolved_page_title(page, data, fallback_path: str) -> str:
+    metadata = _resolved_surface_metadata(page.metadata, data)
+    return metadata.get("title") or page.name or fallback_path
+
+
+def _resolved_surface_metadata(static_metadata, data) -> dict:
+    metadata = dict(static_metadata or {})
     if isinstance(data, dict):
-        meta = data.get("__sprag_meta__")
-        if isinstance(meta, dict) and meta.get("title"):
-            return meta["title"]
-    return page.metadata.get("title") or page.name or fallback_path
+        dynamic = data.get("__sprag_meta__")
+        if isinstance(dynamic, dict):
+            metadata.update(dynamic)
+    return metadata

@@ -60,7 +60,9 @@ Each route directory follows the same six-file convention:
 The app shell is plain HTML and CSS. `app/__init__.py` wires it with
 `sprag.shell(template="app/shell.html", css=["app/shell.css"])`, and
 SPRAG wraps document routes, hybrid routes, and mounts with the same
-shell slot.
+shell slot. For route- or mount-specific styling, add `css=[...]`
+directly on `page(...)` or `mount(...)` and keep `shell=` for full shell
+overrides.
 
 ## Two Render Modes
 

@@ -1,4 +1,4 @@
-from sprag import mount, shell
+from sprag import mount
 
 from .modules import LifecycleDemoModule
 from .server import LifecycleDemoBoot
@@ -10,6 +10,6 @@ lifecycle_demo = mount(
     component=LifecycleDemoApp,
     module=LifecycleDemoModule,
     boot=LifecycleDemoBoot,
-    shell=shell(css=["app/mounts/lifecycle_demo/lifecycle.css"]),
+    css=["app/mounts/lifecycle_demo/lifecycle.css"],
     metadata={"title": "Lifecycle Mount"},
 )

@@ -152,6 +152,19 @@ app = App(
 </div>
 ```
 
+For per-route or per-mount styling, use `css=[...]` on the surface itself.
+Keep `shell=` for full shell overrides or shell composition.
+
+```python
+page(
+    path="/counter",
+    controller=CounterController,
+    screen=CounterScreen,
+    mode="hybrid",
+    css=["app/routes/counter/counter.css"],
+)
+```
+
 ### One store API, mirrored across both runtimes
 
 ```python

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import importlib
+import posixpath
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -24,6 +27,14 @@ class Shell:
     template: str | None = None
     css: tuple[str, ...] = field(default_factory=tuple)
     slot: str = DEFAULT_SLOT
+
+
+@dataclass(frozen=True)
+class ShellAsset:
+    """Resolved stylesheet asset for a shell."""
+
+    source_path: Path
+    web_path: str
 
 
 def shell(base=None, *, template=None, css=None, slot=DEFAULT_SLOT) -> Shell:
@@ -62,16 +73,31 @@ def apply_shell(
     surface_shell=None,
     project_root: str | Path | None = None,
     app_shell=None,
-) -> tuple[str, str]:
-    """Return ``(body_html, head_html)`` after applying the effective shell."""
+    document_path: str | None = None,
+) -> tuple[str, str, tuple[ShellAsset, ...]]:
+    """Return ``(body_html, head_html, assets)`` after applying the effective shell."""
     effective = effective_shell(app_shell if app_shell is not None else getattr(app, "shell", None), surface_shell)
     if effective is None:
-        return body_html, ""
+        return body_html, "", ()
 
     root = _project_root(app, project_root)
     wrapped_body = _render_shell_template(effective, body_html, root)
-    head_html = _render_css(effective.css, root)
-    return wrapped_body, head_html
+    assets = _resolve_css_assets(effective.css, root)
+    head_html = _render_css_links(assets, document_path=document_path)
+    return wrapped_body, head_html, assets
+
+
+def emit_shell_assets(output_dir: str | Path, assets: Iterable[ShellAsset]):
+    """Copy resolved shell stylesheets into the build output directory."""
+    target_root = Path(output_dir)
+    seen = set()
+    for asset in assets:
+        if asset.web_path in seen:
+            continue
+        seen.add(asset.web_path)
+        target_path = target_root / asset.web_path.lstrip("/")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(asset.source_path, target_path)
 
 
 def effective_shell(app_shell, surface_shell) -> Shell | None:
@@ -115,14 +141,26 @@ def _render_shell_template(shell_spec: Shell, body_html: str, project_root: Path
     )
 
 
-def _render_css(paths: Iterable[str], project_root: Path) -> str:
+def _render_css_links(assets: Iterable[ShellAsset], *, document_path: str | None = None) -> str:
     chunks = []
-    for css_path in paths:
-        resolved = _resolve_path(project_root, css_path)
-        css_text = resolved.read_text(encoding="utf-8")
-        label = html.escape(str(css_path), quote=True)
-        chunks.append(f'<style data-sprag-css="{label}">\n{css_text}\n</style>')
+    for asset in assets:
+        href = asset.web_path
+        if document_path is not None:
+            href = _relative_asset_href(document_path, href)
+        label = html.escape(asset.web_path, quote=True)
+        escaped_href = html.escape(href, quote=True)
+        chunks.append(
+            f'<link rel="stylesheet" href="{escaped_href}" data-sprag-css="{label}">'
+        )
     return "\n".join(chunks)
+
+
+def _resolve_css_assets(paths: Iterable[str], project_root: Path) -> tuple[ShellAsset, ...]:
+    assets = []
+    for css_path in paths:
+        resolved = _resolve_path(project_root, css_path).resolve()
+        assets.append(ShellAsset(source_path=resolved, web_path=_asset_web_path(resolved, project_root)))
+    return tuple(assets)
 
 
 def _resolve_path(project_root: Path, path: str | Path) -> Path:
@@ -130,6 +168,25 @@ def _resolve_path(project_root: Path, path: str | Path) -> Path:
     if next_path.is_absolute():
         return next_path
     return project_root / next_path
+
+
+def _asset_web_path(source_path: Path, project_root: Path) -> str:
+    root = project_root.resolve()
+    try:
+        relative = source_path.relative_to(root)
+        return f"/assets/{relative.as_posix()}"
+    except ValueError:
+        digest = hashlib.sha1(str(source_path).encode("utf-8")).hexdigest()[:12]
+        name = source_path.name or "stylesheet.css"
+        return f"/assets/_external/{digest}-{name}"
+
+
+def _relative_asset_href(document_path: str, asset_path: str) -> str:
+    if not asset_path.startswith("/"):
+        return asset_path
+    if not document_path or document_path == "/":
+        return asset_path.lstrip("/")
+    return posixpath.relpath(asset_path.lstrip("/"), start=document_path.strip("/"))
 
 
 def _project_root(app, explicit: str | Path | None) -> Path:

@@ -6,6 +6,7 @@ in the live server, as well as at build time for pre-rendered HTML.
 
 from __future__ import annotations
 
+import html
 import json
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
@@ -45,13 +46,18 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
     request = request or Request(path=normalize_route_path(page.path), method="GET")
     data, data_error = load_controller_data(page, request=request, app=app)
     body_html, hydration, render_error = render_screen(page, data)
-    body_html, shell_head = apply_shell(body_html, app=app, surface_shell=getattr(page, "shell", None))
+    page_meta = _resolved_surface_metadata(page.metadata, data)
+    body_html, shell_head, _ = apply_shell(
+        body_html,
+        app=app,
+        surface_shell=getattr(page, "shell", None),
+    )
 
     route_slug = page.name or _route_slug(page.path)
     route_actions = sorted(page.controller.sprag_actions().keys())
 
     document = build_document_html(
-        title=_resolved_page_title(page, data, request.path),
+        title=page_meta.get("title") or page.name or request.path,
         body_html=body_html,
         route_data=data,
         route_info={
@@ -67,6 +73,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
         hydration=hydration,
         script_path=script_path,
         store_snapshot=store_snapshots(),
+        metadata=page_meta,
         head_html=shell_head,
     )
 
@@ -98,19 +105,21 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
         "socket_bridge": surface_socket_enabled(app, mount.boot),
     }
 
-    body_html, shell_head = apply_shell(
+    mount_meta = _resolved_surface_metadata(mount.metadata, data)
+    body_html, shell_head, _ = apply_shell(
         '<div id="app-root"></div>',
         app=app,
         surface_shell=getattr(mount, "shell", None),
     )
 
     document = build_mount_html(
-        title=mount.metadata.get("title") or mount.name or mount.path,
+        title=mount_meta.get("title") or mount.name or mount.path,
         mount_info=mount_info,
         boot_data=data,
         script_path=script_path,
         store_snapshot=store_snapshots(),
         body_html=body_html,
+        metadata=mount_meta,
         head_html=shell_head,
     )
 
@@ -171,6 +180,7 @@ def build_document_html(
     hydration,
     script_path,
     store_snapshot: dict | None = None,
+    metadata: dict | None = None,
     head_html: str = "",
 ):
     """Build a full HTML document for a SPRAG page.
@@ -181,13 +191,15 @@ def build_document_html(
     same state the server just rendered against.
     """
     store_snap = store_snapshot or {}
+    head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
+    escaped_title = html.escape(str(title))
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title}</title>
-  {head_html}
+  <title>{escaped_title}</title>
+  {head_bits}
 </head>
 <body>
   <div id="app-root">{body_html}</div>
@@ -211,17 +223,20 @@ def build_mount_html(
     script_path,
     store_snapshot: dict | None = None,
     body_html: str | None = None,
+    metadata: dict | None = None,
     head_html: str = "",
 ):
     """Build the HTML boot document for a client app mount."""
     store_snap = store_snapshot or {}
+    head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
+    escaped_title = html.escape(str(title))
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title}</title>
-  {head_html}
+  <title>{escaped_title}</title>
+  {head_bits}
 </head>
 <body>
   {body_html or '<div id="app-root"></div>'}
@@ -264,12 +279,44 @@ def serializable_hydration(hydration_entries):
     ]
 
 
-def _resolved_page_title(page, data, fallback_path: str) -> str:
+def _resolved_surface_metadata(static_metadata, data) -> dict:
+    metadata = dict(static_metadata or {})
     if isinstance(data, dict):
-        meta = data.get("__sprag_meta__")
-        if isinstance(meta, dict) and meta.get("title"):
-            return meta["title"]
-    return page.metadata.get("title") or page.name or fallback_path
+        dynamic = data.get("__sprag_meta__")
+        if isinstance(dynamic, dict):
+            metadata.update(dynamic)
+    return metadata
+
+
+def _render_metadata_tags(metadata) -> str:
+    if not metadata:
+        return ""
+
+    tags = []
+    for key, value in metadata.items():
+        if key == "title" or value is None or value == "":
+            continue
+        content = _metadata_content(value)
+        if not content:
+            continue
+        escaped_content = html.escape(content, quote=True)
+        if key == "canonical":
+            tags.append(f'<link rel="canonical" href="{escaped_content}">')
+            continue
+        escaped_key = html.escape(str(key), quote=True)
+        attr = "property" if str(key).startswith("og:") else "name"
+        tags.append(f'<meta {attr}="{escaped_key}" content="{escaped_content}">')
+    return "\n  ".join(tags)
+
+
+def _metadata_content(value) -> str:
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item) for item in value if item is not None and item != "")
+    return str(value)
+
+
+def _join_head_html(*chunks: str) -> str:
+    return "\n  ".join(chunk for chunk in chunks if chunk)
 
 
 def _json_safe(value):

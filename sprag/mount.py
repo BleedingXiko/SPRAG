@@ -26,12 +26,16 @@ class Mount:
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
 
 
-def mount(path, *, component, module=None, boot=None, name=None, metadata=None, shell=None):
+def mount(path, *, component, module=None, boot=None, name=None, metadata=None, shell=None, css=None):
     """Declare a client app mount.
 
     A mount is not a route mode. It is a server URL that returns a boot
     document and lets Ragot create the root Component/Module in the browser.
     """
+    if css is not None:
+        from .shell import shell as build_shell
+
+        shell = build_shell(shell, css=css)
 
     return Mount(
         path=path,
