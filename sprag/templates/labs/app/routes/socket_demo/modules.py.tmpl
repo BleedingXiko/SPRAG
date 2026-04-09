@@ -1,0 +1,81 @@
+from sprag import Module
+
+
+class SocketDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "connected": False,
+                "status": "Waiting for the socket bridge.",
+                "message_count": 0,
+                "last_message": "No socket activity yet.",
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='socket-ping']", self.on_socket_ping)
+        self.delegate(
+            self.element,
+            "click",
+            "[data-role='server-broadcast']",
+            self.on_server_broadcast,
+        )
+        self.on_socket("lab:socket.pong", self.on_pong)
+        self.on_socket("lab:socket.server", self.on_server_message)
+        self.listen("sprag:socket:open", self.on_runtime_open)
+        self.listen("sprag:socket:ready", self.on_runtime_ready)
+        self.listen("sprag:socket:close", self.on_runtime_close)
+        self.listen("sprag:socket:error", self.on_runtime_error)
+
+    def on_runtime_open(self, payload):
+        message = "WebSocket opened for " + payload.get("path", "/")
+        self.set_state({"status": message})
+        self.record_message("runtime", message)
+
+    def on_runtime_ready(self, payload):
+        route = payload.get("route", "/")
+        message = "Socket bridge ready for " + route
+        self.set_state({"connected": True, "status": message})
+        self.record_message("runtime", message)
+
+    def on_runtime_close(self, payload):
+        self.set_state({"connected": False, "status": "Socket closed for " + payload.get("path", "/")})
+
+    def on_runtime_error(self, payload):
+        self.set_state({"status": "Socket error: " + payload.get("error", "unknown")})
+
+    def on_socket_ping(self, event):
+        event.prevent_default()
+        self.emit_socket(
+            "lab:socket.ping",
+            {
+                "count": self.state["message_count"] + 1,
+                "origin": "browser",
+            },
+        )
+        self.set_state({"status": "Sent socket ping to controller ingress."})
+
+    def on_server_broadcast(self, event):
+        event.prevent_default()
+        self.call_action("broadcast", {}).then(self.on_broadcast_result)
+
+    def on_broadcast_result(self, result):
+        self.set_state({"status": result.value["message"]})
+
+    def on_pong(self, payload):
+        self.set_state({"connected": True, "status": payload["message"]})
+        self.record_message("pong", payload["message"])
+
+    def on_server_message(self, payload):
+        self.set_state({"connected": True, "status": payload["message"]})
+        self.record_message("broadcast", payload["message"])
+
+    def record_message(self, kind, text):
+        self.set_state(
+            {
+                "message_count": self.state["message_count"] + 1,
+                "last_message": kind + ": " + text,
+            }
+        )

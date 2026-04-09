@@ -1,0 +1,42 @@
+from sprag import Controller, Schema, action
+
+
+class SocketDemoController(Controller):
+    route = "/socket-demo"
+
+    def load(self):
+        return {
+            "connected": False,
+            "status": "Open the socket bridge and send a ping.",
+            "message_count": 0,
+            "last_message": "No socket activity yet.",
+        }
+
+    def build_events(self, handler):
+        handler.on("lab:socket.ping", self.handle_ping)
+
+    def handle_ping(self, payload=None):
+        payload = payload or {}
+        count = payload.get("count", 0)
+        self.emit_socket(
+            "lab:socket.pong",
+            {
+                "message": f"Controller received ping #{count} from browser socket ingress.",
+                "count": count,
+            },
+            route=self.route,
+        )
+
+    @action(schema=Schema("broadcast", {}))
+    def broadcast(self):
+        delivered = self.emit_socket(
+            "lab:socket.server",
+            {
+                "message": "Controller pushed a route-scoped websocket broadcast.",
+            },
+            route=self.route,
+        )
+        return {
+            "message": "Broadcast sent over shared websocket transport." if delivered else "No live websocket client connected yet.",
+            "delivered": delivered,
+        }

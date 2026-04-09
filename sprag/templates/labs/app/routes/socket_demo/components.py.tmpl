@@ -1,0 +1,43 @@
+from sprag import Component, ui
+
+
+class SocketCard(Component):
+    def render(self, props=None):
+        message_count = self.state.get("message_count", 0)
+        last_message = self.state.get("last_message", "No socket activity yet.")
+        status = self.state.get("status", "Waiting for the socket bridge.")
+        connected = "connected" if self.state.get("connected") else "connecting"
+        return ui.div(
+            ui.h2("Socket Demo"),
+            ui.p(
+                "A shared runtime websocket client powers Module.on_socket(...) "
+                "and Module.emit_socket(...). The controller owns ingress via "
+                "build_events(handler) and can emit back out with emit_socket(...)."
+            ),
+            ui.div(
+                ui.div(
+                    ui.span("Bridge"),
+                    ui.strong(connected),
+                    class_="metric",
+                ),
+                ui.div(
+                    ui.span("Messages"),
+                    ui.strong(str(message_count)),
+                    class_="metric",
+                ),
+                class_="queue-actions",
+            ),
+            ui.p(status, class_="status-line"),
+            ui.div(
+                ui.button("Send socket ping", type="button", class_="btn", data_role="socket-ping"),
+                ui.button(
+                    "Server broadcast",
+                    type="button",
+                    class_="btn btn-ghost",
+                    data_role="server-broadcast",
+                ),
+                class_="queue-actions",
+            ),
+            ui.p(last_message, class_="status-line"),
+            class_="demo-card queue-card",
+        )

@@ -71,6 +71,7 @@ def _map_name(name):
         # Ragot Module: sockets
         "on_socket": "onSocket",
         "off_socket": "offSocket",
+        "emit_socket": "emitSocket",
         # Ragot: state utilities
         "create_selector": "createSelector",
         "create_state_store": "createStateStore",

@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import SocketDemoController
+from .web import SocketDemoScreen
+
+
+socket_demo = page(
+    path="/socket-demo",
+    controller=SocketDemoController,
+    screen=SocketDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Socket Demo — SPRAG Labs"},
+)

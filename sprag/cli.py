@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import __version__
-from .http_server import serve_sprag_app
+from .http_server import SERVER_MODES, resolve_server_mode, serve_sprag_app
 from .loader import load_app
 from .package import build_dist_bundle
 from .scaffold import (
@@ -50,6 +50,15 @@ def _build_parser():
         if name == "dev":
             sub.add_argument("--port", type=int, default=8000)
             sub.add_argument("--interval", type=float, default=1.0)
+            sub.add_argument(
+                "--server-mode",
+                choices=SERVER_MODES,
+                default=None,
+                help=(
+                    "Server transport mode. 'wsgi' uses plain gevent WSGI; "
+                    "'websocket' uses a GhostHub-style websocket-capable gevent handler."
+                ),
+            )
         sub.set_defaults(func=globals()[f"cmd_{name}"])
 
     new_parser = subparsers.add_parser("new", help="Create a new SPRAG project")
@@ -166,6 +175,7 @@ def cmd_dev(args):
     app_target, app = _load_cli_app(args)
     output_dir = Path(args.output)
     _build_once(app, output_dir)
+    resolved_server_mode = resolve_server_mode(app, args.server_mode)
 
     stop_event = threading.Event()
     watcher = threading.Thread(
@@ -180,6 +190,7 @@ def cmd_dev(args):
     banner = [
         f"[SPRAG] app: {app_target}",
         f"[SPRAG] dev server running at http://127.0.0.1:{args.port}/",
+        f"[SPRAG] server mode: {resolved_server_mode}",
         "",
         "  Routes:",
     ]
@@ -213,6 +224,7 @@ def cmd_dev(args):
             host="127.0.0.1",
             port=args.port,
             banner=banner,
+            server_mode=args.server_mode,
         )
     except KeyboardInterrupt:
         print("\n[SPRAG] stopping dev server")

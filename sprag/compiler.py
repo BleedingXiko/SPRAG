@@ -23,6 +23,7 @@ from .runtime import (
     serializable_hydration,
     store_snapshots,
 )
+from .socket_bridge import surface_socket_enabled
 from .shell import apply_shell
 from .stores import declared_stores
 
@@ -70,6 +71,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 "actions": route_actions,
                 "action_endpoint": "/__sprag__/actions",
                 "events_endpoint": "/__sprag__/events",
+                "socket_bridge": surface_socket_enabled(app, page.controller),
             },
             hydration=hydration,
             script_path=script_path,
@@ -122,6 +124,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 "actions": mount_actions,
                 "action_endpoint": "/__sprag__/actions",
                 "events_endpoint": "/__sprag__/events",
+                "socket_bridge": surface_socket_enabled(app, mt.boot),
             },
             boot_data=data,
             script_path=script_path,

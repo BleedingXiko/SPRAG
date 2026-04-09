@@ -204,7 +204,38 @@ export class {module_class.__name__} extends Module {{
         this.component = null;
         this.actions = null;
         this.route = null;
+        this.socket = null;
 {constructor_extras}
+    }}
+
+    _spragSocket() {{
+        return this.socket || window.__SPRAG_SOCKET__ || null;
+    }}
+
+    onSocket(event, handler) {{
+        const socket = this._spragSocket();
+        if (!socket) {{
+            console.warn('[SPRAG] Module.on_socket(...) called before the shared socket bridge was ready.');
+            return this;
+        }}
+        return super.onSocket(socket, event, handler);
+    }}
+
+    offSocket(event, handler) {{
+        const socket = this._spragSocket();
+        if (!socket) {{
+            return this;
+        }}
+        return super.offSocket(socket, event, handler);
+    }}
+
+    emitSocket(event, payload = null) {{
+        const socket = this._spragSocket();
+        if (!socket || typeof socket.emit !== 'function') {{
+            console.warn('[SPRAG] Module.emit_socket(...) called before the shared socket bridge was ready.');
+            return false;
+        }}
+        return socket.emit(event, payload);
     }}
 
     callAction(name, payload = {{}}) {{

@@ -8,8 +8,8 @@ from typing import Optional
 
 from specter import registry
 
-from .compiler import build_web_preview
 from .discovery import discover_surfaces
+from .socket_bridge import SpragSocketBridge, controller_uses_socket_bridge
 
 
 @dataclass
@@ -19,12 +19,19 @@ class App:
     mounts_package: str = "app.mounts"
     project_root: Optional[str] = None
     shell: object = None
+    server_mode: str = "auto"
 
     def __post_init__(self):
+        if self.server_mode not in {"auto", "wsgi", "websocket"}:
+            raise ValueError(
+                "App(server_mode=...) must be 'auto', 'wsgi', or 'websocket', "
+                f"got {self.server_mode!r}."
+            )
         self._pages = None
         self._mounts = None
         self._controllers = {}
         self._controller_registry_keys = []
+        self._socket_bridge = None
         self._booted = False
 
     def pages(self):
@@ -49,6 +56,7 @@ class App:
         if self._booted:
             return
         self._ensure_surfaces()
+        self._ensure_socket_runtime()
         for svc in self.services:
             registry.provide(svc.name, svc, owner=None)
             if not svc.running:
@@ -64,6 +72,7 @@ class App:
                 svc.stop()
             if registry.has(svc.name):
                 registry.unregister(svc.name)
+        self._shutdown_socket_runtime()
         self._booted = False
 
     def controller_for_page(self, page):
@@ -101,6 +110,9 @@ class App:
         if not controller.running:
             controller.start()
 
+        if controller_uses_socket_bridge(controller_cls):
+            controller.build_handler(self.socket_bridge())
+
         self._controllers[key] = controller
         return controller
 
@@ -116,6 +128,8 @@ class App:
         self._controller_registry_keys.clear()
 
     def build(self, output_dir=".sprag"):
+        from .compiler import build_web_preview
+
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         self.invalidate_pages()
@@ -129,13 +143,44 @@ class App:
             if did_boot:
                 self.shutdown()
 
-    def serve(self, *, host="127.0.0.1", port=8000, build_dir=".sprag", max_workers=16):
+    def serve(
+        self,
+        *,
+        host="127.0.0.1",
+        port=8000,
+        build_dir=".sprag",
+        max_workers=16,
+        server_mode: str | None = None,
+    ):
         """Boot services, build assets, and start the application server."""
         from .http_server import serve_sprag_app
 
         self.boot()
         self.build(build_dir)
-        serve_sprag_app(self, build_dir, host=host, port=port, max_workers=max_workers)
+        serve_sprag_app(
+            self,
+            build_dir,
+            host=host,
+            port=port,
+            max_workers=max_workers,
+            server_mode=server_mode,
+        )
+
+    def socket_bridge(self):
+        """Return the app-owned socket transport bridge."""
+        self._ensure_socket_runtime()
+        return self._socket_bridge
+
+    def _ensure_socket_runtime(self):
+        if self._socket_bridge is None:
+            self._socket_bridge = SpragSocketBridge(self)
+        self._socket_bridge.provide_registry()
+
+    def _shutdown_socket_runtime(self):
+        if self._socket_bridge is None:
+            return
+        self._socket_bridge.close()
+        self._socket_bridge.clear_registry()
 
 
 def _controller_registry_key(key, controller):

@@ -1,0 +1,13 @@
+from sprag import Screen, hydrate
+
+from .components import SocketCard
+from .modules import SocketDemoModule
+
+
+class SocketDemoScreen(Screen):
+    modules = [SocketDemoModule]
+
+    def render(self, data):
+        socket_demo = self.module(SocketDemoModule)
+        socket_demo.set_state(data)
+        return hydrate(SocketCard, module=socket_demo)

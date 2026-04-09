@@ -11,6 +11,11 @@ dependencies = [
     "specter-runtime",
 ]
 
+[project.optional-dependencies]
+websocket = [
+    "gevent-websocket",
+]
+
 [project.scripts]
 sprag = "sprag.cli:main"
 

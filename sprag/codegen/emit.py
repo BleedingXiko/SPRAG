@@ -134,6 +134,34 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
         return [];
     }
 
+    function _cloneValue(value) {
+        if (value === null || value === undefined) return value;
+        if (typeof value !== 'object') return value;
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    function _valuesEqual(left, right) {
+        if (Object.is(left, right)) return true;
+        if (left === null || right === null) return left === right;
+        if (typeof left !== 'object' || typeof right !== 'object') return false;
+        try {
+            return JSON.stringify(left) === JSON.stringify(right);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    function _selectValue(selector) {
+        if (selector === undefined || selector === null) return _store.getState();
+        if (typeof selector === 'string' || Array.isArray(selector)) {
+            return _store.get(selector);
+        }
+        if (typeof selector === 'function') {
+            return selector(_store.getState());
+        }
+        return _store.getState();
+    }
+
     return {
         name,
         get(path, fallback) {
@@ -179,7 +207,30 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
             });
         },
         subscribe(listener, options) {
-            return _store.subscribe(listener, options || {});
+            const resolved = options || {};
+            const selector = resolved.selector;
+            const immediate = !!resolved.immediate;
+
+            if (selector === undefined && resolved.equals === undefined) {
+                return _store.subscribe(listener, resolved);
+            }
+
+            let lastValue = _cloneValue(_selectValue(selector));
+            if (immediate) {
+                listener(_cloneValue(lastValue));
+            }
+
+            return _store.subscribe(() => {
+                const nextValue = _cloneValue(_selectValue(selector));
+                const equals = typeof resolved.equals === 'function'
+                    ? resolved.equals
+                    : _valuesEqual;
+                if (equals(nextValue, lastValue)) {
+                    return;
+                }
+                lastValue = _cloneValue(nextValue);
+                listener(_cloneValue(nextValue));
+            }, { immediate: false });
         },
         select(selector, fallback) {
             if (typeof selector === 'string' || Array.isArray(selector)) {
@@ -305,6 +356,8 @@ window.__SPRAG_ACTIONS__ = actionClient;
 
 const spragRoots = [];
 let spragEventSource = null;
+let spragSocket = null;
+let spragSocketRegistryKey = null;
 let spragBooted = false;
 
 function provideRuntimeRoot(key, value, owner) {{
@@ -338,7 +391,7 @@ function stopRuntimeRoot(root) {{
 }}
 
 function teardownSpragRuntime(reason = 'teardown') {{
-    if (!spragBooted && spragRoots.length === 0 && !spragEventSource) return;
+    if (!spragBooted && spragRoots.length === 0 && !spragEventSource && !spragSocket) return;
 
     if (spragEventSource) {{
         spragEventSource.close();
@@ -346,6 +399,22 @@ function teardownSpragRuntime(reason = 'teardown') {{
             window.__SPRAG_EVENT_SOURCE__ = null;
         }}
         spragEventSource = null;
+    }}
+
+    if (spragSocket) {{
+        spragSocket.close();
+        if (window.__SPRAG_SOCKET__ === spragSocket) {{
+            window.__SPRAG_SOCKET__ = null;
+        }}
+        spragSocket = null;
+    }}
+    if (spragSocketRegistryKey) {{
+        try {{
+            ragotRegistry.unregister(spragSocketRegistryKey);
+        }} catch (error) {{
+            console.warn('[SPRAG] Error while unregistering shared socket bridge', error);
+        }}
+        spragSocketRegistryKey = null;
     }}
 
     while (spragRoots.length > 0) {{
@@ -388,6 +457,7 @@ function mountHydrationEntry(entry) {{
         const module = new ModuleClass(entry.module_state || {{}});
         module.actions = actionClient;
         module.route = route;
+        module.socket = spragSocket;
         module.component = component;          // back-ref for imperative access
         module.element = target;               // self.element inside Module == hydrate container
         component.module = module;              // Component -> Module back-ref
@@ -446,6 +516,7 @@ function mountClientApp(entry) {{
         const module = new ModuleClass(boot || {{}});
         module.actions = actionClient;
         module.route = entry;
+        module.socket = spragSocket;
         module.component = component;
         module.element = target;
         component.module = module;
@@ -499,21 +570,201 @@ function connectBusBridge(route) {{
     return source;
 }}
 
+function createSocketUrl(path) {{
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${{protocol}}//${{window.location.host}}${{path}}`;
+}}
+
+function createSharedSocketClient(surface) {{
+    const socketPath = '/__sprag__/socket';
+    const listeners = new Map();
+    const outboundQueue = [];
+    let ws = null;
+    let reconnectTimer = null;
+    let closed = false;
+
+    function listenerSet(event) {{
+        let handlers = listeners.get(event);
+        if (!handlers) {{
+            handlers = new Set();
+            listeners.set(event, handlers);
+        }}
+        return handlers;
+    }}
+
+    function dispatch(event, payload) {{
+        const handlers = listeners.get(event);
+        if (!handlers) return;
+        for (const handler of Array.from(handlers)) {{
+            try {{
+                handler(payload);
+            }} catch (error) {{
+                console.warn(`[SPRAG] Socket handler for "${{event}}" failed.`, error);
+            }}
+        }}
+    }}
+
+    function flushQueue() {{
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        while (outboundQueue.length > 0) {{
+            ws.send(outboundQueue.shift());
+        }}
+    }}
+
+    function scheduleReconnect() {{
+        if (closed || reconnectTimer) return;
+        reconnectTimer = window.setTimeout(() => {{
+            reconnectTimer = null;
+            connect();
+        }}, 1000);
+    }}
+
+    function connect() {{
+        if (closed) return;
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {{
+            return;
+        }}
+
+        ws = new WebSocket(createSocketUrl(socketPath));
+        ws.onopen = () => {{
+            ws.send(JSON.stringify({{
+                type: 'hello',
+                route: surface.path || '/',
+            }}));
+            flushQueue();
+            bus.emit('sprag:socket:open', {{ path: surface.path || '/' }});
+        }};
+        ws.onmessage = (event) => {{
+            try {{
+                const message = JSON.parse(event.data);
+                if (message && message.type === 'event' && message.event) {{
+                    dispatch(message.event, message.payload);
+                    return;
+                }}
+                if (message && message.type === 'error') {{
+                    dispatch('sprag:socket:error', message);
+                    bus.emit('sprag:socket:error', message);
+                    return;
+                }}
+                if (message && message.type === 'ready') {{
+                    bus.emit('sprag:socket:ready', message);
+                    return;
+                }}
+                bus.emit('sprag:socket:message', message);
+            }} catch (_error) {{
+                bus.emit('sprag:socket:message', event.data);
+            }}
+        }};
+        ws.onerror = () => {{
+            bus.emit('sprag:socket:error', {{
+                error: 'socket-error',
+                path: surface.path || '/',
+            }});
+        }};
+        ws.onclose = () => {{
+            bus.emit('sprag:socket:close', {{ path: surface.path || '/' }});
+            if (!closed) {{
+                scheduleReconnect();
+            }}
+        }};
+    }}
+
+    const socket = {{
+        on(event, handler) {{
+            if (!event || typeof handler !== 'function') {{
+                return this;
+            }}
+            listenerSet(event).add(handler);
+            return this;
+        }},
+        off(event, handler) {{
+            const handlers = listeners.get(event);
+            if (!handlers) {{
+                return this;
+            }}
+            handlers.delete(handler);
+            if (handlers.size === 0) {{
+                listeners.delete(event);
+            }}
+            return this;
+        }},
+        emit(event, payload = null) {{
+            if (!event) {{
+                return false;
+            }}
+            const encoded = JSON.stringify({{
+                type: 'emit',
+                event,
+                payload,
+                route: surface.path || '/',
+            }});
+            if (ws && ws.readyState === WebSocket.OPEN) {{
+                ws.send(encoded);
+                return true;
+            }}
+            outboundQueue.push(encoded);
+            connect();
+            return false;
+        }},
+        close() {{
+            closed = true;
+            if (reconnectTimer) {{
+                window.clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }}
+            listeners.clear();
+            outboundQueue.length = 0;
+            if (ws && ws.readyState !== WebSocket.CLOSED) {{
+                ws.close();
+            }}
+        }},
+        connect() {{
+            connect();
+            return this;
+        }},
+    }};
+
+    return socket;
+}}
+
+function connectSocketBridge(surface) {{
+    if (!surface || !surface.socket_bridge) {{
+        return null;
+    }}
+    if (typeof window.WebSocket !== 'function') {{
+        console.warn('[SPRAG] This browser does not support WebSocket; socket bridge disabled.');
+        return null;
+    }}
+    const socket = createSharedSocketClient(surface);
+    window.__SPRAG_SOCKET__ = socket;
+    spragSocketRegistryKey = provideRuntimeRoot('sprag.socket', socket, null);
+    spragSocket = socket;
+    return socket;
+}}
+
 function boot() {{
     if (spragBooted) return;
     try {{
+        const surface = mount || route;
+        const socket = connectSocketBridge(surface);
         // Stores hydrate via the side-effect import of
         // './generated/stores.js' above — each store bridge reads its
         // window.__SPRAG_STORES__[name] entry at module-load time, so by
         // the time boot() runs every store is live.
         if (mount) {{
             mountClientApp(mount);
+            if (socket && typeof socket.connect === 'function') {{
+                socket.connect();
+            }}
             connectBusBridge(mount);
             spragBooted = true;
             return;
         }}
         const hydration = window.__SPRAG_HYDRATION__ || [];
         hydration.forEach(mountHydrationEntry);
+        if (socket && typeof socket.connect === 'function') {{
+            socket.connect();
+        }}
         connectBusBridge(route);
         spragBooted = true;
     }} catch (error) {{

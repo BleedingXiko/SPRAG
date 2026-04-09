@@ -97,6 +97,17 @@ class Landing(Component):
                     class_="card",
                 ),
                 ui.a(
+                    ui.h3("Socket Demo →"),
+                    ui.p(
+                        "Shared websocket runtime: Module.on_socket(...) "
+                        "and emit_socket(...) on the browser, build_events(handler) "
+                        "and emit_socket(...) on the controller."
+                    ),
+                    ui.span("hybrid · SocketIngress", class_="tag"),
+                    href="/socket-demo",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Lifecycle Mount →"),
                     ui.p(
                         "A client app mount with one root Module, arbitrary "

@@ -381,6 +381,10 @@ class Module:
         """Unsubscribe from a socket event."""
         _browser_only("Module.off_socket")
 
+    def emit_socket(self, event, payload=None):
+        """Emit a websocket event through SPRAG's shared runtime socket."""
+        _browser_only("Module.emit_socket")
+
     # -- Actions (SPRAG-specific bridge to controllers) --------------------
     def call_action(self, name, payload=None):
         """Call a server-side controller action; returns a Promise in JS."""

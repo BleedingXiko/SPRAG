@@ -15,7 +15,10 @@ from gevent.pywsgi import WSGIServer
 
 from .request import Request
 from .runtime import render_mount, render_page
+from .socket_bridge import controller_uses_socket_bridge
 from .server import ActionDispatchError, bus, dispatch_controller_action
+
+SERVER_MODES = ("auto", "wsgi", "websocket")
 
 
 class SpragWSGIApp:
@@ -295,7 +298,16 @@ _STATUS_PHRASES = {
 }
 
 
-def serve_sprag_app(app, directory, *, host="127.0.0.1", port=8000, max_workers=16, banner=None):
+def serve_sprag_app(
+    app,
+    directory,
+    *,
+    host="127.0.0.1",
+    port=8000,
+    max_workers=16,
+    banner=None,
+    server_mode=None,
+):
     """Serve a SPRAG app with gevent, bounded concurrency, and action dispatch."""
     did_boot = False
     if hasattr(app, "boot") and not getattr(app, "_booted", False):
@@ -303,17 +315,44 @@ def serve_sprag_app(app, directory, *, host="127.0.0.1", port=8000, max_workers=
         did_boot = True
 
     wsgi_app = SpragWSGIApp(app, directory)
+    resolved_server_mode = resolve_server_mode(app, server_mode)
+    if app is not None:
+        setattr(app, "_resolved_server_mode", resolved_server_mode)
     # gevent's WSGIServer uses ``spawn`` as a *callable* — pass a Pool, not
     # a semaphore. A Pool both bounds concurrency and is callable as
     # ``pool(fn, *args)`` which is what the server expects.
     pool = Pool(max_workers)
+    server_kwargs = {
+        "spawn": pool,
+        "log": None,
+    }
+    if resolved_server_mode == "websocket":
+        try:
+            from geventwebsocket.handler import WebSocketHandler
+            from geventwebsocket.resource import Resource, WebSocketApplication
+        except ImportError as exc:
+            raise RuntimeError(
+                "SPRAG server_mode='websocket' requires the 'gevent-websocket' package. "
+                "Install it or switch the app/server back to server_mode='wsgi'."
+            ) from exc
+        server_kwargs["handler_class"] = WebSocketHandler
+        socket_bridge = app.socket_bridge()
 
-    server = WSGIServer(
-        (host, port),
-        wsgi_app,
-        spawn=pool,
-        log=None,
-    )
+        class _SpragSocketApplication(WebSocketApplication):
+            bridge = socket_bridge
+
+            def handle(self):
+                self.bridge.handle_websocket(self.ws)
+
+        app_resource = Resource(
+            [
+                (r"^/__sprag__/socket$", _SpragSocketApplication),
+                (r"^/.*", wsgi_app),
+            ]
+        )
+        server = WSGIServer((host, port), app_resource, **server_kwargs)
+    else:
+        server = WSGIServer((host, port), wsgi_app, **server_kwargs)
 
     if banner:
         for line in banner:
@@ -322,5 +361,54 @@ def serve_sprag_app(app, directory, *, host="127.0.0.1", port=8000, max_workers=
     try:
         server.serve_forever()
     finally:
+        if app is not None:
+            setattr(app, "_resolved_server_mode", None)
         if did_boot and hasattr(app, "shutdown"):
             app.shutdown()
+
+
+def resolve_server_mode(app, override=None):
+    mode = override or getattr(app, "server_mode", "auto")
+    if mode not in SERVER_MODES:
+        raise ValueError(
+            f"Unknown SPRAG server mode {mode!r}. Expected one of: {', '.join(SERVER_MODES)}."
+        )
+    if mode != "auto":
+        return mode
+    return "websocket" if app_uses_socket_bridge(app) else "wsgi"
+
+
+def app_uses_socket_bridge(app) -> bool:
+    """Return True when discovered SPRAG surfaces imply websocket transport.
+
+    Auto mode should stay invisible for normal SPRAG apps. If a project grows
+    a real socket bridge, SPRAG can detect that from the app itself instead of
+    forcing the user to opt into a server flag just to make the runtime honest.
+    """
+    if app is None:
+        return False
+
+    pages = []
+    mounts = []
+    if hasattr(app, "pages"):
+        try:
+            pages = list(app.pages() or [])
+        except Exception:
+            pages = []
+    if hasattr(app, "mounts"):
+        try:
+            mounts = list(app.mounts() or [])
+        except Exception:
+            mounts = []
+
+    for _module_name, page in pages:
+        if _controller_uses_sockets(getattr(page, "controller", None)):
+            return True
+    for _module_name, mount in mounts:
+        if _controller_uses_sockets(getattr(mount, "boot", None)):
+            return True
+    return False
+
+
+def _controller_uses_sockets(controller_cls) -> bool:
+    return controller_uses_socket_bridge(controller_cls)

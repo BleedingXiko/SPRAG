@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import __file__ as sprag_init_file
 from .compiler import build_web_preview
+from .http_server import resolve_server_mode
 
 
 def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path | None = None) -> dict:
@@ -38,7 +39,8 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
         _replace_dir(target_dir, source_dir=source_dir)
 
     _write_text(output_dir / "server.py", _dist_server_source(app_target))
-    dist_requirements = _dist_requirements(app_project_root)
+    server_mode = resolve_server_mode(app)
+    dist_requirements = _dist_requirements(app_project_root, server_mode=server_mode)
     _write_text(output_dir / "requirements.txt", dist_requirements)
     _write_text(output_dir / "README.md", _dist_readme(app_target))
     _write_text(
@@ -50,6 +52,7 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
                 "app_project_root": str(app_project_root),
                 "public_dir": "public",
                 "server_entry": "server.py",
+                "server_mode": server_mode,
                 "routes": serializable_routes,
                 "mounts": serializable_mounts,
                 "errors": manifest["errors"],
@@ -154,7 +157,7 @@ def _dist_server_source(app_target):
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
 
-        from sprag.http_server import serve_sprag_app
+        from sprag.http_server import resolve_server_mode, serve_sprag_app
         from sprag.loader import load_app
 
 
@@ -162,12 +165,15 @@ def _dist_server_source(app_target):
             parser = argparse.ArgumentParser(prog="sprag-dist")
             parser.add_argument("--host", default="127.0.0.1")
             parser.add_argument("--port", type=int, default=8000)
+            parser.add_argument("--server-mode", choices=["auto", "wsgi", "websocket"], default=None)
             args = parser.parse_args(argv)
 
             app_target, app = load_app({app_target!r})
+            resolved_server_mode = resolve_server_mode(app, args.server_mode)
             banner = [
                 f"[SPRAG dist] app: {{app_target}}",
                 f"[SPRAG dist] serving public assets from {{ROOT / 'public'}}",
+                f"[SPRAG dist] server mode: {{resolved_server_mode}}",
                 f"[SPRAG dist] server running at http://{{args.host}}:{{args.port}}/",
             ]
             serve_sprag_app(
@@ -176,6 +182,7 @@ def _dist_server_source(app_target):
                 host=args.host,
                 port=args.port,
                 banner=banner,
+                server_mode=args.server_mode,
             )
 
 
@@ -185,7 +192,7 @@ def _dist_server_source(app_target):
     )
 
 
-def _dist_requirements(project_root: Path):
+def _dist_requirements(project_root: Path, *, server_mode: str = "wsgi"):
     requirements = []
     seen = set()
 
@@ -211,6 +218,11 @@ def _dist_requirements(project_root: Path):
 
     if "specter-runtime" not in seen:
         requirements.insert(0, "specter-runtime")
+        seen.add("specter-runtime")
+
+    if server_mode == "websocket" and "gevent-websocket" not in seen:
+        requirements.append("gevent-websocket")
+        seen.add("gevent-websocket")
 
     return "\n".join(requirements) + "\n"
 

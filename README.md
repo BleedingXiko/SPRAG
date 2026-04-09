@@ -6,7 +6,7 @@ SPRAG is a Python web framework that mirrors a server runtime ([Specter](#under-
 
 There is no app template language for your UI, no separate JS package to install, and no client/server context switch. You write UI as Python components, while shared document chrome can live in a plain HTML/CSS shell with one SPRAG slot. The same `self.set_state`, `self.listen`, `self.timeout`, `self.subscribe` calls work on either side of the wire.
 
-> **Status: pre-alpha.** The end-to-end shape works today — `sprag new` produces projects that build, dev-serve, dispatch typed actions, hydrate modules/components, hydrate stores, compose shared browser classes, serve client app mounts, and bridge bus events to the browser over SSE. The surface is still moving and the public API is not yet pinned.
+> **Status: pre-alpha.** The end-to-end shape works today — `sprag new` produces projects that build, dev-serve, dispatch typed actions, hydrate modules/components, hydrate stores, compose shared browser classes, serve client app mounts, bridge bus events to the browser over SSE, and run bidirectional websocket flows through `Module.on_socket(...)` / `Controller.build_events(...)`. The surface is still moving and the public API is not yet pinned.
 
 ---
 
@@ -189,6 +189,15 @@ app_shell = shell(template="app/shell.html", css=["app/shell.css"])
 
 app = App(routes="app.routes", shell=app_shell)
 ```
+
+SPRAG now defaults to `server_mode="auto"`. Normal apps stay on plain WSGI
+transport automatically; apps that declare a real socket bridge can promote
+themselves onto websocket-capable ingress without making `sprag dev` flags part
+of the normal workflow. You can still force `wsgi` or `websocket` explicitly
+with `App(server_mode=...)` or `sprag dev --server-mode ...` for edge cases such
+as cross-app communication. The Labs template pins `server_mode="websocket"`
+because it ships a real socket demo, and its scaffolded `requirements.txt`
+includes `gevent-websocket` so that demo works in a fresh project.
 
 ```html
 <!-- app/shell.html -->
@@ -378,11 +387,15 @@ cart.subscribe(
 )
 ```
 
-The server's current snapshot is shipped in the document as `window.__SPRAG_STORES__`, and the generated shim hydrates the browser bridge from it on first paint, so there is no flash. `store(...)` is the single SPRAG state primitive: flat state works, nested dot-path state works, selector-based reads work, and you do not need a separate `model(...)` API to graduate into richer app state.
+The server's current snapshot is shipped in the document as `window.__SPRAG_STORES__`, and the generated shim hydrates the browser bridge from it on first paint, so there is no flash. `store(...)` is the single SPRAG state primitive: flat state works, nested dot-path state works, selector-based reads work, selector subscriptions on nested objects use value semantics instead of stale object identity, and you do not need a separate `model(...)` API to graduate into richer app state.
 
 ### Bus events, bridged
 
 `bus.emit("sprag:broadcast", {"event": "...", "payload": ...})` on the server reaches every connected browser via an SSE stream. The browser-side `self.listen("...", fn)` picks it up. Services, queue workers, watchers, and controller actions can all publish into the same bridge.
+
+### Realtime sockets
+
+SPRAG also supports bidirectional websocket flows when a surface needs them. Browser modules use `self.on_socket(...)`, `self.off_socket(...)`, and `self.emit_socket(...)`; server controllers declare ingress with `build_events(handler)` and can reply or broadcast with `self.emit_socket(...)`. The transport path is runtime-owned — the authoring API is event-based, not endpoint-shaped.
 
 ### Templates and forcing functions
 
@@ -390,7 +403,7 @@ SPRAG ships more than one scaffold:
 
 - `default` — the normal starter app with home, counter, about, a file-backed shell, and a cross-route store.
 - `bare` — only the minimal package skeleton. Use this when you want to design the app shape yourself.
-- `labs` — a runnable framework canary with routes and mounts for actions, flat and nested stores, queues, watchers, operations, animation, virtual scrolling, and lifecycle teardown.
+- `labs` — a runnable framework canary with routes and mounts for actions, flat and nested stores, queues, watchers, operations, animation, virtual scrolling, lifecycle teardown, and a working websocket/socket-ingress demo.
 
 Local exploratory apps should live under `.sandbox/` while developing SPRAG itself. Template-generated sandboxes can be deleted and regenerated; hand-built sandboxes like a mini app are fine too, but they are test artifacts, not framework source.
 

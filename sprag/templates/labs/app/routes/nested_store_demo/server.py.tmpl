@@ -26,9 +26,8 @@ class NestedStoreDemoController(Controller):
 
     @action(schema=Schema("patch_prefs", {"theme": Field(str, required=True)}))
     def patch_prefs(self, theme):
-        # ``patch`` is a shallow merge at the *root*, so we go through
-        # update() to mutate a nested sub-tree atomically.
-        session.update(lambda s: {"prefs": {**s["prefs"], "theme": theme}})
+        # Path-style set keeps the rest of the nested store intact.
+        session.set("prefs.theme", theme)
         return {"prefs": session.get("prefs")}
 
     @action(schema=Schema("bump", {}))

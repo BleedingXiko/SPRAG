@@ -159,6 +159,20 @@ class Service(SPECTERService):
     def off_socket(self, *args, **kwargs):
         _server_only("Service.off_socket")
 
+    def emit_socket(self, event, data=None, *, route=None, client_id=None):
+        """Emit a websocket event to connected browser clients.
+
+        Controllers default to their declared ``route`` when no explicit
+        route filter is provided, which keeps per-surface socket traffic
+        scoped by default.
+        """
+        transport = registry.resolve("socket_transport")
+        if transport is None:
+            return False
+        if route is None:
+            route = getattr(self, "route", None)
+        return bool(transport.emit(event, data, route=route, client_id=client_id))
+
     def call_action(self, *args, **kwargs):
         _server_only("Service.call_action")
 
@@ -206,6 +220,15 @@ class Controller(SPECTERController):
         """Attach the owning SPRAG app without starting a request scope."""
         self._sprag_app = app
         return self
+
+    def emit_socket(self, event, data=None, *, route=None, client_id=None):
+        """Emit a websocket event to connected browser clients."""
+        transport = registry.resolve("socket_transport")
+        if transport is None:
+            return False
+        if route is None:
+            route = getattr(self, "route", None)
+        return bool(transport.emit(event, data, route=route, client_id=client_id))
 
     @classmethod
     def sprag_actions(cls):

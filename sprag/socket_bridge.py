@@ -1,0 +1,258 @@
+"""Shared SPRAG websocket bridge helpers.
+
+This module owns the runtime socket bridge contract used by browser
+``Module.on_socket(...)`` / ``Module.emit_socket(...)`` and server-side
+controller ``build_events(handler)`` declarations.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+import logging
+from dataclasses import dataclass
+
+from gevent.lock import BoundedSemaphore
+from specter import Controller as SpecterController
+from specter import SocketIngress, registry
+
+from .request import Request
+from .server import controller_context
+
+logger = logging.getLogger(__name__)
+
+
+def controller_uses_socket_bridge(controller_cls) -> bool:
+    """Return ``True`` when a controller declares socket ingress."""
+    if controller_cls is None:
+        return False
+    build_events = getattr(controller_cls, "build_events", None)
+    base_build_events = getattr(SpecterController, "build_events", None)
+    return build_events is not None and build_events is not base_build_events
+
+
+def surface_socket_enabled(app=None, controller_cls=None) -> bool:
+    """Return ``True`` when the current surface should boot the socket client."""
+    if app is not None:
+        resolved = getattr(app, "_resolved_server_mode", None)
+        if resolved == "websocket":
+            return True
+        if resolved is None and getattr(app, "server_mode", None) == "websocket":
+            return True
+    return controller_uses_socket_bridge(controller_cls)
+
+
+class SpragSocketIngress(SocketIngress):
+    """Socket ingress that scopes controller request/app context per message."""
+
+    def __init__(self, app):
+        super().__init__(socketio=None, name="socket_ingress")
+        self._sprag_app = app
+
+    def dispatch_message(self, message: dict, *, connection=None):
+        event_name = message.get("event")
+        if not isinstance(event_name, str) or not event_name.strip():
+            raise ValueError("SPRAG socket messages require a non-empty 'event'.")
+
+        route = message.get("route") or getattr(connection, "route", None) or "/"
+        headers = {}
+        if connection is not None:
+            headers["X-SPRAG-Socket-Id"] = connection.id
+
+        request = Request(
+            path=route,
+            headers=headers,
+            method="SOCKET",
+            body=json.dumps(message, sort_keys=True).encode("utf-8"),
+        )
+        with controller_context(request=request, app=self._sprag_app):
+            return super().dispatch(event_name.strip(), message.get("payload"))
+
+    def dispatch_default_error_message(self, exc: Exception, *, connection=None):
+        route = getattr(connection, "route", None) or "/"
+        headers = {}
+        if connection is not None:
+            headers["X-SPRAG-Socket-Id"] = connection.id
+        request = Request(path=route, headers=headers, method="SOCKET")
+        with controller_context(request=request, app=self._sprag_app):
+            return super().dispatch_default_error(exc)
+
+
+@dataclass
+class SpragSocketConnection:
+    """One live browser websocket client."""
+
+    id: str
+    websocket: object
+    route: str = "/"
+
+
+class SpragSocketBridge:
+    """Process-local websocket bridge for SPRAG browser/runtime sockets."""
+
+    registry_keys = ("socket_ingress", "socket_transport")
+
+    def __init__(self, app):
+        self.name = "socket_transport"
+        self._app = app
+        self._ingress = SpragSocketIngress(app)
+        self._connections: dict[str, SpragSocketConnection] = {}
+        self._next_id = itertools.count(1)
+        self._lock = BoundedSemaphore(1)
+
+    @property
+    def ingress(self) -> SpragSocketIngress:
+        return self._ingress
+
+    def provide_registry(self):
+        registry.provide("socket_ingress", self._ingress, owner=None, replace=True)
+        registry.provide("socket_transport", self, owner=None, replace=True)
+
+    def clear_registry(self):
+        for key in reversed(self.registry_keys):
+            if registry.has(key):
+                registry.unregister(key)
+
+    def connect(self, websocket) -> SpragSocketConnection:
+        connection = SpragSocketConnection(
+            id=f"sprag-socket-{next(self._next_id)}",
+            websocket=websocket,
+        )
+        with self._lock:
+            self._connections[connection.id] = connection
+        self._send(
+            connection,
+            {
+                "type": "hello",
+                "id": connection.id,
+            },
+        )
+        return connection
+
+    def disconnect(self, connection: SpragSocketConnection):
+        with self._lock:
+            self._connections.pop(connection.id, None)
+        try:
+            if getattr(connection.websocket, "closed", False):
+                return
+            connection.websocket.close()
+        except Exception:
+            logger.debug("[SPRAG] failed to close websocket %s", connection.id, exc_info=True)
+
+    def handle_websocket(self, websocket):
+        connection = self.connect(websocket)
+        try:
+            while not getattr(websocket, "closed", False):
+                message = websocket.receive()
+                if message is None:
+                    break
+                self.handle_message(connection, message)
+        except Exception as exc:
+            logger.debug("[SPRAG] websocket %s crashed: %s", connection.id, exc, exc_info=True)
+            self._ingress.dispatch_default_error_message(exc, connection=connection)
+        finally:
+            self.disconnect(connection)
+
+    def handle_message(self, connection: SpragSocketConnection, raw_message):
+        if isinstance(raw_message, bytes):
+            raw_message = raw_message.decode("utf-8", errors="replace")
+
+        try:
+            message = json.loads(raw_message)
+        except Exception as exc:
+            self._send_error(connection, f"Invalid SPRAG socket JSON: {exc}")
+            return
+
+        if not isinstance(message, dict):
+            self._send_error(connection, "SPRAG socket messages must be JSON objects.")
+            return
+
+        message_type = message.get("type") or "emit"
+        if message_type == "hello":
+            route = message.get("route")
+            if isinstance(route, str) and route.strip():
+                connection.route = route
+            self._send(
+                connection,
+                {
+                    "type": "ready",
+                    "id": connection.id,
+                    "route": connection.route,
+                },
+            )
+            return
+        if message_type == "ping":
+            self._send(connection, {"type": "pong"})
+            return
+        if message_type != "emit":
+            self._send_error(connection, f"Unsupported SPRAG socket message type {message_type!r}.")
+            return
+
+        route = message.get("route")
+        if isinstance(route, str) and route.strip():
+            connection.route = route
+        else:
+            message["route"] = connection.route
+
+        try:
+            self._ingress.dispatch_message(message, connection=connection)
+        except Exception as exc:
+            logger.debug("[SPRAG] socket dispatch failed: %s", exc, exc_info=True)
+            self._ingress.dispatch_default_error_message(exc, connection=connection)
+            self._send_error(connection, f"{exc.__class__.__name__}: {exc}")
+
+    def emit(self, event_name, payload=None, *, route=None, client_id=None):
+        """Emit a server event to connected SPRAG websocket clients."""
+        if not isinstance(event_name, str) or not event_name.strip():
+            raise TypeError("socket_transport.emit(event_name, ...) requires a non-empty string.")
+
+        envelope = {
+            "type": "event",
+            "event": event_name.strip(),
+            "payload": payload,
+        }
+
+        delivered = False
+        for connection in self._matching_connections(route=route, client_id=client_id):
+            delivered = self._send(connection, envelope) or delivered
+        return delivered
+
+    def close(self):
+        with self._lock:
+            connections = list(self._connections.values())
+            self._connections.clear()
+        for connection in connections:
+            try:
+                if not getattr(connection.websocket, "closed", False):
+                    connection.websocket.close()
+            except Exception:
+                logger.debug("[SPRAG] failed closing websocket %s", connection.id, exc_info=True)
+        self._ingress.clear()
+
+    def _matching_connections(self, *, route=None, client_id=None):
+        with self._lock:
+            connections = list(self._connections.values())
+        for connection in connections:
+            if client_id is not None and connection.id != client_id:
+                continue
+            if route is not None and connection.route != route:
+                continue
+            yield connection
+
+    def _send(self, connection: SpragSocketConnection, envelope: dict) -> bool:
+        try:
+            connection.websocket.send(json.dumps(envelope, sort_keys=True))
+            return True
+        except Exception:
+            logger.debug("[SPRAG] failed sending websocket event to %s", connection.id, exc_info=True)
+            self.disconnect(connection)
+            return False
+
+    def _send_error(self, connection: SpragSocketConnection, message: str):
+        self._send(
+            connection,
+            {
+                "type": "error",
+                "error": message,
+            },
+        )

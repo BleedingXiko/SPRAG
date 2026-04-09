@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from .render import render_tree
 from .request import Request
+from .socket_bridge import surface_socket_enabled
 from .server import controller_context
 from .shell import apply_shell
 from .stores import declared_stores
@@ -58,7 +59,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
             "actions": route_actions,
             "action_endpoint": "/__sprag__/actions",
             "events_endpoint": "/__sprag__/events",
-            "socket_endpoint": getattr(page.controller, "socket_endpoint", None),
+            "socket_bridge": surface_socket_enabled(app, page.controller),
         },
         hydration=hydration,
         script_path=script_path,
@@ -91,6 +92,7 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
         "actions": boot_actions,
         "action_endpoint": "/__sprag__/actions",
         "events_endpoint": "/__sprag__/events",
+        "socket_bridge": surface_socket_enabled(app, mount.boot),
     }
 
     body_html, shell_head = apply_shell(
