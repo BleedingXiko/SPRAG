@@ -1,0 +1,29 @@
+from sprag import Component, ui
+
+from app.site import article_shell, nav_item
+
+
+class BlogArticlePage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        post = props.get("post")
+        if not post:
+            return ui.div(
+                ui.span("Blog", class_="eyebrow"),
+                ui.h1("Post not found"),
+                ui.p("This blog post does not exist."),
+            )
+
+        sidebar_items = [
+            nav_item(item.title, item.url_path, active=(item.url_path == post.url_path))
+            for item in props["posts"]
+        ]
+        return article_shell(
+            kicker="Blog",
+            title=post.title,
+            description=post.description,
+            meta=post.metadata.get("date", ""),
+            sidebar_title="Recent posts",
+            sidebar_items=sidebar_items,
+            body=ui.article(ui.HTML(post.html), class_="prose"),
+        )

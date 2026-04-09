@@ -1,0 +1,19 @@
+from sprag import Controller
+
+from app.content import docs_collection
+
+
+class DocsIndexController(Controller):
+    route = "/docs"
+
+    def load(self):
+        docs = docs_collection()
+        return {
+            "__sprag_meta__": {"title": "Docs"},
+            "title": "Documentation",
+            "description": (
+                "Content pages are regular Markdown files. Nested folders become "
+                "nested docs URLs through the catch-all route."
+            ),
+            "docs": docs,
+        }

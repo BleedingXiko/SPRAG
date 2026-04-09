@@ -1,0 +1,45 @@
+from sprag import ui
+
+
+def card(title, href, description, meta=None):
+    return ui.a(
+        ui.h3(title),
+        ui.p(description),
+        ui.div(meta or "Open page", class_="card-meta"),
+        href=href,
+        class_="card",
+    )
+
+
+def article_shell(*, kicker, title, description, meta, sidebar_title, sidebar_items, body):
+    return ui.section(
+        ui.div(
+            ui.aside(
+                ui.h2(sidebar_title),
+                ui.ul(sidebar_items),
+                class_="content-sidebar",
+            ),
+            ui.div(
+                ui.header(
+                    ui.div(kicker, class_="content-kicker"),
+                    ui.h1(title),
+                    ui.p(description),
+                    ui.div(meta, class_="content-meta") if meta else None,
+                    class_="content-header",
+                ),
+                body,
+                class_="content-main",
+            ),
+            class_="content-shell",
+        )
+    )
+
+
+def nav_item(label, href, *, active=False):
+    return ui.li(
+        ui.a(
+            label,
+            href=href,
+            class_="is-active" if active else None,
+        )
+    )

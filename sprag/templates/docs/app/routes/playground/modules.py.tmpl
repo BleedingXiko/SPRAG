@@ -1,0 +1,45 @@
+from sprag import Module
+
+
+class PlaygroundModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(screen=screen, state=state or {})
+        self.snippets = {
+            "python": "from sprag import Component, ui\n\nclass Hello(Component):\n    def render(self, props=None):\n        return ui.h1('Hello docs')",
+            "html": "<section class='hero'>\n  <h1>Static docs</h1>\n  <p>Rendered at build time.</p>\n</section>",
+            "css": ".hero {\n  display: grid;\n  gap: 1rem;\n  padding: 2rem;\n}",
+        }
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-lang]", self.on_tab)
+        self.delegate(self.element, "click", "[data-role='increment']", self.on_increment)
+        self.delegate(self.element, "click", "[data-role='reset']", self.on_reset)
+
+    def on_tab(self, event, target):
+        event.prevent_default()
+        language = target.dataset.lang
+        self.set_state(
+            {
+                "language": language,
+                "snippet": self.snippets[language],
+                "status": "Switched to the " + language + " example locally.",
+            }
+        )
+
+    def on_increment(self, event):
+        event.prevent_default()
+        self.set_state(
+            {
+                "count": self.state.get("count", 0) + 1,
+                "status": "Updated local state without a server round-trip.",
+            }
+        )
+
+    def on_reset(self, event):
+        event.prevent_default()
+        self.set_state(
+            {
+                "count": 0,
+                "status": "Reset local state.",
+            }
+        )

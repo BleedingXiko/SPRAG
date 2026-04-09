@@ -3,25 +3,25 @@
 from __future__ import annotations
 
 import importlib
+import importlib.machinery
 import importlib.util
+import re
 import pkgutil
+import sys
+from pathlib import Path
 
 from .mount import Mount
 from .page import Page
+from .routing import is_dynamic_path
 
 
 def discover_pages(routes_package: str) -> list[tuple[str, Page]]:
     pages = []
-    package = importlib.import_module(routes_package)
-
-    for module_info in pkgutil.walk_packages(package.__path__, prefix=f"{routes_package}."):
-        if not module_info.name.endswith(".page"):
-            continue
-        module = importlib.import_module(module_info.name)
+    for module_name, module in _discover_surface_modules(routes_package, leaf_name="page"):
         for attr_name in dir(module):
             value = getattr(module, attr_name)
             if isinstance(value, Page):
-                pages.append((module_info.name, value))
+                pages.append((module_name, value))
 
     seen_paths = {}
     for module_name, pg in pages:
@@ -32,7 +32,7 @@ def discover_pages(routes_package: str) -> list[tuple[str, Page]]:
             )
         seen_paths[pg.path] = module_name
 
-    return sorted(pages, key=lambda item: item[1].path)
+    return sorted(pages, key=lambda item: (is_dynamic_path(item[1].path), item[1].path))
 
 
 def discover_mounts(mounts_package: str) -> list[tuple[str, Mount]]:
@@ -40,16 +40,11 @@ def discover_mounts(mounts_package: str) -> list[tuple[str, Mount]]:
     if not _package_exists(mounts_package):
         return mounts
 
-    package = importlib.import_module(mounts_package)
-
-    for module_info in pkgutil.walk_packages(package.__path__, prefix=f"{mounts_package}."):
-        if not module_info.name.endswith(".mount"):
-            continue
-        module = importlib.import_module(module_info.name)
+    for module_name, module in _discover_surface_modules(mounts_package, leaf_name="mount"):
         for attr_name in dir(module):
             value = getattr(module, attr_name)
             if isinstance(value, Mount):
-                mounts.append((module_info.name, value))
+                mounts.append((module_name, value))
 
     seen_paths = {}
     for module_name, mt in mounts:
@@ -134,3 +129,102 @@ def _package_exists(package_name: str) -> bool:
         return importlib.util.find_spec(package_name) is not None
     except ModuleNotFoundError:
         return False
+
+
+def _discover_surface_modules(package_name: str, *, leaf_name: str):
+    package = importlib.import_module(package_name)
+    package_paths = list(getattr(package, "__path__", []))
+    if not package_paths:
+        return []
+
+    discovered = []
+    for root_path in package_paths:
+        root = Path(root_path)
+        prefix = package_name + "."
+        for module_info in pkgutil.walk_packages([str(root)], prefix=prefix):
+            if module_info.name.endswith(f".{leaf_name}"):
+                discovered.append((module_info.name, importlib.import_module(module_info.name)))
+
+        # pkgutil drops route packages whose directory names contain dots
+        # (for example `[...segments]`). Walk the filesystem as a fallback
+        # and load any missing surface modules through a safe synthetic name.
+        for source_path in sorted(root.rglob(f"{leaf_name}.py")):
+            relative = source_path.relative_to(root)
+            if not any("." in part for part in relative.parts[:-1]):
+                continue
+            synthetic_name = _synthetic_module_name(package_name, relative)
+            if source_path.name == "__init__.py":
+                continue
+            if source_path.parent.name == "__pycache__":
+                continue
+            discovered.append((synthetic_name, _load_surface_module(package_name, root, relative)))
+
+    seen = {}
+    unique = []
+    for module_name, module in discovered:
+        if module_name in seen:
+            continue
+        seen[module_name] = True
+        unique.append((module_name, module))
+    return unique
+
+
+def _load_surface_module(package_name: str, root: Path, relative: Path):
+    raw_parts = relative.parts
+    package_parts = raw_parts[:-1]
+    parent_name = package_name
+    current_dir = root
+
+    for part in package_parts:
+        current_dir = current_dir / part
+        safe_part = _safe_module_segment(part)
+        parent_name = parent_name + "." + safe_part
+        if parent_name in sys.modules:
+            continue
+        init_path = current_dir / "__init__.py"
+        if init_path.exists():
+            spec = importlib.util.spec_from_file_location(
+                parent_name,
+                init_path,
+                submodule_search_locations=[str(current_dir)],
+            )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[parent_name] = module
+            spec.loader.exec_module(module)
+        else:
+            spec = importlib.machinery.ModuleSpec(parent_name, loader=None, is_package=True)
+            module = importlib.util.module_from_spec(spec)
+            module.__path__ = [str(current_dir)]
+            sys.modules[parent_name] = module
+
+    module_name = parent_name + "." + _safe_module_segment(relative.stem)
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+
+    spec = importlib.util.spec_from_file_location(module_name, root / relative)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _synthetic_module_name(package_name: str, relative: Path) -> str:
+    parts = [_safe_module_segment(part) for part in relative.with_suffix("").parts]
+    return package_name + "." + ".".join(parts)
+
+
+def _safe_module_segment(segment: str) -> str:
+    if segment.isidentifier():
+        return segment
+    if segment.startswith("[...") and segment.endswith("]"):
+        name = segment[4:-1]
+        return f"__sprag_catchall_{_sanitize_segment(name)}__"
+    if segment.startswith("[") and segment.endswith("]"):
+        name = segment[1:-1]
+        return f"__sprag_param_{_sanitize_segment(name)}__"
+    return f"__sprag_{_sanitize_segment(segment)}__"
+
+
+def _sanitize_segment(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_]+", "_", value).strip("_")
+    return cleaned or "segment"

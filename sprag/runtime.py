@@ -7,10 +7,12 @@ in the live server, as well as at build time for pre-rendered HTML.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
+from pathlib import Path
 
 from .render import render_tree
 from .request import Request
+from .routing import normalize_route_path
 from .socket_bridge import surface_socket_enabled
 from .server import controller_context
 from .shell import apply_shell
@@ -40,6 +42,7 @@ class MountResult:
 
 def render_page(page, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> PageResult:
     """Render a page through its controller and screen, returning full HTML."""
+    request = request or Request(path=normalize_route_path(page.path), method="GET")
     data, data_error = load_controller_data(page, request=request, app=app)
     body_html, hydration, render_error = render_screen(page, data)
     body_html, shell_head = apply_shell(body_html, app=app, surface_shell=getattr(page, "shell", None))
@@ -48,11 +51,11 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
     route_actions = sorted(page.controller.sprag_actions().keys())
 
     document = build_document_html(
-        title=page.metadata.get("title") or page.name or page.path,
+        title=_resolved_page_title(page, data, request.path),
         body_html=body_html,
         route_data=data,
         route_info={
-            "path": page.path,
+            "path": request.path,
             "mode": page.mode,
             "name": route_slug,
             "controller": page.controller.__name__,
@@ -190,7 +193,7 @@ def build_document_html(
   <div id="app-root">{body_html}</div>
   <script>
     window.__SPRAG_PAGE__ = {json.dumps(route_info, sort_keys=True)};
-    window.__SPRAG_ROUTE_DATA__ = {json.dumps(route_data, sort_keys=True)};
+    window.__SPRAG_ROUTE_DATA__ = {json.dumps(_json_safe(route_data), sort_keys=True)};
     window.__SPRAG_HYDRATION__ = {json.dumps(serializable_hydration(hydration), sort_keys=True)};
     window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
   </script>
@@ -225,8 +228,8 @@ def build_mount_html(
   <script>
     window.__SPRAG_MOUNT__ = {json.dumps(mount_info, sort_keys=True)};
     window.__SPRAG_PAGE__ = {json.dumps(mount_info, sort_keys=True)};
-    window.__SPRAG_BOOT__ = {json.dumps(boot_data, sort_keys=True)};
-    window.__SPRAG_ROUTE_DATA__ = {json.dumps(boot_data, sort_keys=True)};
+    window.__SPRAG_BOOT__ = {json.dumps(_json_safe(boot_data), sort_keys=True)};
+    window.__SPRAG_ROUTE_DATA__ = {json.dumps(_json_safe(boot_data), sort_keys=True)};
     window.__SPRAG_HYDRATION__ = [];
     window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
   </script>
@@ -259,6 +262,26 @@ def serializable_hydration(hydration_entries):
         }
         for entry in hydration_entries
     ]
+
+
+def _resolved_page_title(page, data, fallback_path: str) -> str:
+    if isinstance(data, dict):
+        meta = data.get("__sprag_meta__")
+        if isinstance(meta, dict) and meta.get("title"):
+            return meta["title"]
+    return page.metadata.get("title") or page.name or fallback_path
+
+
+def _json_safe(value):
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _route_slug(path):

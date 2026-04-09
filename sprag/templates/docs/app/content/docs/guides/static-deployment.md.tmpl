@@ -1,0 +1,31 @@
+---
+title: Static Deployment
+description: Ship the built docs site to any static host, including GitHub Pages.
+order: 2
+---
+
+# Static Deployment
+
+SPRAG already knows how to emit fully static HTML, CSS, and browser assets. The missing piece for docs/blog work was **dynamic route expansion at build time**, which this template now uses for both docs and posts.
+
+## Build
+
+```bash
+sprag build
+```
+
+Deploy the generated `dist/public/` directory.
+
+## GitHub Pages
+
+This template is designed to work when the site lives under a project subpath as well as at the root of a domain.
+
+## What stays interactive?
+
+Anything that is purely client-owned still works on a static host:
+
+- local `Module` state
+- delegated DOM events
+- hydrated Components that do not call server actions
+
+For that pattern, see the `/playground` route in this template.

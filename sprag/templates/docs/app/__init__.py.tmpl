@@ -1,0 +1,10 @@
+from sprag import App, shell
+
+
+app_shell = shell(template="app/shell.html", css=["app/shell.css"])
+
+
+app = App(
+    routes="app.routes",
+    shell=app_shell,
+)

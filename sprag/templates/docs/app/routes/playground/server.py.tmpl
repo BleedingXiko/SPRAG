@@ -1,0 +1,13 @@
+from sprag import Controller
+
+
+class PlaygroundController(Controller):
+    route = "/playground"
+
+    def load(self):
+        return {
+            "language": "python",
+            "snippet": "from sprag import Component, ui\n\nclass Hello(Component):\n    def render(self, props=None):\n        return ui.h1('Hello docs')",
+            "count": 0,
+            "status": "Pure browser state. No server round-trip required.",
+        }

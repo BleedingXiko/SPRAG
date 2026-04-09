@@ -1,0 +1,64 @@
+from sprag import Component, ui
+
+
+class PlaygroundPage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        current = self.state.get("language", "python")
+        return ui.div(
+            ui.section(
+                ui.div(
+                    ui.span("Playground", class_="eyebrow"),
+                    ui.h1("Interactive Docs Playground"),
+                    ui.p(
+                        "This route is intentionally static-safe: the Module only updates browser state, "
+                        "which is the pattern you want for interactive docs widgets on a static site."
+                    ),
+                    class_="playground-panel",
+                ),
+                class_="hero",
+            ),
+            ui.section(
+                ui.div(
+                    ui.div(
+                        ui.h2("Snippet tabs"),
+                        ui.p("Switch languages without touching the server.", class_="muted"),
+                        ui.div(
+                            ui.button(
+                                "Python",
+                                type="button",
+                                class_="tab-btn is-active" if current == "python" else "tab-btn",
+                                data_lang="python",
+                            ),
+                            ui.button(
+                                "HTML",
+                                type="button",
+                                class_="tab-btn is-active" if current == "html" else "tab-btn",
+                                data_lang="html",
+                            ),
+                            ui.button(
+                                "CSS",
+                                type="button",
+                                class_="tab-btn is-active" if current == "css" else "tab-btn",
+                                data_lang="css",
+                            ),
+                            class_="tab-row",
+                        ),
+                        ui.div(self.state.get("snippet", ""), class_="snippet-frame"),
+                        class_="snippet-panel",
+                    ),
+                    ui.div(
+                        ui.h2("Local state"),
+                        ui.p(self.state.get("status", ""), class_="muted"),
+                        ui.div(str(self.state.get("count", 0)), class_="preview-count"),
+                        ui.div(
+                            ui.button("Increment", type="button", class_="btn btn-primary", data_role="increment"),
+                            ui.button("Reset", type="button", class_="btn", data_role="reset"),
+                            class_="action-row",
+                        ),
+                        class_="snippet-preview",
+                    ),
+                    class_="playground-grid",
+                )
+            ),
+        )

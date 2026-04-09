@@ -1,0 +1,23 @@
+from sprag import Controller
+
+from app.content import blog_collection, docs_collection
+
+
+class HomeController(Controller):
+    route = "/"
+
+    def load(self):
+        docs = docs_collection()
+        posts = blog_collection()
+        return {
+            "__sprag_meta__": {"title": "{{project_name}}"},
+            "title": "{{project_name}}",
+            "tagline": (
+                "A static-first SPRAG documentation site with file-based docs, "
+                "blog posts, and one client-only interactive playground."
+            ),
+            "doc_count": len(docs),
+            "post_count": len(posts),
+            "docs": docs[:3],
+            "posts": posts[:2],
+        }

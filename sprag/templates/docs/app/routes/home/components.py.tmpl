@@ -1,0 +1,78 @@
+from sprag import Component, ui
+
+from app.site import card
+
+
+class HomePage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        docs = props["docs"]
+        posts = props["posts"]
+        return ui.div(
+            ui.section(
+                ui.div(
+                    ui.span("Static Docs Template", class_="eyebrow"),
+                    ui.h1(props["title"]),
+                    ui.p(props["tagline"]),
+                    class_="hero-panel",
+                ),
+                ui.aside(
+                    ui.h2("At a glance"),
+                    ui.div(
+                        ui.span("Docs pages"),
+                        ui.strong(str(props["doc_count"])),
+                        class_="metric",
+                    ),
+                    ui.div(
+                        ui.span("Blog posts"),
+                        ui.strong(str(props["post_count"])),
+                        class_="metric",
+                    ),
+                    ui.div(
+                        ui.span("Deployment"),
+                        ui.strong("Static"),
+                        class_="metric",
+                    ),
+                    class_="info-panel",
+                ),
+                class_="hero",
+            ),
+            ui.section(
+                ui.div(
+                    ui.h2("Docs"),
+                    ui.p("Markdown files routed through /docs/[...segments]."),
+                    class_="section-heading",
+                ),
+                ui.div(
+                    [card(doc.title, doc.url_path, doc.description, "Documentation") for doc in docs],
+                    class_="card-grid",
+                ),
+            ),
+            ui.section(
+                ui.div(
+                    ui.h2("Blog"),
+                    ui.p("Slug-based post pages under /blog/[slug]."),
+                    class_="section-heading",
+                ),
+                ui.div(
+                    [card(post.title, post.url_path, post.description, post.metadata.get("date", "Post")) for post in posts],
+                    class_="card-grid",
+                ),
+            ),
+            ui.section(
+                ui.div(
+                    ui.h2("Interactive Example"),
+                    ui.p("The playground route hydrates locally and works on a static host."),
+                    class_="section-heading",
+                ),
+                ui.div(
+                    card(
+                        "Open Playground",
+                        "/playground",
+                        "Client-only tabs and state updates, no server action bridge required.",
+                        "Hybrid route",
+                    ),
+                    class_="card-grid",
+                ),
+            ),
+        )

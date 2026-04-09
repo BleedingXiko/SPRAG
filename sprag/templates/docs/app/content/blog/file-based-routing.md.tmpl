@@ -1,0 +1,28 @@
+---
+title: File-Based Routing for Docs and Blog
+description: Dynamic docs segments and post slugs are now first-class build inputs.
+date: 2026-04-08
+---
+
+# File-Based Routing for Docs and Blog
+
+This template uses two dynamic route shapes:
+
+- `/docs/[...segments]`
+- `/blog/[slug]`
+
+The docs route is a catch-all so nested files become nested URLs.
+
+## Example
+
+```text
+app/content/docs/guides/static-deployment.md
+```
+
+becomes:
+
+```text
+/docs/guides/static-deployment
+```
+
+For blog posts, each Markdown file becomes a single slug page under `/blog`.

@@ -1,0 +1,29 @@
+from sprag import Component, ui
+
+from app.site import article_shell, nav_item
+
+
+class DocsArticlePage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        doc = props.get("doc")
+        if not doc:
+            return ui.div(
+                ui.span("Docs", class_="eyebrow"),
+                ui.h1("Page not found"),
+                ui.p("This docs page does not exist."),
+            )
+
+        sidebar_items = [
+            nav_item(item.title, item.url_path, active=(item.url_path == doc.url_path))
+            for item in props["docs"]
+        ]
+        return article_shell(
+            kicker="Documentation",
+            title=doc.title,
+            description=doc.description,
+            meta=doc.source_path.name,
+            sidebar_title="All docs",
+            sidebar_items=sidebar_items,
+            body=ui.article(ui.HTML(doc.html), class_="prose"),
+        )

@@ -14,6 +14,7 @@ from .codegen import (
     emit_stores_shim,
 )
 from .request import Request
+from .routing import build_entries_for_page, normalize_route_path
 from .runtime import (
     build_document_html,
     build_mount_html,
@@ -35,66 +36,96 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
     mount_manifest = []
     build_errors = []
     root_document = None
+    seen_outputs = set()
 
     for module_name, page in pages:
+        try:
+            build_entries = build_entries_for_page(page)
+        except Exception as exc:
+            build_errors.append(
+                {
+                    "path": page.path,
+                    "stage": "static_paths",
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            )
+            continue
+
         route_slug = _route_slug(page.path)
-        page_dir = output_dir / _route_dir(path=page.path)
-        page_dir.mkdir(parents=True, exist_ok=True)
         route_actions = sorted(page.controller.sprag_actions().keys())
 
-        build_request = Request(path=page.path, method="BUILD")
-        data, data_error = load_controller_data(page, request=build_request, app=app)
-        body_html, hydration, render_error = render_screen(page, data)
-        body_html, shell_head = apply_shell(
-            body_html,
-            app=app,
-            surface_shell=getattr(page, "shell", None),
-        )
+        for build_entry in build_entries:
+            actual_path = normalize_route_path(build_entry.path)
+            output_path = _route_web_path(actual_path)
+            if output_path in seen_outputs:
+                build_errors.append(
+                    {
+                        "path": actual_path,
+                        "stage": "route_conflict",
+                        "error": f"Duplicate static output path {output_path!r} while building {page.path!r}.",
+                    }
+                )
+                continue
+            seen_outputs.add(output_path)
 
-        if data_error:
-            build_errors.append({"path": page.path, "stage": "load", "error": data_error})
-        if render_error:
-            build_errors.append(
-                {"path": page.path, "stage": "render", "error": render_error}
+            page_dir = output_dir / _route_dir(path=actual_path)
+            page_dir.mkdir(parents=True, exist_ok=True)
+
+            build_request = Request(path=actual_path, params=build_entry.params, method="BUILD")
+            data, data_error = load_controller_data(page, request=build_request, app=app)
+            body_html, hydration, render_error = render_screen(page, data)
+            body_html, shell_head = apply_shell(
+                body_html,
+                app=app,
+                surface_shell=getattr(page, "shell", None),
             )
 
-        script_path = _relative_web_path(page_dir, output_dir / "app.js")
-        document_html = build_document_html(
-            title=page.metadata.get("title") or page.name or page.path,
-            body_html=body_html,
-            route_data=data,
-            route_info={
-                "path": page.path,
-                "mode": page.mode,
-                "name": page.name or route_slug,
-                "controller": page.controller.__name__,
-                "actions": route_actions,
-                "action_endpoint": "/__sprag__/actions",
-                "events_endpoint": "/__sprag__/events",
-                "socket_bridge": surface_socket_enabled(app, page.controller),
-            },
-            hydration=hydration,
-            script_path=script_path,
-            store_snapshot=store_snapshots(),
-            head_html=shell_head,
-        )
-        (page_dir / "index.html").write_text(document_html, encoding="utf-8")
-        if page.path == "/":
-            root_document = document_html
+            if data_error:
+                build_errors.append({"path": actual_path, "stage": "load", "error": data_error})
+            if render_error:
+                build_errors.append(
+                    {"path": actual_path, "stage": "render", "error": render_error}
+                )
 
-        route_manifest.append(
-            {
-                "module": module_name,
-                "path": page.path,
-                "mode": page.mode,
-                "name": page.name or route_slug,
-                "controller": page.controller.__name__,
-                "screen": page.screen.__name__,
-                "actions": route_actions,
-                "hydration": hydration,
-                "output": _route_web_path(page.path),
-            }
-        )
+            script_path = _relative_web_path(page_dir, output_dir / "app.js")
+            document_html = build_document_html(
+                title=_resolved_page_title(page, data, actual_path),
+                body_html=body_html,
+                route_data=data,
+                route_info={
+                    "path": actual_path,
+                    "mode": page.mode,
+                    "name": page.name or route_slug,
+                    "controller": page.controller.__name__,
+                    "actions": route_actions,
+                    "action_endpoint": "/__sprag__/actions",
+                    "events_endpoint": "/__sprag__/events",
+                    "socket_bridge": surface_socket_enabled(app, page.controller),
+                },
+                hydration=hydration,
+                script_path=script_path,
+                store_snapshot=store_snapshots(),
+                head_html=shell_head,
+            )
+            (page_dir / "index.html").write_text(document_html, encoding="utf-8")
+            if actual_path == "/":
+                root_document = document_html
+
+            route_manifest.append(
+                {
+                    "module": module_name,
+                    "path": actual_path,
+                    "pattern": page.path,
+                    "params": build_entry.params,
+                    "mode": page.mode,
+                    "name": page.name or route_slug,
+                    "controller": page.controller.__name__,
+                    "screen": page.screen.__name__,
+                    "actions": route_actions,
+                    "hydration": hydration,
+                    "output": output_path,
+                }
+            )
 
     for module_name, mt in mounts:
         mount_slug = mt.name or _route_slug(mt.path)
@@ -248,3 +279,11 @@ def _collect_hydration_entries(routes):
     for route in routes:
         entries.extend(route["hydration"])
     return entries
+
+
+def _resolved_page_title(page, data, fallback_path: str) -> str:
+    if isinstance(data, dict):
+        meta = data.get("__sprag_meta__")
+        if isinstance(meta, dict) and meta.get("title"):
+            return meta["title"]
+    return page.metadata.get("title") or page.name or fallback_path

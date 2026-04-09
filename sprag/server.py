@@ -35,6 +35,8 @@ from specter import ManagedProcess, Watcher, WatcherError, start_process
 # -- Orchestration -----------------------------------------------------------
 from specter import ServiceManager, boot
 
+from .routing import match_page_route
+
 
 _UNSET = object()
 _current_request = ContextVar("sprag_current_request", default=_UNSET)
@@ -313,11 +315,12 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
 
 
 def _resolve_surface_controller(pages, mounts, route_path, *, app=None):
-    for _module_name, page in pages:
-        if page.path == route_path:
-            if app is not None and hasattr(app, "controller_for_page"):
-                return app.controller_for_page(page)
-            return page.controller()
+    matched_page = match_page_route(pages, route_path)
+    if matched_page is not None:
+        page = matched_page.page
+        if app is not None and hasattr(app, "controller_for_page"):
+            return app.controller_for_page(page)
+        return page.controller()
     for _module_name, mount in mounts:
         if mount.path == route_path and mount.boot is not None:
             if app is not None and hasattr(app, "controller_for_mount"):
@@ -327,9 +330,9 @@ def _resolve_surface_controller(pages, mounts, route_path, *, app=None):
 
 
 def _resolve_route_page(pages, route_path):
-    for _module_name, page in pages:
-        if page.path == route_path:
-            return page
+    matched_page = match_page_route(pages, route_path)
+    if matched_page is not None:
+        return matched_page.page
     raise ActionDispatchError(f"Unknown route {route_path!r}.", status_code=404)
 
 

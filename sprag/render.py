@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 
 from .attrs import normalize_attr_key
-from .ui import ElementNode, ForNode, LazyImageNode, _resolve_key
+from .ui import HTMLNode, ElementNode, ForNode, LazyImageNode, _resolve_key
 from .web import Component, HydrateMount, SSRMount
 
 VOID_TAGS = {
@@ -110,6 +110,8 @@ def _render_node(node, hydration, context):
             attrs["src"] = node.placeholder
         attrs_html = _attrs_to_html(attrs)
         return f"<img{attrs_html}>"
+    if isinstance(node, HTMLNode):
+        return node.html
     if isinstance(node, ElementNode):
         attrs = _attrs_to_html(node.attrs)
         rendered_children = "".join(_render_node(child, hydration, context) for child in node.children)

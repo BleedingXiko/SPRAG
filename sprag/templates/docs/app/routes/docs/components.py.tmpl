@@ -1,0 +1,37 @@
+from sprag import Component, ui
+
+from app.site import card
+
+
+class DocsIndexPage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        return ui.div(
+            ui.section(
+                ui.div(
+                    ui.span("Docs", class_="eyebrow"),
+                    ui.h1(props["title"]),
+                    ui.p(props["description"]),
+                    class_="hero-panel",
+                ),
+                ui.aside(
+                    ui.h2("Route shape"),
+                    ui.div(
+                        ui.span("Index"),
+                        ui.strong("/docs"),
+                        class_="metric",
+                    ),
+                    ui.div(
+                        ui.span("Articles"),
+                        ui.strong("/docs/[...segments]"),
+                        class_="metric",
+                    ),
+                    class_="info-panel",
+                ),
+                class_="hero",
+            ),
+            ui.div(
+                [card(doc.title, doc.url_path, doc.description, "Documentation") for doc in props["docs"]],
+                class_="card-grid",
+            ),
+        )

@@ -1,0 +1,46 @@
+---
+title: Getting Started
+description: The minimum shape of a SPRAG docs site and why this template is static-first.
+order: 1
+---
+
+# Getting Started
+
+This template is a **content-first** SPRAG app. The docs and blog are authored as Markdown files, while the routes are responsible for:
+
+- resolving file-based content
+- mapping dynamic params like `slug` or `segments`
+- rendering a consistent shell and article layout
+
+## Why static first?
+
+For docs and blog surfaces, the ideal deployment target is just static files.
+
+- `sprag build` emits the whole site into `dist/public`
+- the docs and blog routes expand their dynamic paths at build time
+- the `/playground` route stays interactive without needing server actions
+
+## Files to edit
+
+- `app/content/docs/` for documentation pages
+- `app/content/blog/` for posts
+- `app/routes/docs/[...segments]/` for the docs article route
+- `app/routes/blog/[slug]/` for blog post pages
+
+## Add a page
+
+```bash
+app/content/docs/guides/new-page.md
+```
+
+Use nested folders when you want nested docs URLs. A file like:
+
+```text
+app/content/docs/guides/static-deployment.md
+```
+
+builds to:
+
+```text
+/docs/guides/static-deployment
+```

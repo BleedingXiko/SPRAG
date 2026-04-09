@@ -74,6 +74,13 @@ class LazyImageNode:
     attrs: dict = field(default_factory=dict)
 
 
+@dataclass
+class HTMLNode:
+    """Trusted raw HTML fragment for SSR-only content surfaces."""
+
+    html: str
+
+
 def _resolve_key(key, item, index):
     """Apply a ui.For / ui.Grid ``key=`` argument against an item.
 
@@ -129,6 +136,10 @@ class UIFactory:
     def LazyImage(self, src, *, placeholder=None, **attrs):
         """Lazy-loaded image. Compiles to a ``createLazyLoader`` install."""
         return LazyImageNode(src=src, placeholder=placeholder, attrs=attrs)
+
+    def HTML(self, html):
+        """Inject trusted HTML into an SSR surface."""
+        return HTMLNode(html=html)
 
     # ----- Generic element factory (any tag name) -----
 

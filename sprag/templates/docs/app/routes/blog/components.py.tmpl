@@ -1,0 +1,46 @@
+from sprag import Component, ui
+
+from app.site import card
+
+
+class BlogIndexPage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        posts = props["posts"]
+        return ui.div(
+            ui.section(
+                ui.div(
+                    ui.span("Blog", class_="eyebrow"),
+                    ui.h1(props["title"]),
+                    ui.p(props["description"]),
+                    class_="hero-panel",
+                ),
+                ui.aside(
+                    ui.h2("Route shape"),
+                    ui.div(
+                        ui.span("Index"),
+                        ui.strong("/blog"),
+                        class_="metric",
+                    ),
+                    ui.div(
+                        ui.span("Posts"),
+                        ui.strong("/blog/[slug]"),
+                        class_="metric",
+                    ),
+                    class_="info-panel",
+                ),
+                class_="hero",
+            ),
+            ui.div(
+                [
+                    card(
+                        post.title,
+                        post.url_path,
+                        post.description,
+                        post.metadata.get("date", "Post"),
+                    )
+                    for post in posts
+                ],
+                class_="card-grid",
+            ),
+        )

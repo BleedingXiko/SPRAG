@@ -1,0 +1,1 @@
+"""Dynamic blog post route."""

@@ -10,6 +10,7 @@ class Request:
     """Immutable snapshot of an incoming HTTP request."""
 
     path: str
+    params: dict = field(default_factory=dict)
     query: dict = field(default_factory=dict)
     headers: dict = field(default_factory=dict)
     method: str = "GET"

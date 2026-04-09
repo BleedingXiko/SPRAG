@@ -304,10 +304,91 @@ const manifest = {json.dumps(serializable, indent=2, sort_keys=True)};
 window.__SPRAG_MANIFEST__ = manifest;
 const route = window.__SPRAG_PAGE__ || {{}};
 const mount = window.__SPRAG_MOUNT__ || null;
+const surface = mount || route;
+
+function trimTrailingSlash(value) {{
+    if (!value || value === '/') {{
+        return '';
+    }}
+    return value.replace(/\/+$/, '');
+}}
+
+function normalizePath(value) {{
+    if (!value || value === '/') {{
+        return '/';
+    }}
+    return '/' + String(value).replace(/^\/+|\/+$/g, '');
+}}
+
+function normalizeComparablePath(value) {{
+    const normalized = normalizePath(value);
+    return normalized === '/' ? '/' : normalized.replace(/\/+$/, '');
+}}
+
+function deriveBasePrefix(currentPathname, surfacePath) {{
+    const actual = trimTrailingSlash(currentPathname || '/');
+    const currentSurface = trimTrailingSlash(normalizePath(surfacePath || '/'));
+    if (!currentSurface) {{
+        return actual;
+    }}
+    if (actual === currentSurface) {{
+        return '';
+    }}
+    if (actual.endsWith(currentSurface)) {{
+        return actual.slice(0, actual.length - currentSurface.length);
+    }}
+    return '';
+}}
+
+const spragBasePrefix = deriveBasePrefix(window.location.pathname, surface.path || '/');
+window.__SPRAG_BASE__ = spragBasePrefix || '';
+
+function withSpragBase(path) {{
+    const normalized = normalizePath(path || '/');
+    const prefix = trimTrailingSlash(window.__SPRAG_BASE__ || '');
+    if (!prefix) {{
+        return normalized;
+    }}
+    return normalized === '/' ? `${{prefix}}/` : `${{prefix}}${{normalized}}`;
+}}
+
+const spragInternalPathMap = new Map([['/', '/']]);
+for (const entry of [...(manifest.routes || []), ...(manifest.mounts || [])]) {{
+    const canonical = entry.output || entry.path || '/';
+    spragInternalPathMap.set(normalizeComparablePath(canonical), canonical);
+    if (entry.path) {{
+        spragInternalPathMap.set(normalizeComparablePath(entry.path), canonical);
+    }}
+}}
+
+function rewriteInternalLinks() {{
+    if (typeof document === 'undefined') {{
+        return;
+    }}
+    for (const anchor of document.querySelectorAll('a[href]')) {{
+        const rawHref = anchor.getAttribute('href');
+        if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('mailto:') || rawHref.startsWith('tel:')) {{
+            continue;
+        }}
+        try {{
+            const parsed = new URL(rawHref, window.location.origin);
+            if (parsed.origin !== window.location.origin) {{
+                continue;
+            }}
+            const canonical = spragInternalPathMap.get(normalizeComparablePath(parsed.pathname));
+            if (!canonical) {{
+                continue;
+            }}
+            anchor.setAttribute('href', `${{withSpragBase(canonical)}}${{parsed.search}}${{parsed.hash}}`);
+        }} catch (_error) {{
+            // Ignore invalid or non-URL href values.
+        }}
+    }}
+}}
 
 function createActionClient(currentRoute) {{
     const knownActions = new Set(currentRoute.actions || []);
-    const endpoint = currentRoute.action_endpoint || '/__sprag__/actions';
+    const endpoint = withSpragBase(currentRoute.action_endpoint || '/__sprag__/actions');
 
     return {{
         async call(name, payload = {{}}) {{
@@ -318,18 +399,33 @@ function createActionClient(currentRoute) {{
                 throw new Error(`[SPRAG] Unknown action "${{name}}" for route "${{currentRoute.path || 'unknown'}}".`);
             }}
 
-            const response = await fetch(endpoint, {{
-                method: 'POST',
-                headers: {{
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                }},
-                body: JSON.stringify({{
-                    route: currentRoute.path,
-                    action: name,
-                    payload
-                }})
-            }});
+            let response = null;
+            try {{
+                response = await fetch(endpoint, {{
+                    method: 'POST',
+                    headers: {{
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{
+                        route: currentRoute.path,
+                        action: name,
+                        payload
+                    }})
+                }});
+            }} catch (_error) {{
+                const message =
+                    `[SPRAG] Action "${{name}}" could not reach "${{endpoint}}". ` +
+                    'This usually means you are viewing a static build and this example needs a live SPRAG server.';
+                const error = new Error(message);
+                error.status = 0;
+                error.response = {{
+                    ok: false,
+                    code: 'SPRAG_SERVER_UNAVAILABLE',
+                    error: message,
+                }};
+                throw error;
+            }}
 
             const contentType = response.headers.get('content-type') || '';
             const result = contentType.includes('application/json')
@@ -551,7 +647,7 @@ function mountClientApp(entry) {{
 }}
 
 function connectBusBridge(route) {{
-    const endpoint = route.events_endpoint || '/__sprag__/events';
+    const endpoint = withSpragBase(route.events_endpoint || '/__sprag__/events');
     const source = new EventSource(endpoint);
     source.onmessage = (event) => {{
         try {{
@@ -572,7 +668,7 @@ function connectBusBridge(route) {{
 
 function createSocketUrl(path) {{
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${{protocol}}//${{window.location.host}}${{path}}`;
+    return `${{protocol}}//${{window.location.host}}${{withSpragBase(path)}}`;
 }}
 
 function createSharedSocketClient(surface) {{
@@ -745,7 +841,7 @@ function connectSocketBridge(surface) {{
 function boot() {{
     if (spragBooted) return;
     try {{
-        const surface = mount || route;
+        rewriteInternalLinks();
         const socket = connectSocketBridge(surface);
         // Stores hydrate via the side-effect import of
         // './generated/stores.js' above — each store bridge reads its

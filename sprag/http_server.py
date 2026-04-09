@@ -14,6 +14,7 @@ from gevent.pool import Pool
 from gevent.pywsgi import WSGIServer
 
 from .request import Request
+from .routing import match_page_route, normalize_route_path
 from .runtime import render_mount, render_page
 from .socket_bridge import controller_uses_socket_bridge
 from .server import ActionDispatchError, bus, dispatch_controller_action
@@ -39,10 +40,10 @@ class SpragWSGIApp:
             return self._handle_events(environ, start_response)
 
         if method == "GET":
-            route_path = path.rstrip("/") or "/"
-            page = self._match_page(route_path)
-            if page is not None:
-                return self._handle_page(environ, start_response, page)
+            route_path = normalize_route_path(path.rstrip("/") or "/")
+            matched_page = self._match_page(route_path)
+            if matched_page is not None:
+                return self._handle_page(environ, start_response, matched_page)
             mount = self._match_mount(route_path)
             if mount is not None:
                 return self._handle_mount(environ, start_response, mount)
@@ -53,10 +54,7 @@ class SpragWSGIApp:
     # -- Page rendering ------------------------------------------------------
 
     def _match_page(self, route_path):
-        for _module_name, page in self._sprag_app.pages():
-            if page.path == route_path:
-                return page
-        return None
+        return match_page_route(self._sprag_app.pages(), route_path)
 
     def _match_mount(self, route_path):
         for _module_name, mount in self._sprag_app.mounts():
@@ -64,14 +62,16 @@ class SpragWSGIApp:
                 return mount
         return None
 
-    def _handle_page(self, environ, start_response, page):
+    def _handle_page(self, environ, start_response, matched_page):
+        page = matched_page.page
         parsed_path = environ.get("PATH_INFO", "/")
         parsed_qs = environ.get("QUERY_STRING", "")
         query = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed_qs).items()}
         headers = self._extract_headers(environ)
 
         request = Request(
-            path=parsed_path,
+            path=normalize_route_path(parsed_path),
+            params=matched_page.params,
             query=query,
             headers=headers,
             method="GET",

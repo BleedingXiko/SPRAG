@@ -1,0 +1,27 @@
+---
+title: Launching a Static SPRAG Docs Site
+description: A small content surface proving out docs, blog posts, and static build output in one template.
+date: 2026-04-09
+---
+
+# Launching a Static SPRAG Docs Site
+
+The docs starter is intentionally opinionated:
+
+- docs live under `/docs`
+- posts live under `/blog`
+- both are powered by Markdown files with frontmatter
+- dynamic routes expand into concrete pages during `sprag build`
+
+That gives SPRAG a direct answer for content-heavy sites without requiring a server process in production.
+
+## The interesting part
+
+The docs site still includes an interactive route. That matters because real documentation sites often need:
+
+- sandboxes
+- live examples
+- tabbed snippets
+- tiny client-only widgets
+
+Those should work statically too.

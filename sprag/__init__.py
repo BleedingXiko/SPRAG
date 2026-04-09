@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 from . import dom
 from .actions import action
 from .app import App
+from .content import ContentDocument, load_markdown_document, load_markdown_tree, slugify
 from .mount import Mount, mount
 from .page import Page, page
 from .request import Request
@@ -70,12 +71,15 @@ __all__ = [
     "__version__",
     # App
     "App",
+    "ContentDocument",
     "Mount",
     "Page",
     "Request",
     "Shell",
     "action",
     "mount",
+    "load_markdown_document",
+    "load_markdown_tree",
     "page",
     # Web authoring
     "Component",
@@ -89,6 +93,7 @@ __all__ = [
     "StoreBridge",
     "declared_stores",
     "store",
+    "slugify",
     # Client-side decorators (justified — see sprag/web.py)
     "animate",
     "debounce",

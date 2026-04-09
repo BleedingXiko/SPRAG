@@ -13,6 +13,7 @@ class Page:
     name: Optional[str] = None
     metadata: dict = field(default_factory=dict)
     shell: object = None
+    static_paths: object = None
 
     def __post_init__(self):
         if not self.path.startswith("/"):
@@ -22,8 +23,17 @@ class Page:
                 f"SPRAG page mode must be one of document|hybrid|spa: {self.mode!r}"
             )
 
-
-def page(*, path, controller, screen, mode="hybrid", name=None, metadata=None, shell=None):
+def page(
+    *,
+    path,
+    controller,
+    screen,
+    mode="hybrid",
+    name=None,
+    metadata=None,
+    shell=None,
+    static_paths=None,
+):
     """Create a route page manifest."""
     return Page(
         path=path,
@@ -33,4 +43,5 @@ def page(*, path, controller, screen, mode="hybrid", name=None, metadata=None, s
         name=name,
         metadata=metadata or {},
         shell=shell,
+        static_paths=static_paths,
     )
