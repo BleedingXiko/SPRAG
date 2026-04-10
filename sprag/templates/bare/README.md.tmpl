@@ -8,11 +8,11 @@ A bare SPRAG application. No routes yet — start by adding one.
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-sprag add index
+sprag add content guides
 sprag dev --port 8000
 ```
 
-Open <http://127.0.0.1:8000/>.
+Open <http://127.0.0.1:8000/guides/>.
 
 ## Project Layout
 
@@ -26,4 +26,5 @@ Open <http://127.0.0.1:8000/>.
 ```
 
 Scaffold routes with `sprag add <name>` (see `sprag add --help` for
-mode and other flags).
+mode and other flags). For a fast markdown-backed section in a bare app,
+use `sprag add content guides`.

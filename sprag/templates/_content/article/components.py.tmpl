@@ -1,0 +1,39 @@
+from sprag import Component, ui
+
+
+def _nav_item(doc, current_path):
+    label = doc.title
+    if doc.url_path == current_path:
+        label = label + " (current)"
+    return ui.li(ui.a(label, href=doc.url_path))
+
+
+class {{class_name}}ArticlePage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        doc = props.get("doc")
+        docs = props.get("docs") or []
+
+        if not doc:
+            return ui.main(
+                ui.p(ui.a("Back to collection", href=props["route_path"])),
+                ui.h1("Page not found"),
+                ui.p("No Markdown page matched this route."),
+                ui.p("Look under ", ui.code(props["collection_path"]), " to add content."),
+            )
+
+        return ui.main(
+            ui.p(ui.a("Back to collection", href=props["route_path"])),
+            ui.div(
+                ui.aside(
+                    ui.h2("All pages"),
+                    ui.ul([_nav_item(item, props["current_path"]) for item in docs]),
+                ),
+                ui.article(
+                    ui.h1(doc.title),
+                    ui.p(doc.description) if doc.description else None,
+                    ui.p("Source: ", ui.code(doc.source_path.name)),
+                    ui.HTML(doc.html),
+                ),
+            ),
+        )

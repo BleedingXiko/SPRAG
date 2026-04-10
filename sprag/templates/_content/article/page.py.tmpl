@@ -1,0 +1,19 @@
+from sprag import page
+
+from app.content_support import content_static_paths
+
+from .server import {{class_name}}ArticleController
+from .web import {{class_name}}ArticleScreen
+
+
+def {{var_name}}_static_paths():
+    return content_static_paths("{{collection_name}}", base_url="{{route_path}}")
+
+
+{{var_name}}_article = page(
+    path="{{route_path}}/[...segments]",
+    controller={{class_name}}ArticleController,
+    screen={{class_name}}ArticleScreen,
+    mode="document",
+    static_paths={{var_name}}_static_paths,
+)

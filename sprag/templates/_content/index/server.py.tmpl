@@ -1,0 +1,20 @@
+from sprag import Controller
+
+from app.content_support import content_collection
+
+
+class {{class_name}}IndexController(Controller):
+    route = "{{route_path}}"
+
+    def load(self):
+        return {
+            "__sprag_meta__": {"title": "{{title}}"},
+            "title": "{{title}}",
+            "description": (
+                "Markdown files under `app/content/{{collection_name}}/` become pages in this collection."
+            ),
+            "docs": content_collection("{{collection_name}}", base_url="{{route_path}}"),
+            "route_path": "{{route_path}}",
+            "article_path": "{{route_path}}/[...segments]",
+            "collection_path": "app/content/{{collection_name}}/",
+        }

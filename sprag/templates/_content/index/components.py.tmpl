@@ -1,0 +1,30 @@
+from sprag import Component, ui
+
+
+def _content_card(doc):
+    return ui.li(
+        ui.a(
+            ui.strong(doc.title),
+            ui.span(doc.url_path, style="display:block;margin-top:0.25rem;font-family:monospace;"),
+            ui.p(doc.description or "Open page", style="margin:0.5rem 0 0;"),
+            href=doc.url_path,
+        )
+    )
+
+
+class {{class_name}}IndexPage(Component):
+    def render(self, props=None):
+        props = props or self.props
+        docs = props.get("docs") or []
+        return ui.main(
+            ui.p("Content collection"),
+            ui.h1(props["title"]),
+            ui.p(props["description"]),
+            ui.p("Collection root: ", ui.code(props["collection_path"])),
+            ui.p("Article route: ", ui.code(props["article_path"])),
+            ui.ul([_content_card(doc) for doc in docs]) if docs else ui.p(
+                "No pages yet. Add Markdown files under ",
+                ui.code(props["collection_path"]),
+                " and reload.",
+            ),
+        )

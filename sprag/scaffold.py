@@ -5,7 +5,8 @@ suffix so that ``.py`` template sources don't get picked up by package
 discovery. Route templates (for ``sprag add``) live under
 ``sprag/templates/_route/<mode>/`` — the leading underscore keeps them
 out of ``available_templates()`` so they don't show up as user-facing
-project templates.
+project templates. Mount and content collection scaffolds live under
+``sprag/templates/_mount/`` and ``sprag/templates/_content/``.
 
 Both flows share ``_render_template_dir``, which walks a template tree,
 strips the ``.tmpl`` suffix, and substitutes ``{{key}}`` tokens from a
@@ -25,6 +26,7 @@ TEMPLATES_ROOT = Path(__file__).parent / "templates"
 TEMPLATE_SUFFIX = ".tmpl"
 ROUTE_TEMPLATES_ROOT = TEMPLATES_ROOT / "_route"
 MOUNT_TEMPLATES_ROOT = TEMPLATES_ROOT / "_mount"
+CONTENT_TEMPLATES_ROOT = TEMPLATES_ROOT / "_content"
 ROUTE_MODES = ("document", "hybrid")
 DEFAULT_ROUTE_MODE = "document"
 
@@ -216,9 +218,101 @@ def scaffold_mount(project_root: Path, mount_name: str) -> list[Path]:
     return created
 
 
+def scaffold_content(project_root: Path, content_name: str) -> list[Path]:
+    """Scaffold a markdown-backed content collection inside an existing app.
+
+    A content collection creates:
+
+    - ``app/content/<name>/`` with starter Markdown
+    - ``app/content_support.py`` generic helpers (created once)
+    - ``app/routes/<name>/`` index route
+    - ``app/routes/<name>/[...segments]/`` article route
+    """
+    normalized = content_name.strip("/").strip()
+    if not normalized:
+        raise ValueError("content name must not be empty")
+
+    segments = [seg for seg in normalized.split("/") if seg]
+    for seg in segments:
+        if not seg.replace("_", "").replace("-", "").isalnum():
+            raise ValueError(f"invalid content segment: {seg!r}")
+
+    class_name = "".join(_pascal_case(seg) for seg in segments)
+    route_path = "/" + "/".join(segments)
+    title = _human_title(segments)
+
+    app_root = project_root / "app"
+    routes_root = app_root / "routes"
+    if not routes_root.exists():
+        raise SystemExit(f"[SPRAG] routes directory not found: {routes_root}")
+
+    route_dir = routes_root / Path(*segments)
+    article_dir = route_dir / "[...segments]"
+    content_root = app_root / "content"
+    collection_dir = content_root / Path(*segments)
+
+    if route_dir.exists():
+        raise SystemExit(f"[SPRAG] content route already exists: {route_dir}")
+    if article_dir.exists():
+        raise SystemExit(f"[SPRAG] content article route already exists: {article_dir}")
+    if collection_dir.exists():
+        raise SystemExit(f"[SPRAG] content collection already exists: {collection_dir}")
+
+    _validate_new_surface(project_root, route_path, kind="route")
+    _validate_new_surface(project_root, route_path + "/[...segments]", kind="route")
+
+    created: list[Path] = []
+
+    support_file = app_root / "content_support.py"
+    if not support_file.exists():
+        created.extend(
+            _render_template_dir(CONTENT_TEMPLATES_ROOT / "support", app_root, {})
+        )
+    elif "def content_collection(" not in support_file.read_text(encoding="utf-8"):
+        raise SystemExit(
+            "[SPRAG] app/content_support.py already exists but does not look like the "
+            "SPRAG content scaffold helper. Move or merge it manually, then re-run "
+            "'sprag add content'."
+        )
+
+    current = routes_root
+    for seg in segments[:-1]:
+        current = current / seg
+        current.mkdir(parents=True, exist_ok=True)
+        init_file = current / "__init__.py"
+        if not init_file.exists():
+            init_file.write_text(f'"""{seg} route group."""\n', encoding="utf-8")
+            created.append(init_file)
+
+    route_dir.mkdir(parents=True, exist_ok=True)
+    article_dir.mkdir(parents=True, exist_ok=True)
+    collection_dir.mkdir(parents=True, exist_ok=True)
+
+    variables = {
+        "collection_name": normalized,
+        "class_name": class_name,
+        "route_path": route_path,
+        "title": title,
+        "var_name": segments[-1].replace("-", "_"),
+    }
+    created.extend(_render_template_dir(CONTENT_TEMPLATES_ROOT / "index", route_dir, variables))
+    created.extend(_render_template_dir(CONTENT_TEMPLATES_ROOT / "article", article_dir, variables))
+    created.extend(_render_template_dir(CONTENT_TEMPLATES_ROOT / "starter", collection_dir, variables))
+
+    return created
+
+
 def _pascal_case(segment: str) -> str:
     parts = segment.replace("-", "_").split("_")
     return "".join(p[:1].upper() + p[1:] for p in parts if p)
+
+
+def _human_title(segments: list[str]) -> str:
+    words: list[str] = []
+    for segment in segments:
+        for part in segment.replace("-", " ").replace("_", " ").split():
+            words.append(part[:1].upper() + part[1:])
+    return " ".join(words)
 
 
 def _validate_new_surface(project_root: Path, path: str, *, kind: str) -> None:

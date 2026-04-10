@@ -1,0 +1,8 @@
+from sprag import Screen, ssr
+
+from .components import {{class_name}}ArticlePage
+
+
+class {{class_name}}ArticleScreen(Screen):
+    def render(self, data):
+        return ssr({{class_name}}ArticlePage, **data)

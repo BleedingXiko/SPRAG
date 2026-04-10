@@ -1,0 +1,8 @@
+from sprag import Screen, ssr
+
+from .components import {{class_name}}IndexPage
+
+
+class {{class_name}}IndexScreen(Screen):
+    def render(self, data):
+        return ssr({{class_name}}IndexPage, **data)

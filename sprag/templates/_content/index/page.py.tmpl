@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import {{class_name}}IndexController
+from .web import {{class_name}}IndexScreen
+
+
+{{var_name}}_index = page(
+    path="{{route_path}}",
+    controller={{class_name}}IndexController,
+    screen={{class_name}}IndexScreen,
+    mode="document",
+    metadata={"title": "{{title}}"},
+)

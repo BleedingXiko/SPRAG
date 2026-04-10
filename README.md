@@ -287,10 +287,24 @@ pip install -e /path/to/SPRAG
 
 sprag new myapp
 cd myapp
+sprag add content guides
 sprag dev --port 8000
 ```
 
 Open `http://127.0.0.1:8000/`.
+
+Before chasing framework bugs, run a structural check:
+
+```bash
+sprag doctor
+```
+
+If something looks wrong in hydration or browser behavior, inspect the generated surface:
+
+```bash
+sprag inspect /counter --rebuild
+sprag inspect /counter --open-files
+```
 
 Build a deployable artifact:
 
@@ -370,6 +384,8 @@ SPRAG discovers surfaces by walking `app.routes` and `app.mounts`, including dyn
 
 ## CLI
 
+### Scaffolding
+
 ```bash
 sprag new <name>
 sprag new <name> --template=docs
@@ -377,10 +393,36 @@ sprag new <name> --template=labs
 sprag add route <name> --mode=document
 sprag add route <name> --mode=hybrid
 sprag add mount <name>
+sprag add content <name>
+```
+
+### Build and serve
+
+```bash
 sprag dev
+sprag dev --port 8000
 sprag build
 sprag routes
 ```
+
+### Diagnostics
+
+```bash
+sprag doctor
+sprag doctor --verbose
+sprag inspect /counter
+sprag inspect /counter --rebuild
+sprag inspect /counter --open-files
+sprag inspect /lifecycle-mount --open-files
+```
+
+`sprag add content <name>` scaffolds a markdown-backed collection under `app/content/<name>/` plus a document index route and catch-all article route under `app/routes/<name>/`. It is the fast way to turn a `bare` app into a real content site without hand-wiring `app/content_support.py`, static paths, and the article route shape yourself.
+
+`sprag doctor` is the fast health check for the current app. It verifies project shape, app loading, route and mount importability, subclass sanity, buildability, and transport dependencies, then prints a short green/red checklist.
+
+`sprag inspect <path>` is the practical "what did SPRAG compile this into?" tool. It accepts a concrete route or mount path, reads `.sprag/manifest.json`, and prints the matched surface metadata, hydration entries, generated file paths, and the compiled JS for just that surface.
+
+Use `--rebuild` when you want inspect output from a fresh preview build. Use `--open-files` when you only want the generated file paths without dumping the compiled source.
 
 ## Under The Hood
 

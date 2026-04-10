@@ -6,8 +6,10 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from . import __version__
@@ -18,6 +20,7 @@ from .scaffold import (
     DEFAULT_ROUTE_MODE,
     ROUTE_MODES,
     available_templates,
+    scaffold_content,
     scaffold_project,
     scaffold_mount,
     scaffold_route,
@@ -36,6 +39,7 @@ _SUBCOMMAND_HELP = {
     "build": "Build the app into a deployable artifact",
     "routes": "List all discovered routes with actions and schemas",
     "dev": "Start the dev server with file watching",
+    "doctor": "Run structural diagnostics against the current SPRAG app",
 }
 
 
@@ -61,6 +65,12 @@ def _build_parser():
                     "'websocket' uses a GhostHub-style websocket-capable gevent handler."
                 ),
             )
+        if name == "doctor":
+            sub.add_argument(
+                "--verbose",
+                action="store_true",
+                help="Print traceback details for failing checks.",
+            )
         sub.set_defaults(func=globals()[f"cmd_{name}"])
 
     new_parser = subparsers.add_parser("new", help="Create a new SPRAG project")
@@ -80,11 +90,15 @@ def _build_parser():
     add_parser.add_argument(
         "kind_or_name",
         help=(
-            "Use 'route <name>' or 'mount <name>'. Back-compat: a bare name "
-            "is treated as 'route <name>'."
+            "Use 'route <name>', 'mount <name>', or 'content <name>'. "
+            "Back-compat: a bare name is treated as 'route <name>'."
         ),
     )
-    add_parser.add_argument("name", nargs="?", help="Route or mount name, e.g. 'dashboard' or 'admin/users'")
+    add_parser.add_argument(
+        "name",
+        nargs="?",
+        help="Route, mount, or content name, e.g. 'dashboard' or 'admin/guides'",
+    )
     add_parser.add_argument("--project-root", default=os.getcwd())
     add_parser.add_argument(
         "--mode",
@@ -97,6 +111,23 @@ def _build_parser():
         ),
     )
     add_parser.set_defaults(func=cmd_add)
+
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect the built output for a route or mount")
+    inspect_parser.add_argument("target", help="Concrete route or mount path, for example '/counter'")
+    inspect_parser.add_argument("--app", dest="app_target", default=None)
+    inspect_parser.add_argument("--project-root", default=os.getcwd())
+    inspect_parser.add_argument("--output", default=".sprag")
+    inspect_parser.add_argument(
+        "--open-files",
+        action="store_true",
+        help="Print generated file paths without dumping compiled source.",
+    )
+    inspect_parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Rebuild the preview output before inspecting it.",
+    )
+    inspect_parser.set_defaults(func=cmd_inspect)
 
     return parser
 
@@ -272,6 +303,23 @@ def cmd_add(args):
         print("Then run: sprag dev")
         return
 
+    if kind == "content":
+        if args.mode is not None:
+            raise SystemExit("[SPRAG] --mode is only valid for 'sprag add route', not 'sprag add content'.")
+        created = scaffold_content(project_root, name)
+        print(f"[SPRAG] created content collection '{normalized}' at app/routes/{normalized}/ and app/content/{normalized}/")
+        for path in created:
+            print(f"  {path.relative_to(project_root)}")
+        print()
+        print("Edit your content:")
+        print(f"  app/content/{normalized}/getting-started.md          # starter Markdown page")
+        print(f"  app/routes/{normalized}/server.py                   # collection index data")
+        print(f"  app/routes/{normalized}/[...segments]/server.py     # article route data")
+        print(f"  app/content_support.py                              # shared markdown helpers")
+        print()
+        print(f"Then run: sprag dev and open {('/' + normalized).replace('//', '/')}")
+        return
+
     mode = args.mode or DEFAULT_ROUTE_MODE
     created = scaffold_route(project_root, name, mode=mode)
     print(f"[SPRAG] created {mode}-mode route '{normalized}' at app/routes/{normalized}/")
@@ -288,14 +336,246 @@ def cmd_add(args):
     print("Then run: sprag dev")
 
 
+def cmd_doctor(args):
+    from .mount import Mount
+    from .page import Page
+    from .server import Controller as SpragController
+    from .web import Component as SpragComponent
+    from .web import Module as SpragModule
+    from .web import Screen as SpragScreen
+
+    checks = []
+    project_root = Path(args.project_root).resolve()
+    app_target = None
+    app = None
+    pages = []
+    mounts = []
+    surfaces_loaded = False
+
+    _append_check(checks, "project shape", *_doctor_project_shape(project_root))
+
+    try:
+        app_target, app = _load_cli_app(args)
+    except Exception as exc:
+        _append_check(
+            checks,
+            "app discovery",
+            False,
+            f"{exc.__class__.__name__}: {exc}",
+            details=_exception_details(exc, args.verbose),
+        )
+    else:
+        _append_check(checks, "app discovery", True, f"loaded {app_target}")
+
+    if app is None:
+        _append_check(checks, "surface importability", False, "skipped because app discovery failed")
+        _append_check(checks, "subclass sanity", False, "skipped because app discovery failed")
+        _append_check(checks, "buildability", False, "skipped because app discovery failed")
+        _append_check(checks, "transport deps", False, "skipped because app discovery failed")
+    else:
+        try:
+            pages = app.pages()
+            mounts = app.mounts()
+        except Exception as exc:
+            _append_check(
+                checks,
+                "surface importability",
+                False,
+                f"{exc.__class__.__name__}: {exc}",
+                details=_exception_details(exc, args.verbose),
+            )
+        else:
+            _append_check(
+                checks,
+                "surface importability",
+                True,
+                f"{len(pages)} route(s), {len(mounts)} mount(s)",
+            )
+            surfaces_loaded = True
+
+        if not surfaces_loaded:
+            _append_check(checks, "subclass sanity", False, "skipped because surface importability failed")
+        elif pages or mounts:
+            issues = []
+            for module_name, page in pages:
+                if not isinstance(page, Page):
+                    issues.append(f"{module_name}: exported value is not a Page")
+                    continue
+                if not (isinstance(page.controller, type) and issubclass(page.controller, SpragController)):
+                    issues.append(
+                        f"{module_name}: controller {_display_name(page.controller)} is not a sprag.Controller subclass"
+                    )
+                if not (isinstance(page.screen, type) and issubclass(page.screen, SpragScreen)):
+                    issues.append(
+                        f"{module_name}: screen {_display_name(page.screen)} is not a sprag.Screen subclass"
+                    )
+                controller_route = getattr(page.controller, "route", None)
+                if controller_route is not None and controller_route != page.path:
+                    issues.append(
+                        f"{module_name}: controller.route={controller_route!r} does not match page.path={page.path!r}"
+                    )
+            for module_name, mount in mounts:
+                if not isinstance(mount, Mount):
+                    issues.append(f"{module_name}: exported value is not a Mount")
+                    continue
+                if not (isinstance(mount.component, type) and issubclass(mount.component, SpragComponent)):
+                    issues.append(
+                        f"{module_name}: component {_display_name(mount.component)} is not a sprag.Component subclass"
+                    )
+                if mount.module is not None and not (
+                    isinstance(mount.module, type) and issubclass(mount.module, SpragModule)
+                ):
+                    issues.append(
+                        f"{module_name}: module {_display_name(mount.module)} is not a sprag.Module subclass"
+                    )
+                if mount.boot is not None and not (
+                    isinstance(mount.boot, type) and issubclass(mount.boot, SpragController)
+                ):
+                    issues.append(
+                        f"{module_name}: boot {_display_name(mount.boot)} is not a sprag.Controller subclass"
+                    )
+
+            if issues:
+                _append_check(
+                    checks,
+                    "subclass sanity",
+                    False,
+                    f"{len(issues)} issue(s)",
+                    details=issues,
+                )
+            else:
+                _append_check(checks, "subclass sanity", True, "all routes and mounts look sane")
+        else:
+            _append_check(checks, "subclass sanity", True, "no routes or mounts discovered")
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="sprag-doctor-") as tmp:
+                manifest = app.build(Path(tmp) / "preview")
+        except Exception as exc:
+            _append_check(
+                checks,
+                "buildability",
+                False,
+                f"{exc.__class__.__name__}: {exc}",
+                details=_exception_details(exc, args.verbose),
+            )
+        else:
+            build_errors = manifest.get("errors", [])
+            if build_errors:
+                _append_check(
+                    checks,
+                    "buildability",
+                    False,
+                    f"{len(build_errors)} build error(s)",
+                    details=[_format_build_error(error) for error in build_errors],
+                )
+            else:
+                _append_check(
+                    checks,
+                    "buildability",
+                    True,
+                    f"preview build succeeded with {len(manifest.get('routes', []))} route(s) and {len(manifest.get('mounts', []))} mount(s)",
+                )
+
+        try:
+            resolved_server_mode = resolve_server_mode(app)
+            if resolved_server_mode == "websocket":
+                from geventwebsocket.handler import WebSocketHandler  # noqa: F401
+
+                detail = "server mode websocket; gevent-websocket available"
+            else:
+                detail = f"server mode {resolved_server_mode}; no extra transport package required"
+            _append_check(checks, "transport deps", True, detail)
+        except Exception as exc:
+            _append_check(
+                checks,
+                "transport deps",
+                False,
+                f"{exc.__class__.__name__}: {exc}",
+                details=_exception_details(exc, args.verbose),
+            )
+
+    failed = [check for check in checks if not check["ok"]]
+    print(f"[SPRAG] doctor for {project_root}")
+    if app_target:
+        print(f"[SPRAG] app: {app_target}")
+    for check in checks:
+        status = "ok" if check["ok"] else "fail"
+        print(f"[{status}] {check['name']}: {check['message']}")
+        for detail in check.get("details", []):
+            print(f"  - {detail}")
+    print()
+    if failed:
+        print(f"[SPRAG] doctor found {len(failed)} failing check(s).")
+        raise SystemExit(1)
+    print(f"[SPRAG] doctor healthy ({len(checks)}/{len(checks)} checks passed).")
+
+
+def cmd_inspect(args):
+    from .routing import match_page_route, normalize_route_path
+
+    app_target, app = _load_cli_app(args)
+    output_dir = Path(args.output)
+    manifest_path = output_dir / "manifest.json"
+    built_fresh = False
+
+    if args.rebuild or not manifest_path.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
+        app.build(output_dir)
+        built_fresh = True
+
+    if not manifest_path.exists():
+        raise SystemExit(f"[SPRAG] inspect could not find {manifest_path}. Run with --rebuild.")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    target_path = normalize_route_path(args.target)
+
+    route = next((entry for entry in manifest.get("routes", []) if entry.get("path") == target_path), None)
+    if route is not None:
+        print(f"[SPRAG] inspect route {target_path}")
+        print(f"[SPRAG] app: {app_target}")
+        print(f"[SPRAG] build output: {output_dir.resolve()} ({'rebuilt' if built_fresh else 'existing manifest'})")
+        _print_surface_metadata(
+            kind="route",
+            entry=route,
+            output_dir=output_dir,
+            open_files=args.open_files,
+        )
+        return
+
+    mount = next((entry for entry in manifest.get("mounts", []) if entry.get("path") == target_path), None)
+    if mount is not None:
+        print(f"[SPRAG] inspect mount {target_path}")
+        print(f"[SPRAG] app: {app_target}")
+        print(f"[SPRAG] build output: {output_dir.resolve()} ({'rebuilt' if built_fresh else 'existing manifest'})")
+        _print_surface_metadata(
+            kind="mount",
+            entry=mount,
+            output_dir=output_dir,
+            open_files=args.open_files,
+        )
+        return
+
+    matched = match_page_route(app.pages(), target_path)
+    if matched is not None:
+        raise SystemExit(
+            f"[SPRAG] {target_path!r} matches route pattern {matched.page.path!r}, "
+            "but that concrete path is not present in the built manifest. "
+            "For dynamic routes, make sure page(..., static_paths=...) includes this path, then rerun inspect with --rebuild."
+        )
+
+    raise SystemExit(f"[SPRAG] no route or mount found for {target_path!r}.")
+
+
 def _parse_add_target(args):
-    if args.kind_or_name in {"route", "mount"}:
+    if args.kind_or_name in {"route", "mount", "content"}:
         if not args.name:
             raise SystemExit(f"[SPRAG] missing name for 'sprag add {args.kind_or_name}'.")
         return args.kind_or_name, args.name
     if args.name is not None:
         raise SystemExit(
-            "[SPRAG] expected 'sprag add route <name>' or 'sprag add mount <name>'. "
+            "[SPRAG] expected 'sprag add route <name>', 'sprag add mount <name>', "
+            "or 'sprag add content <name>'. "
             "For backward compatibility, 'sprag add <name>' is also accepted."
         )
     return "route", args.kind_or_name
@@ -391,6 +671,150 @@ def _emit_dev_rebuild_event(*, ok, build_id, changed, error=None):
     if error:
         payload["payload"]["error"] = error
     bus.emit("sprag:broadcast", payload)
+
+
+def _doctor_project_shape(project_root: Path):
+    missing = []
+    required = [
+        project_root / "app" / "__init__.py",
+        project_root / "app" / "routes" / "__init__.py",
+    ]
+    for path in required:
+        if not path.exists():
+            missing.append(str(path.relative_to(project_root)))
+
+    mounts_dir = project_root / "app" / "mounts"
+    mounts_init = mounts_dir / "__init__.py"
+    if mounts_dir.exists() and not mounts_init.exists():
+        missing.append(str(mounts_init.relative_to(project_root)))
+
+    if missing:
+        return False, f"missing {len(missing)} required path(s)", missing
+    detail = "found app package and routes package"
+    if mounts_init.exists():
+        detail += ", plus mounts package"
+    return True, detail, []
+
+
+def _append_check(checks, name, ok, message, details=None):
+    checks.append(
+        {
+            "name": name,
+            "ok": bool(ok),
+            "message": message,
+            "details": list(details or []),
+        }
+    )
+
+
+def _exception_details(exc, verbose):
+    if not verbose:
+        return []
+    return [line.rstrip("\n") for line in traceback.format_exception(exc)]
+
+
+def _display_name(value):
+    return getattr(value, "__name__", repr(value))
+
+
+def _format_build_error(error):
+    path = error.get("path") or "(unknown path)"
+    stage = error.get("stage") or "build"
+    message = error.get("error") or "unknown error"
+    return f"{path} [{stage}] {message}"
+
+
+def _print_surface_metadata(*, kind, entry, output_dir: Path, open_files: bool):
+    if kind == "route":
+        lines = [
+            f"module: {entry.get('module')}",
+            f"pattern: {entry.get('pattern')}",
+            f"path: {entry.get('path')}",
+            f"mode: {entry.get('mode')}",
+            f"controller: {entry.get('controller')}",
+            f"screen: {entry.get('screen')}",
+            f"actions: {', '.join(entry.get('actions') or []) or '(none)'}",
+            f"output: {entry.get('output')}",
+        ]
+        hydration = entry.get("hydration") or []
+    else:
+        lines = [
+            f"source: {entry.get('source')}",
+            f"path: {entry.get('path')}",
+            f"name: {entry.get('name')}",
+            f"component: {entry.get('component')}",
+            f"module: {entry.get('module') or '(none)'}",
+            f"boot: {entry.get('boot') or '(none)'}",
+            f"actions: {', '.join(entry.get('actions') or []) or '(none)'}",
+            f"output: {entry.get('output')}",
+        ]
+        hydration = [
+            {
+                "id": "app-root",
+                "component": entry.get("component"),
+                "module": entry.get("module"),
+            }
+        ]
+
+    for line in lines:
+        print(line)
+
+    print()
+    print("hydration:")
+    if hydration:
+        for item in hydration:
+            print(
+                f"  - id={item.get('id')} component={item.get('component') or '(none)'} module={item.get('module') or '(none)'}"
+            )
+    else:
+        print("  - (none)")
+
+    files = _surface_generated_files(kind=kind, entry=entry, output_dir=output_dir)
+    print()
+    print("generated files:")
+    if files:
+        for path in files:
+            print(f"  - {path}")
+    else:
+        print("  - (none)")
+
+    if open_files or not files:
+        return
+
+    for path in files:
+        print()
+        print(f"===== {path} =====")
+        print(path.read_text(encoding='utf-8'))
+
+
+def _surface_generated_files(*, kind, entry, output_dir: Path):
+    files = []
+    seen = set()
+
+    def _push(path: Path):
+        resolved = path.resolve()
+        if resolved in seen or not path.exists():
+            return
+        seen.add(resolved)
+        files.append(resolved)
+
+    if kind == "route":
+        for item in entry.get("hydration") or []:
+            component_name = item.get("component")
+            module_name = item.get("module")
+            if component_name:
+                _push(output_dir / "generated" / "components" / f"{component_name}.js")
+            if module_name:
+                _push(output_dir / "generated" / "modules" / f"{module_name}.js")
+    else:
+        component_name = entry.get("component")
+        module_name = entry.get("module")
+        if component_name:
+            _push(output_dir / "generated" / "components" / f"{component_name}.js")
+        if module_name:
+            _push(output_dir / "generated" / "modules" / f"{module_name}.js")
+
+    return files
 
 if __name__ == "__main__":
     main()

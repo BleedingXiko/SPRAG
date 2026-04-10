@@ -1,0 +1,21 @@
+from sprag import Controller
+
+from app.content_support import content_collection, find_content_doc
+
+
+class {{class_name}}ArticleController(Controller):
+    route = "{{route_path}}/[...segments]"
+
+    def load(self):
+        segments = tuple(self.request.params.get("segments") or [])
+        doc = find_content_doc("{{collection_name}}", segments, base_url="{{route_path}}")
+        title = doc.title if doc else "{{title}}"
+        return {
+            "__sprag_meta__": {"title": title},
+            "title": "{{title}}",
+            "doc": doc,
+            "docs": content_collection("{{collection_name}}", base_url="{{route_path}}"),
+            "route_path": "{{route_path}}",
+            "current_path": "{{route_path}}/" + "/".join(segments),
+            "collection_path": "app/content/{{collection_name}}/",
+        }
