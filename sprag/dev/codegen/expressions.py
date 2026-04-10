@@ -43,6 +43,13 @@ def _compile_expr(node, env, method_names=None):
             f"{_compile_expr(node.value, env, method_names=method_names)}"
             f"[{_compile_slice(node.slice, env, method_names=method_names)}]"
         )
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        # In browser codegen we reserve ``|`` for Python's dict-merge
+        # spelling and lower it to object spread. Bitwise-or is still
+        # intentionally unsupported here.
+        left = _compile_expr(node.left, env, method_names=method_names)
+        right = _compile_expr(node.right, env, method_names=method_names)
+        return f"({{ ...{left}, ...{right} }})"
     if isinstance(node, ast.BinOp):
         operator = _compile_binop(node.op)
         return (
@@ -94,45 +101,37 @@ def _compile_expr(node, env, method_names=None):
                 )
         return "{ " + ", ".join(chunks) + " }"
     if isinstance(node, ast.ListComp):
-        if len(node.generators) != 1:
-            raise JSCodegenError("Only one-generator list comprehensions are supported.")
-        generator = node.generators[0]
-        target_js, target_names = _compile_comp_target(generator.target)
-        next_env = dict(env)
-        for name in target_names:
-            next_env[name] = name
-        iter_expr = _compile_expr(generator.iter, env, method_names=method_names)
-        chain = f"(({iter_expr}) || [])"
-        if generator.ifs:
-            conds = " && ".join(
-                f"({_compile_expr(cond, next_env, method_names=method_names)})"
-                for cond in generator.ifs
-            )
-            chain = f"{chain}.filter(({target_js}) => {conds})"
+        chain, target_js, next_env = _compile_comprehension_chain(
+            node, env, method_names=method_names
+        )
         elt_js = _compile_expr(node.elt, next_env, method_names=method_names)
         return f"{chain}.map(({target_js}) => {elt_js})"
     if isinstance(node, ast.DictComp):
-        if len(node.generators) != 1:
-            raise JSCodegenError("Only one-generator dict comprehensions are supported.")
-        generator = node.generators[0]
-        target_js, target_names = _compile_comp_target(generator.target)
-        next_env = dict(env)
-        for name in target_names:
-            next_env[name] = name
-        iter_expr = _compile_expr(generator.iter, env, method_names=method_names)
-        chain = f"(({iter_expr}) || [])"
-        if generator.ifs:
-            conds = " && ".join(
-                f"({_compile_expr(cond, next_env, method_names=method_names)})"
-                for cond in generator.ifs
-            )
-            chain = f"{chain}.filter(({target_js}) => {conds})"
+        chain, target_js, next_env = _compile_comprehension_chain(
+            node, env, method_names=method_names
+        )
         key_js = _compile_expr(node.key, next_env, method_names=method_names)
         value_js = _compile_expr(node.value, next_env, method_names=method_names)
         return (
             f"Object.fromEntries({chain}.map(({target_js}) => "
             f"[{key_js}, {value_js}]))"
         )
+    if isinstance(node, ast.GeneratorExp):
+        # JS generators would require a larger runtime/lowering story than
+        # SPRAG has today. Lower eagerly through the same comprehension chain
+        # as list comprehensions so authors can still write the natural Python
+        # spelling anywhere an iterable/array-like value is acceptable.
+        chain, target_js, next_env = _compile_comprehension_chain(
+            node, env, method_names=method_names
+        )
+        elt_js = _compile_expr(node.elt, next_env, method_names=method_names)
+        return f"{chain}.map(({target_js}) => {elt_js})"
+    if isinstance(node, ast.SetComp):
+        chain, target_js, next_env = _compile_comprehension_chain(
+            node, env, method_names=method_names
+        )
+        elt_js = _compile_expr(node.elt, next_env, method_names=method_names)
+        return f"new Set({chain}.map(({target_js}) => {elt_js}))"
     if isinstance(node, ast.Call):
         # Python builtins that map to JS equivalents. These are compiled
         # before the generic callee path so the user can write idiomatic
@@ -256,6 +255,7 @@ def _compile_expr(node, env, method_names=None):
     if isinstance(node, ast.Await):
         return f"await {_compile_expr(node.value, env, method_names=method_names)}"
     if isinstance(node, ast.Lambda):
+        _ensure_no_namedexpr(node, context="lambda bodies")
         params = [arg.arg for arg in node.args.args]
         body = _compile_expr(node.body, env, method_names=method_names)
         # An arrow returning an object literal must be paren-wrapped, or
@@ -263,6 +263,15 @@ def _compile_expr(node, env, method_names=None):
         if isinstance(node.body, ast.Dict):
             body = f"({body})"
         return f"({', '.join(params)}) => {body}"
+    if isinstance(node, ast.NamedExpr):
+        if not isinstance(node.target, ast.Name):
+            raise JSCodegenError(
+                "Walrus operator only supports simple name targets in browser codegen."
+            )
+        target = node.target.id
+        env[target] = target
+        value = _compile_expr(node.value, env, method_names=method_names)
+        return f"({target} = {value})"
     if isinstance(node, ast.Compare):
         result = _compile_expr(node.left, env, method_names=method_names)
         for op, comparator in zip(node.ops, node.comparators):
@@ -313,6 +322,7 @@ _BUILTIN_CALLS = {
     "round": lambda args: f"Math.round({args[0]})",
     "print": lambda args: f"console.log({', '.join(args)})",
     "range": lambda args: _range_to_js(args),
+    "sum": lambda args: _sum_to_js(args),
 }
 
 
@@ -342,6 +352,48 @@ def _compile_builtin_call(node, env, *, method_names):
     handler = _BUILTIN_CALLS[node.func.id]
     args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
     return handler(args)
+
+
+def _sum_to_js(args):
+    # Python's sum(iterable, start=0) shape maps cleanly enough to a JS
+    # reduce for the common numeric cases that survive into browser code.
+    if len(args) == 1:
+        start = "0"
+    elif len(args) == 2:
+        start = args[1]
+    else:
+        raise JSCodegenError("sum() expects 1-2 arguments")
+    return f"(({args[0]}) || []).reduce((__sum, __value) => __sum + __value, {start})"
+
+
+def _compile_comprehension_chain(node, env, *, method_names):
+    _ensure_no_namedexpr(node, context="comprehensions")
+    if len(node.generators) != 1:
+        raise JSCodegenError(
+            f"Only one-generator {node.__class__.__name__} nodes are supported."
+        )
+    generator = node.generators[0]
+    target_js, target_names = _compile_comp_target(generator.target)
+    next_env = dict(env)
+    for name in target_names:
+        next_env[name] = name
+    iter_expr = _compile_expr(generator.iter, env, method_names=method_names)
+    chain = f"(({iter_expr}) || [])"
+    if generator.ifs:
+        conds = " && ".join(
+            f"({_compile_expr(cond, next_env, method_names=method_names)})"
+            for cond in generator.ifs
+        )
+        chain = f"{chain}.filter(({target_js}) => {conds})"
+    return chain, target_js, next_env
+
+
+def _ensure_no_namedexpr(node, *, context):
+    for child in ast.walk(node):
+        if isinstance(child, ast.NamedExpr):
+            raise JSCodegenError(
+                f"Walrus operator inside {context} is not supported in browser codegen yet."
+            )
 
 
 def _compile_comp_target(target):

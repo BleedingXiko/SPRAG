@@ -117,6 +117,28 @@ counter = page(
 
 The browser module above is still Python. SPRAG compiles it into the client bundle, ships the route data, wires the action bridge, and hydrates the component in place.
 
+## Browser Codegen Surface
+
+Browser-facing `Module` and `Component` code is compiled Python, not a full embedded Python runtime. SPRAG aims to support the Python spellings that map cleanly onto Ragot/JS, and to fail at compile time when a construct would require fake or misleading semantics.
+
+Supported browser codegen today includes:
+
+- `if` / `elif` / `else`, `for`, `while`, `break`, `continue`, `try` / `except` / `finally`
+- tuple unpacking in assignments and loop targets
+- one-generator list, dict, set, and generator comprehensions, including `if` filters and tuple targets
+- dict spread (`{**a, **b}`) plus dict-merge spellings `a | b` and `a |= b`
+- conservative walrus support for simple-name targets in ordinary expression contexts
+- conservative `match/case` support for literal/singleton, wildcard/capture, guarded, fixed-length sequence, simple mapping, `as` alias, and binding-free `|` patterns
+
+Deliberately unsupported examples still raise `JSCodegenError` with a specific message:
+
+- walrus inside comprehensions or lambda bodies
+- `match/case` class patterns, sequence `*rest`, mapping `**rest`, and OR patterns that bind names
+- browser-side server-only imports
+- Python constructs with no honest JS/Ragot equivalent
+
+If a construct matters for real app code and the compiler rejects it, treat that as a framework surface decision, not just a parser bug. Either the support should be added explicitly or the framework should document the intended alternative.
+
 ## What Makes SPRAG Different
 
 ### Routes, mounts, and shells are first-class
