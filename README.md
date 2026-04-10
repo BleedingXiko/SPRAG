@@ -1,42 +1,57 @@
 # SPRAG
 
-One Python language, two runtimes.
+**One Python language, two runtimes.**
 
-SPRAG is a Python-first web framework for building server-rendered, hydrated, mounted, and realtime apps without splitting your app across Python and JavaScript. You write `Controller`s, `Component`s, `Module`s, stores, services, and route surfaces in Python. SPRAG keeps the server runtime as Python, compiles the browser-facing pieces to JavaScript at build time, and ships them together as one framework-owned app shape.
+Write your entire web app in Python — server logic, UI components, browser behavior, state management, realtime events — and SPRAG compiles, ships, and runs it as a single coherent application.
 
-It is not a template language. It is not a Python wrapper around fetch calls. It is not “Python for the backend plus a separate frontend you still have to wire by hand.”
+No JavaScript to write. No frontend build chain to maintain. No "API layer" between your server and your UI.
 
-It is a full-stack framework with:
+```bash
+pip install spragkit
+sprag new myapp && cd myapp && sprag dev
+```
 
-- file-discovered routes and mounts
-- SSR-first pages with optional hydration
-- typed server actions
-- one `store(...)` API mirrored across server and browser
-- plain HTML/CSS shells
-- queues, watchers, SSE, and websocket flows
-- static output for dynamic content routes
-- a real `dist/` artifact you can run
+> **Status: pre-alpha.** The framework is real and working. The API surface is not pinned yet.
 
-> **Status: pre-alpha.** The shape is real and working. The API is not pinned yet.
+---
 
-PyPI distribution: `spragkit`. Python import package: `sprag`.
+## What SPRAG Actually Is
 
-## The Pitch
+SPRAG is a full-stack Python web framework where server controllers, browser components, browser modules, state stores, realtime events, and deployment artifacts are all authored in Python and managed by one toolchain.
 
-SPRAG has three core ideas:
+- **Routes** are file-discovered under `app/routes/`
+- **SSR is the default** — document routes are pure server HTML, hybrid routes render first then hydrate
+- **Browser code is compiled Python** — your `Module` and `Component` classes are real Python that SPRAG compiles to JavaScript at build time
+- **State is declared once** — `store(...)` works identically on server and browser
+- **Actions are typed** — server mutations go through schema-validated action dispatch
+- **Realtime is built in** — SSE, websockets, queues, watchers, and broadcast events are framework primitives
+- **`sprag build` produces a deployable artifact** — `sprag pack` optimizes it for production
 
-1. **The server and browser should feel like one framework.** `set_state`, `listen`, `emit`, `subscribe`, `timeout`, `interval`, and `adopt` follow the same mental model across runtimes.
-2. **SSR should be the default, not an afterthought.** Document routes are pure server HTML. Hybrid routes render first, then hydrate in place. Mounts get a boot document and a browser-owned app root.
-3. **The framework should own the plumbing.** Actions, event bridges, route discovery, store hydration, shell composition, and deployable build output are all part of the runtime story.
+### Not This
 
-## In One Route
+SPRAG is not a template language, not a Python wrapper around REST calls, not "Flask + React you still wire yourself," and not a virtual DOM framework.
 
-This is the basic SPRAG loop: load on the server, render in Python, hydrate behavior in Python, call a typed action, update state.
+---
+
+## Install
+
+```bash
+pip install spragkit
+```
+
+PyPI package: `spragkit`. Import package: `sprag`.
+
+Requires Python 3.9+. Runtime dependency: `specter-runtime`.
+
+---
+
+## 60-Second Example
+
+A hybrid route with server-rendered HTML, browser hydration, and a typed action:
 
 ```python
 # app/routes/counter/server.py
 from sprag import Controller, Field, Schema, action
-
 
 class CounterController(Controller):
     route = "/counter"
@@ -53,7 +68,6 @@ class CounterController(Controller):
 # app/routes/counter/components.py
 from sprag import Component, ui
 
-
 class CounterCard(Component):
     def render(self, props=None):
         return ui.div(
@@ -66,7 +80,6 @@ class CounterCard(Component):
 ```python
 # app/routes/counter/modules.py
 from sprag import Module
-
 
 class CounterModule(Module):
     def __init__(self, screen=None, state=None):
@@ -86,10 +99,8 @@ class CounterModule(Module):
 ```python
 # app/routes/counter/web.py
 from sprag import Screen, hydrate
-
 from .components import CounterCard
 from .modules import CounterModule
-
 
 class CounterScreen(Screen):
     modules = [CounterModule]
@@ -102,10 +113,8 @@ class CounterScreen(Screen):
 ```python
 # app/routes/counter/page.py
 from sprag import page
-
 from .server import CounterController
 from .web import CounterScreen
-
 
 counter = page(
     path="/counter",
@@ -115,53 +124,56 @@ counter = page(
 )
 ```
 
-The browser module above is still Python. SPRAG compiles it into the client bundle, ships the route data, wires the action bridge, and hydrates the component in place.
+The `Module` above is Python. SPRAG compiles it to JavaScript, ships it with the route, wires the action bridge, and hydrates the component in place. No handoff. No separate frontend.
 
-## Browser Codegen Surface
+---
 
-Browser-facing `Module` and `Component` code is compiled Python, not a full embedded Python runtime. SPRAG aims to support the Python spellings that map cleanly onto Ragot/JS, and to fail at compile time when a construct would require fake or misleading semantics.
+## Core Concepts
 
-Supported browser codegen today includes:
+### Routes and Mounts
 
-- `if` / `elif` / `else`, `for`, `while`, `break`, `continue`, `try` / `except` / `finally`
-- tuple unpacking in assignments and loop targets
-- one-generator list, dict, set, and generator comprehensions, including `if` filters and tuple targets
-- dict spread (`{**a, **b}`) plus dict-merge spellings `a | b` and `a |= b`
-- conservative walrus support for simple-name targets in ordinary expression contexts
-- conservative `match/case` support for literal/singleton, wildcard/capture, guarded, fixed-length sequence, simple mapping, `as` alias, and binding-free `|` patterns
+SPRAG has two surface types:
 
-Deliberately unsupported examples still raise `JSCodegenError` with a specific message:
+| Surface | Purpose | Render |
+|---|---|---|
+| `page(mode="document")` | Pure SSR page | Server HTML, no JS |
+| `page(mode="hybrid")` | SSR + hydration | Server HTML, then browser takes over |
+| `mount(...)` | Browser-owned app | Boot document, browser owns the root |
 
-- walrus inside comprehensions or lambda bodies
-- `match/case` class patterns, sequence `*rest`, mapping `**rest`, and OR patterns that bind names
-- browser-side server-only imports
-- Python constructs with no honest JS/Ragot equivalent
+Routes live under `app/routes/`. Mounts live under `app/mounts/`. Both are file-discovered.
 
-If a construct matters for real app code and the compiler rejects it, treat that as a framework surface decision, not just a parser bug. Either the support should be added explicitly or the framework should document the intended alternative.
+### Shared State
 
-## What Makes SPRAG Different
-
-### Routes, mounts, and shells are first-class
-
-SPRAG has two server-known surface types:
-
-- `page(...)` for routes
-- `mount(...)` for browser-owned app entries
-
-Routes can be:
-
-- `mode="document"` for pure SSR
-- `mode="hybrid"` for SSR + hydration
-
-Mounts are not a route mode. A mount returns a boot document and lets the browser own the root app after load.
-
-The shared frame stays in plain HTML and CSS:
+One declaration, two runtimes:
 
 ```python
-# app/__init__.py
-from sprag import App, shell
+# app/stores.py
+from sprag import store
 
+session = store("session", initial={
+    "user": {"name": "Ada"},
+    "prefs": {"theme": "dark"},
+})
+```
 
+```python
+# works identically on server or browser
+session.set("user.name", "Grace")
+session.patch({"prefs": {"theme": "light"}})
+session.subscribe(
+    lambda user: print(user["name"]),
+    selector=lambda s: s["user"],
+    immediate=True,
+)
+```
+
+Server-side it backs a Specter model. Browser-side SPRAG rewrites the import to a generated shim hydrated from `window.__SPRAG_STORES__`.
+
+### Shells
+
+The shared frame is plain HTML and CSS:
+
+```python
 app = App(
     routes="app.routes",
     shell=shell(template="app/shell.html", css=["app/shell.css"]),
@@ -176,283 +188,212 @@ app = App(
 </div>
 ```
 
-For per-route or per-mount styling, use `css=[...]` on the surface itself.
-Keep `shell=` for full shell overrides or shell composition.
+Per-route styling via `css=[...]` on the surface itself.
 
-```python
-page(
-    path="/counter",
-    controller=CounterController,
-    screen=CounterScreen,
-    mode="hybrid",
-    css=["app/routes/counter/counter.css"],
-)
+### Dynamic Routes and Content
+
+File-based dynamic params and catch-all segments:
+
+```
+app/routes/blog/[slug]/page.py       -> /blog/my-post
+app/routes/docs/[...segments]/page.py -> /docs/getting-started/install
 ```
 
-### One store API, mirrored across both runtimes
+Static builds expand dynamic routes via `page(..., static_paths=...)`:
 
 ```python
-# app/stores.py
-from sprag import store
-
-
-session = store(
-    "session",
-    initial={"user": {"name": "Ada"}, "prefs": {"theme": "dark"}},
-)
-```
-
-```python
-# same source on server or browser
-session.set("user.name", "Grace")
-session.patch({"prefs": {"theme": "light"}})
-name = session.select("user.name")
-session.subscribe(
-    lambda user: print(user["name"]),
-    selector=lambda s: s["user"],
-    immediate=True,
-)
-```
-
-On the server that is backed by Specter state. In browser code SPRAG rewrites the import to a generated stores shim and hydrates it from `window.__SPRAG_STORES__`. You declare it once.
-
-### Dynamic route patterns are part of the build model
-
-SPRAG supports route patterns like `[slug]` and `[...segments]`, and the static build expects you to declare the concrete paths it should emit.
-
-```python
-# app/routes/docs/[...segments]/page.py
-from sprag import page
-
-from app.content import docs_static_paths
-
-from .server import DocsArticleController
-from .web import DocsArticleScreen
-
-
-docs_article = page(
+docs = page(
     path="/docs/[...segments]",
-    controller=DocsArticleController,
-    screen=DocsArticleScreen,
+    controller=DocsController,
+    screen=DocsScreen,
     mode="document",
-    static_paths=docs_static_paths,
+    static_paths=lambda: [{"segments": list(d.path_parts)} for d in docs_collection()],
 )
 ```
 
-```python
-# app/content.py
-from pathlib import Path
+Markdown content loading is built in via `load_markdown_tree()` and `load_markdown_document()`.
 
-from sprag import load_markdown_tree
+### Realtime
 
-
-CONTENT_ROOT = Path(__file__).resolve().parent / "content"
-
-
-def docs_collection():
-    return load_markdown_tree(CONTENT_ROOT / "docs", base_url="/docs")
-
-
-def docs_static_paths():
-    return [{"segments": list(doc.path_parts)} for doc in docs_collection()]
-```
-
-That means the same framework can serve dynamic route patterns in dev and emit concrete static HTML for them at build time.
-
-### Realtime is framework-level, not bolted on
-
-SSE is built into the HTTP app through the bus bridge:
+SSE broadcast through the bus bridge:
 
 ```python
-from sprag import QueueService, bus
-
-
 class LabJobQueue(QueueService):
     def handle_item(self, item):
-        bus.emit(
-            "sprag:broadcast",
-            {"event": "lab:job.done", "payload": {"id": item["id"]}},
-        )
+        bus.emit("sprag:broadcast", {"event": "lab:job.done", "payload": item})
 ```
 
 ```python
-class QueueDemoModule(Module):
+class JobModule(Module):
     def on_start(self):
         self.listen("lab:job.done", self.on_job_done)
 ```
 
-Websocket ingress is also part of the framework surface:
+Websocket ingress through the shared socket bridge:
 
 ```python
-class SocketDemoController(Controller):
-    route = "/socket-demo"
-
+class ChatController(Controller):
     def build_events(self, handler):
-        handler.on("lab:socket.ping", self.handle_ping)
+        handler.on("chat:message", self.handle_message)
 ```
 
 ```python
-class SocketDemoModule(Module):
+class ChatModule(Module):
     def on_start(self):
-        self.on_socket("lab:socket.pong", self.on_pong)
+        self.on_socket("chat:reply", self.on_reply)
 
-    def send_ping(self):
-        self.emit_socket("lab:socket.ping", {"origin": "browser"})
+    def send(self, text):
+        self.emit_socket("chat:message", {"text": text})
 ```
 
-If an app declares real socket ingress, SPRAG's `server_mode="auto"` can promote it to websocket transport automatically.
+If any surface declares socket ingress, `server_mode="auto"` promotes to websocket transport automatically.
 
-## Quick Start
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e /path/to/SPRAG
-
-sprag new myapp
-cd myapp
-sprag add content guides
-sprag dev --port 8000
-```
-
-Open `http://127.0.0.1:8000/`.
-
-Before chasing framework bugs, run a structural check:
-
-```bash
-sprag doctor
-```
-
-If something looks wrong in hydration or browser behavior, inspect the generated surface:
-
-```bash
-sprag inspect /counter --rebuild
-sprag inspect /counter --open-files
-```
-
-Build a deployable artifact:
-
-```bash
-sprag build
-cd dist
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-python3 server.py --port 8000
-```
-
-The dist bundle contains:
-
-- your app package
-- the SPRAG runtime
-- compiled browser assets under `public/`
-- a runnable `server.py`
-- a rewritten `requirements.txt` with `specter-runtime`
-
-## Showcase
-
-The `labs` template is the clearest picture of the framework's current power. It is not a toy marketing app. It is basically a running canary for the real surface area.
-
-```bash
-sprag new labs-demo --template=labs
-cd labs-demo
-sprag dev --port 8000
-```
-
-It includes:
-
-- `counter` for the basic `Controller` + `Module` + `Component` loop
-- `virtual-scroll` for `@virtual_scroll` over a growing data set
-- `store-demo` for a flat shared `store(...)`
-- `nested-store-demo` for path-based nested state and selector subscriptions
-- `queue-demo` for `QueueService` plus SSE fanout to the browser
-- `watcher-demo` for service-owned polling and broadcast updates
-- `operation-demo` for `Operation.run` success and failure paths
-- `animation-demo` for `@animate` and DOM-driven transitions
-- `socket-demo` for shared websocket transport and controller ingress
-- `lifecycle-mount` for a browser-owned mounted app with child teardown
-
-## Project Shape
-
-A normal app:
-
-```text
-myapp/
-├── app/
-│   ├── __init__.py
-│   ├── shell.html
-│   ├── shell.css
-│   ├── stores.py
-│   ├── mounts/
-│   └── routes/
-│       ├── home/
-│       ├── counter/
-│       └── about/
-├── requirements.txt
-└── README.md
-```
-
-A typical hybrid route:
-
-```text
-app/routes/counter/
-├── __init__.py
-├── server.py
-├── components.py
-├── modules.py
-├── web.py
-└── page.py
-```
-
-SPRAG discovers surfaces by walking `app.routes` and `app.mounts`, including dynamic path directories like `[slug]` and `[...segments]`.
+---
 
 ## CLI
 
-### Scaffolding
+### Create
 
 ```bash
-sprag new <name>
-sprag new <name> --template=docs
-sprag new <name> --template=labs
-sprag add route <name> --mode=document
-sprag add route <name> --mode=hybrid
-sprag add mount <name>
-sprag add content <name>
+sprag new myapp                      # default template
+sprag new myapp --template=bare      # minimal skeleton
+sprag new myapp --template=docs      # static docs/blog site
+sprag new myapp --template=labs      # full framework showcase
 ```
 
-### Build and serve
+### Develop
 
 ```bash
-sprag dev
-sprag dev --port 8000
-sprag build
-sprag routes
+sprag dev                            # dev server with hot reload
+sprag dev --port 3000
+sprag routes                         # list all routes, mounts, and actions
+```
+
+### Scaffold
+
+```bash
+sprag add route dashboard --mode=hybrid
+sprag add route about --mode=document
+sprag add mount admin-panel
+sprag add content guides             # markdown collection + routes
+```
+
+### Build and Deploy
+
+```bash
+sprag build                          # compile to dist/
+sprag pack                           # optimize dist for production
+sprag pack --zip                     # optimize + archive
+```
+
+`sprag pack` runs:
+- CSS/JS minification (terser/cleancss if installed, regex fallback otherwise)
+- Python bytecode compilation with source stripping
+- Image optimization with WebP + responsive variants (requires Pillow)
+- Pre-gzip compression of static assets
+- Build validation
+
+```bash
+sprag pack --skip-bytecode           # minify + images + gzip only
+sprag pack --skip-images             # no image optimization
+sprag pack --image-quality 60        # aggressive image compression
+sprag pack --no-webp --no-srcset     # skip variant generation
 ```
 
 ### Diagnostics
 
 ```bash
-sprag doctor
-sprag doctor --verbose
-sprag inspect /counter
-sprag inspect /counter --rebuild
-sprag inspect /counter --open-files
-sprag inspect /lifecycle-mount --open-files
+sprag doctor                         # structural health check
+sprag doctor --verbose               # with tracebacks
+sprag inspect /counter --rebuild     # show compiled output for a route
+sprag inspect /counter --open-files  # just the generated file paths
 ```
 
-`sprag add content <name>` scaffolds a markdown-backed collection under `app/content/<name>/` plus a document index route and catch-all article route under `app/routes/<name>/`. It is the fast way to turn a `bare` app into a real content site without hand-wiring `app/content_support.py`, static paths, and the article route shape yourself.
+---
 
-`sprag doctor` is the fast health check for the current app. It verifies project shape, app loading, route and mount importability, subclass sanity, buildability, and transport dependencies, then prints a short green/red checklist.
+## Project Shape
 
-`sprag inspect <path>` is the practical "what did SPRAG compile this into?" tool. It accepts a concrete route or mount path, reads `.sprag/manifest.json`, and prints the matched surface metadata, hydration entries, generated file paths, and the compiled JS for just that surface.
+```
+myapp/
+├── app/
+│   ├── __init__.py          # App(...) declaration
+│   ├── shell.html           # shared layout
+│   ├── shell.css            # shared styles
+│   ├── stores.py            # cross-runtime state
+│   ├── routes/
+│   │   ├── home/            # document route
+│   │   ├── counter/         # hybrid route
+│   │   └── blog/[slug]/     # dynamic route
+│   ├── mounts/
+│   │   └── dashboard/       # browser-owned mount
+│   └── content/
+│       └── docs/            # markdown content
+└── requirements.txt
+```
 
-Use `--rebuild` when you want inspect output from a fresh preview build. Use `--open-files` when you only want the generated file paths without dumping the compiled source.
+Each hybrid route:
 
-## Under The Hood
+```
+app/routes/counter/
+├── __init__.py
+├── page.py          # page(...) declaration
+├── server.py        # Controller + @actions
+├── web.py           # Screen + hydrate(...)
+├── components.py    # Component classes (both runtimes)
+└── modules.py       # Module classes (browser, compiled to JS)
+```
 
-SPRAG sits on top of two runtimes and tries to make them feel like one framework:
+---
 
-- **Specter** on the server for controllers, services, queues, watchers, operations, schemas, and orchestration
-- **Ragot** in the browser for components, modules, DOM ownership, stores, hydration, virtual scrolling, and animation
+## Browser Codegen
 
-SPRAG's job is to turn those into one coherent authoring model instead of exposing them as two unrelated systems.
+Browser `Module` and `Component` code is compiled Python — not an embedded Python interpreter. SPRAG compiles the subset of Python that maps cleanly to JavaScript and fails at build time when a construct would produce misleading behavior.
+
+**Supported:**
+
+- Control flow: `if`/`elif`/`else`, `for`, `while`, `break`, `continue`, `try`/`except`/`finally`
+- Comprehensions: list, dict, set, generator (one-generator with `if` filters)
+- Destructuring: tuple unpacking in assigns and loop targets
+- Dict operations: spread `{**a}`, merge `a | b`, augmented merge `a |= b`
+- Pattern matching: `match/case` with literal, wildcard, capture, guard, sequence, mapping, `as`, and `|` patterns
+- Walrus operator: simple-name targets in expression contexts
+- String methods: `.upper()`, `.lower()`, `.strip()` map to JS equivalents
+- Builtins: `len`, `str`, `int`, `float`, `bool`, `abs`, `min`, `max`, `round`, `print`, `range`, `sum`
+- Async: `async def`, `await`
+- Decorators: `@action`, `@debounce`, `@throttle`, `@animate`, `@virtual_scroll`, `@infinite_scroll`, `ref()`
+
+**Deliberately rejected** (clear `JSCodegenError` at build time):
+
+- Walrus inside comprehensions or lambda bodies
+- `match/case` class patterns, `*rest`, `**rest`, binding OR patterns
+- Server-only imports in browser code
+- Python constructs with no honest JS equivalent
+
+---
+
+## The Labs Template
+
+The `labs` template is the framework's running test surface — every primitive SPRAG exposes gets exercised in a real scaffolded app.
+
+```bash
+sprag new labs --template=labs && cd labs && sprag dev
+```
+
+Includes: counter, virtual scroll, flat store, nested store with selectors, queue + SSE, watcher polling, operation success/failure, CSS animation, websocket roundtrip, cross-wired queue-to-store flow, and a lifecycle mount.
+
+---
+
+## Under the Hood
+
+SPRAG sits on two runtimes:
+
+- **[Specter](https://github.com/BleedingXiko/SPECTER)** on the server — controllers, services, queues, watchers, operations, lifecycle management, and orchestration
+- **Ragot** in the browser — components, modules, DOM ownership, stores, hydration, virtual scrolling, animation, and teardown
+
+SPRAG makes them feel like one framework. `set_state`, `listen`, `emit`, `subscribe`, `timeout`, `interval`, and `adopt` follow the same mental model on both sides.
+
+---
+
+## License
+
+MIT

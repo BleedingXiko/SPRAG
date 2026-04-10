@@ -37,6 +37,7 @@ def main(argv=None):
 
 _SUBCOMMAND_HELP = {
     "build": "Build the app into a deployable artifact",
+    "pack": "Optimize a built dist for production deployment",
     "routes": "List all discovered routes with actions and schemas",
     "dev": "Start the dev server with file watching",
     "doctor": "Run structural diagnostics against the current SPRAG app",
@@ -45,11 +46,26 @@ _SUBCOMMAND_HELP = {
 
 def _build_parser():
     parser = argparse.ArgumentParser(prog="sprag", description="SPRAG framework CLI")
-    parser.add_argument("--version", action="version", version=f"sprag {__version__}")
+    parser.add_argument("--version", action="version", version=_version_string())
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     for name, help_text in _SUBCOMMAND_HELP.items():
         sub = subparsers.add_parser(name, help=help_text)
+        if name == "pack":
+            sub.add_argument("--dist", default="dist", help="Path to the dist directory to optimize")
+            sub.add_argument("--zip", action="store_true", help="Create a ZIP archive of the packed dist")
+            sub.add_argument("--dry-run", action="store_true", help="Preview without writing changes")
+            sub.add_argument("--verbose", action="store_true", help="Detailed logging")
+            sub.add_argument("--skip-images", action="store_true", help="Skip image optimization")
+            sub.add_argument("--skip-minify", action="store_true", help="Skip CSS/JS minification")
+            sub.add_argument("--skip-bytecode", action="store_true", help="Skip bytecode compilation")
+            sub.add_argument("--skip-gzip", action="store_true", help="Skip pre-gzip compression")
+            sub.add_argument("--no-webp", action="store_true", help="Skip WebP variant generation")
+            sub.add_argument("--no-srcset", action="store_true", help="Skip responsive image variants")
+            sub.add_argument("--image-quality", type=int, default=80, help="Image compression quality (1-100)")
+            sub.add_argument("--image-max-width", type=int, default=1920, help="Max image width in pixels")
+            sub.set_defaults(func=cmd_pack)
+            continue
         sub.add_argument("--app", dest="app_target", default=None)
         sub.add_argument("--project-root", default=os.getcwd())
         sub.add_argument("--output", default="dist" if name == "build" else ".sprag")
@@ -130,6 +146,27 @@ def _build_parser():
     inspect_parser.set_defaults(func=cmd_inspect)
 
     return parser
+
+
+def cmd_pack(args):
+    from .pack import SpragPack
+
+    dist_dir = Path(args.dist).resolve()
+    packer = SpragPack(
+        dist_dir,
+        zip_output=args.zip,
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+        skip_images=args.skip_images,
+        skip_minify=args.skip_minify,
+        skip_bytecode=args.skip_bytecode,
+        skip_gzip=args.skip_gzip,
+        generate_webp=not args.no_webp,
+        generate_srcset=not args.no_srcset,
+        image_quality=args.image_quality,
+        image_max_width=args.image_max_width,
+    )
+    packer.execute()
 
 
 def cmd_routes(args):
@@ -815,6 +852,27 @@ def _surface_generated_files(*, kind, entry, output_dir: Path):
             _push(output_dir / "generated" / "modules" / f"{module_name}.js")
 
     return files
+
+def _version_string():
+    parts = [f"sprag {__version__}"]
+    try:
+        import specter
+        parts.append(f"specter {specter.__version__}")
+    except Exception:
+        parts.append("specter (not installed)")
+    ragot_bundle = Path(__file__).resolve().parent.parent / "assets" / "ragot.esm.min.js"
+    if ragot_bundle.exists():
+        import re
+        head = ragot_bundle.read_text(encoding="utf-8")[:500]
+        match = re.search(r"@version\s+([\d.]+)", head)
+        if match:
+            parts.append(f"ragot {match.group(1)}")
+        else:
+            parts.append("ragot (bundled)")
+    else:
+        parts.append("ragot (bundle missing)")
+    return " | ".join(parts)
+
 
 if __name__ == "__main__":
     main()

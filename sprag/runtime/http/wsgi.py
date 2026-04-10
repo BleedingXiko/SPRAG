@@ -2,16 +2,38 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import mimetypes
 import os
 import sys
 import traceback
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 from gevent.pool import Pool
 from gevent.pywsgi import WSGIServer
+
+# Content types eligible for gzip compression.
+_COMPRESSIBLE_TYPES = {
+    "text/html",
+    "text/css",
+    "text/javascript",
+    "application/javascript",
+    "application/json",
+    "text/plain",
+    "text/xml",
+    "application/xml",
+    "image/svg+xml",
+}
+
+_GZIP_MIN_SIZE = 1024
+_GZIP_LEVEL = 5
+_GZIP_CACHE_MAX = 128
+_gzip_cache: OrderedDict = OrderedDict()
+_gzip_cache_lock = Lock()
 
 from ..request import Request
 from ..routing import match_page_route, normalize_route_path
@@ -95,7 +117,7 @@ class SpragWSGIApp:
             print(f"[SPRAG] data error on {page.path}: {result.data_error}", file=sys.stderr)
 
         body = result.html.encode("utf-8")
-        return self._respond(start_response, 200, "text/html; charset=utf-8", body)
+        return self._respond_gzip(environ, start_response, 200, "text/html; charset=utf-8", body)
 
     # -- Mount rendering ----------------------------------------------------
 
@@ -128,7 +150,7 @@ class SpragWSGIApp:
             print(f"[SPRAG] mount data error on {mount.path}: {result.data_error}", file=sys.stderr)
 
         body = result.html.encode("utf-8")
-        return self._respond(start_response, 200, "text/html; charset=utf-8", body)
+        return self._respond_gzip(environ, start_response, 200, "text/html; charset=utf-8", body)
 
     # -- Action dispatch -----------------------------------------------------
 
@@ -250,6 +272,18 @@ class SpragWSGIApp:
 
         if file_path.is_file():
             content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+            # Serve pre-compressed .gz file if client accepts and it exists
+            if _client_accepts_gzip(environ):
+                gz_path = file_path.with_name(file_path.name + ".gz")
+                if gz_path.is_file():
+                    body = gz_path.read_bytes()
+                    return self._respond(
+                        start_response, 200, content_type, body,
+                        extra_headers=[
+                            ("Content-Encoding", "gzip"),
+                            ("Vary", "Accept-Encoding"),
+                        ],
+                    )
             body = file_path.read_bytes()
             return self._respond(start_response, 200, content_type, body)
 
@@ -275,13 +309,38 @@ class SpragWSGIApp:
                 headers["Content-Length"] = value
         return headers
 
-    def _respond(self, start_response, status, content_type, body):
-        status_line = f"{status} {_STATUS_PHRASES.get(status, 'Unknown')}"
-        start_response(status_line, [
+    def _respond(self, start_response, status, content_type, body, *, extra_headers=None, environ=None):
+        headers = [
             ("Content-Type", content_type),
-            ("Content-Length", str(len(body))),
-        ])
+        ]
+        if extra_headers:
+            headers.extend(extra_headers)
+
+        # Runtime gzip for eligible dynamic responses (not already compressed)
+        already_encoded = any(k.lower() == "content-encoding" for k, v in headers)
+        if (
+            not already_encoded
+            and environ is not None
+            and len(body) >= _GZIP_MIN_SIZE
+            and _client_accepts_gzip(environ)
+            and _is_compressible_type(content_type)
+        ):
+            compressed = _gzip_compress(body)
+            if compressed is not None and len(compressed) < len(body):
+                body = compressed
+                headers.append(("Content-Encoding", "gzip"))
+                headers.append(("Vary", "Accept-Encoding"))
+
+        headers.append(("Content-Length", str(len(body))))
+        status_line = f"{status} {_STATUS_PHRASES.get(status, 'Unknown')}"
+        start_response(status_line, headers)
         return [body]
+
+    def _respond_gzip(self, environ, start_response, status, content_type, body, *, extra_headers=None):
+        return self._respond(
+            start_response, status, content_type, body,
+            extra_headers=extra_headers, environ=environ,
+        )
 
     def _json_response(self, start_response, status, payload):
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -376,6 +435,23 @@ def resolve_server_mode(app, override=None):
     if mode != "auto":
         return mode
     return "websocket" if app_uses_socket_bridge(app) else "wsgi"
+
+
+def _client_accepts_gzip(environ) -> bool:
+    accept = environ.get("HTTP_ACCEPT_ENCODING", "")
+    return "gzip" in accept
+
+
+def _is_compressible_type(content_type: str) -> bool:
+    base_type = content_type.split(";")[0].strip().lower()
+    return base_type in _COMPRESSIBLE_TYPES
+
+
+def _gzip_compress(data: bytes) -> bytes | None:
+    try:
+        return gzip.compress(data, compresslevel=_GZIP_LEVEL)
+    except Exception:
+        return None
 
 
 def app_uses_socket_bridge(app) -> bool:
