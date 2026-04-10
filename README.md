@@ -19,6 +19,8 @@ It is a full-stack framework with:
 
 > **Status: pre-alpha.** The shape is real and working. The API is not pinned yet.
 
+PyPI distribution: `spragkit`. Python import package: `sprag`.
+
 ## The Pitch
 
 SPRAG has three core ideas:

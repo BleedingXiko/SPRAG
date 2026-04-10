@@ -13,11 +13,11 @@ from urllib.parse import parse_qs, urlparse
 from gevent.pool import Pool
 from gevent.pywsgi import WSGIServer
 
-from .request import Request
-from .routing import match_page_route, normalize_route_path
-from .runtime import render_mount, render_page
-from .socket_bridge import controller_uses_socket_bridge
-from .server import ActionDispatchError, bus, dispatch_controller_action
+from ..request import Request
+from ..routing import match_page_route, normalize_route_path
+from ..rendering import render_mount, render_page
+from ..socket_bridge import controller_uses_socket_bridge
+from ..server import ActionDispatchError, bus, dispatch_controller_action
 
 SERVER_MODES = ("auto", "wsgi", "websocket")
 

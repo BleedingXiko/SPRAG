@@ -2,15 +2,15 @@
 
 __version__ = "0.1.0"
 
-from . import dom
-from .actions import action
-from .app import App
-from .content import ContentDocument, load_markdown_document, load_markdown_tree, slugify
-from .mount import Mount, mount
-from .page import Page, page
-from .request import Request
-from .shell import Shell, shell
-from .server import (
+from .runtime import dom
+from .runtime.app import App
+from .runtime.content import ContentDocument, load_markdown_document, load_markdown_tree, slugify
+from .runtime.mount import Mount, mount
+from .runtime.page import Page, page
+from .runtime.request import Request
+from .runtime.shell import Shell, shell
+from .runtime.server import (
+    action,
     # Core (already exposed)
     Controller,
     Field,
@@ -51,9 +51,9 @@ from .server import (
     ServiceManager,
     boot,
 )
-from .stores import StoreBridge, declared_stores, store
-from .ui import ui
-from .web import (
+from .runtime.stores import StoreBridge, declared_stores, store
+from .runtime.ui import ui
+from .runtime.browser import (
     Component,
     Module,
     Screen,
@@ -94,7 +94,7 @@ __all__ = [
     "declared_stores",
     "store",
     "slugify",
-    # Client-side decorators (justified — see sprag/web.py)
+    # Client-side decorators (justified — see sprag/browser.py)
     "animate",
     "debounce",
     "infinite_scroll",

@@ -10,8 +10,8 @@ from __future__ import annotations
 import ast
 import json
 
-from ..attrs import normalize_attr_key
-from ..stores import STORE_METHOD_JS, STORE_METHODS_OPTIONS_KWARGS
+from ...runtime.attrs import normalize_attr_key
+from ...runtime.stores import STORE_METHOD_JS, STORE_METHODS_OPTIONS_KWARGS
 from .mappings import (
     JSCodegenError,
     _DOM_METHOD_MAP,

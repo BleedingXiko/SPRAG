@@ -128,7 +128,7 @@ class App:
         self._controller_registry_keys.clear()
 
     def build(self, output_dir=".sprag"):
-        from .compiler import build_web_preview
+        from ..dev.build import build_web_preview
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -153,7 +153,7 @@ class App:
         server_mode: str | None = None,
     ):
         """Boot services, build assets, and start the application server."""
-        from .http_server import serve_sprag_app
+        from .http import serve_sprag_app
 
         self.boot()
         self.build(build_dir)

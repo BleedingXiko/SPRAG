@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..stores import StoreBridge
+from ...runtime.stores import StoreBridge
 from .components import compile_component_class
 from .dependencies import used_browser_class_refs
 from .mappings import JSCodegenError
@@ -21,7 +21,7 @@ from .modules import compile_module_class
 def emit_ragot_runtime(output_dir: Path, project_root: Path) -> None:
     vendor_dir = output_dir / "vendor"
     vendor_dir.mkdir(parents=True, exist_ok=True)
-    assets_dir = Path(__file__).resolve().parent.parent / "assets"
+    assets_dir = Path(__file__).resolve().parents[2] / "assets"
     runtime_source = assets_dir / "ragot.esm.min.js"
     (vendor_dir / "ragot.esm.min.js").write_text(
         runtime_source.read_text(encoding="utf-8"),
@@ -85,7 +85,7 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
 
 def _collect_browser_dependencies(component_classes: dict[str, type], module_classes: dict[str, type]) -> None:
     """Recursively include shared browser classes referenced by generated classes."""
-    from ..web import Component, Module
+    from ...runtime.browser import Component, Module
 
     queue = list(component_classes.values()) + list(module_classes.values())
     seen = set()

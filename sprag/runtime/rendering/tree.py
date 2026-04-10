@@ -6,9 +6,9 @@ import html
 import json
 from dataclasses import dataclass, field
 
-from .attrs import normalize_attr_key
-from .ui import HTMLNode, ElementNode, ForNode, LazyImageNode, _resolve_key
-from .web import Component, HydrateMount, SSRMount
+from ..attrs import normalize_attr_key
+from ..ui import HTMLNode, ElementNode, ForNode, LazyImageNode, _resolve_key
+from ..browser import Component, HydrateMount, SSRMount
 
 VOID_TAGS = {
     "area",

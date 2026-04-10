@@ -8,9 +8,9 @@ import shutil
 import textwrap
 from pathlib import Path
 
-from . import __file__ as sprag_init_file
-from .compiler import build_web_preview
-from .http_server import resolve_server_mode
+from .. import __file__ as sprag_init_file
+from .build import build_web_preview
+from ..runtime.http import resolve_server_mode
 
 
 def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path | None = None) -> dict:
@@ -34,9 +34,12 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
     app_project_root = Path(project_root).resolve() if project_root else _project_root_for_package(app_package)
     package_names = [app_package, "sprag"]
     for package_name in package_names:
-        source_dir = _package_dir(package_name)
         target_dir = output_dir / package_name
-        _replace_dir(target_dir, source_dir=source_dir)
+        if package_name == "sprag":
+            _replace_sprag_runtime_dir(target_dir)
+        else:
+            source_dir = _package_dir(package_name)
+            _replace_dir(target_dir, source_dir=source_dir)
 
     _write_text(output_dir / "server.py", _dist_server_source(app_target))
     server_mode = resolve_server_mode(app)
@@ -85,8 +88,6 @@ def _app_package_name(app):
 
 
 def _package_dir(package_name):
-    if package_name == "sprag":
-        return Path(sprag_init_file).resolve().parent
     module = importlib.import_module(package_name)
     return Path(module.__file__).resolve().parent
 
@@ -104,6 +105,17 @@ def _replace_dir(target_dir: Path, *, source_dir: Path | None = None):
     shutil.copytree(
         source_dir,
         target_dir,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
+    )
+
+
+def _replace_sprag_runtime_dir(target_dir: Path):
+    sprag_root = Path(sprag_init_file).resolve().parent
+    _replace_dir(target_dir)
+    shutil.copy2(sprag_root / "__init__.py", target_dir / "__init__.py")
+    shutil.copytree(
+        sprag_root / "runtime",
+        target_dir / "runtime",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
     )
 
@@ -157,8 +169,8 @@ def _dist_server_source(app_target):
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
 
-        from sprag.http_server import resolve_server_mode, serve_sprag_app
-        from sprag.loader import load_app
+        from sprag.runtime.http import resolve_server_mode, serve_sprag_app
+        from sprag.runtime.loader import load_app
 
 
         def main(argv=None):

@@ -14,7 +14,7 @@ focused file rather than a single monolith:
   - ``statements``   - block-level statement compilation (if/for/try/etc)
   - ``modules``      - ``compile_module_class`` + setup/decorator wrappers
   - ``components``   - ``compile_component_class`` + lifecycle merge
-  - ``emit``         - high-level emitters used by ``sprag/compiler.py``
+  - ``emit``         - high-level emitters used by the SPRAG build pipeline
 
 Public API: only the names re-exported here are considered stable. Other
 modules in the package are implementation details.

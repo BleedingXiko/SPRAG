@@ -70,7 +70,7 @@ def _method_source(method):
 
 
 def compile_module_class(module_class) -> str:
-    from ..web import RefDescriptor  # local import to avoid circular dep
+    from ...runtime.browser import RefDescriptor  # local import to avoid circular dep
 
     # Stores referenced in the source file (``from app.stores import counter``).
     # Stashed on the per-call env so _compile_expr can route store-method
@@ -253,7 +253,7 @@ export class {module_class.__name__} extends Module {{
 def _browser_class_imports(compiled_js: str, refs: dict[str, type], *, current_class, kind: str) -> str:
     """Emit JS imports for visible browser classes that appear in compiled JS."""
     import re
-    from ..web import Component, Module
+    from ...runtime.browser import Component, Module
 
     lines = []
     for local_name, ref in sorted(refs.items()):
@@ -301,7 +301,7 @@ def _server_only_imports_for_class(module_class) -> list[str]:
     for node in tree.body:
         if not isinstance(node, ast.ImportFrom):
             continue
-        if node.module not in {"sprag", "sprag.server"}:
+        if node.module not in {"sprag", "sprag.runtime.server"}:
             continue
         for alias in node.names:
             if alias.name == "*":

@@ -43,6 +43,22 @@ _current_request = ContextVar("sprag_current_request", default=_UNSET)
 _current_app = ContextVar("sprag_current_app", default=_UNSET)
 
 
+def action(fn=None, *, schema=None, name=None):
+    """Mark a controller method as a route action."""
+
+    def decorator(method):
+        method._sprag_action = True
+        method._sprag_action_meta = {
+            "name": name or method.__name__,
+            "schema": schema,
+        }
+        return method
+
+    if fn is not None:
+        return decorator(fn)
+    return decorator
+
+
 @contextmanager
 def controller_context(*, request=None, app=None):
     """Expose per-request state to lifecycle-owned controllers safely."""

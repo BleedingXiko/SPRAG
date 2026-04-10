@@ -30,7 +30,7 @@ import inspect
 import sys
 from pathlib import Path
 
-from ..stores import StoreBridge
+from ...runtime.stores import StoreBridge
 
 
 def collect_store_refs_for_class(cls) -> dict[str, str]:

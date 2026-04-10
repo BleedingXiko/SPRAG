@@ -2,7 +2,9 @@
 .sandbox/
 .sprag/
 dist/
+build/
 sprag.egg-info/
+spragkit.egg-info/
 __pycache__/
 *.pyc
 .DS_Store

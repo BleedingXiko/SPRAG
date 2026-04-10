@@ -12,9 +12,9 @@ import time
 import traceback
 from pathlib import Path
 
-from . import __version__
-from .http_server import SERVER_MODES, resolve_server_mode, serve_sprag_app
-from .loader import load_app
+from .. import __version__
+from ..runtime.http import SERVER_MODES, resolve_server_mode, serve_sprag_app
+from ..runtime.loader import load_app
 from .package import build_dist_bundle
 from .scaffold import (
     DEFAULT_ROUTE_MODE,
@@ -25,8 +25,8 @@ from .scaffold import (
     scaffold_mount,
     scaffold_route,
 )
-from .server import bus
-from .stores import store_fingerprint
+from ..runtime.server import bus
+from ..runtime.stores import store_fingerprint
 
 
 def main(argv=None):
@@ -133,8 +133,8 @@ def _build_parser():
 
 
 def cmd_routes(args):
-    from .server import Controller as SpragController
-    from .web import Screen as SpragScreen
+    from ..runtime.server import Controller as SpragController
+    from ..runtime.browser import Screen as SpragScreen
 
     app_target, app = _load_cli_app(args)
     pages = app.pages()
@@ -337,12 +337,12 @@ def cmd_add(args):
 
 
 def cmd_doctor(args):
-    from .mount import Mount
-    from .page import Page
-    from .server import Controller as SpragController
-    from .web import Component as SpragComponent
-    from .web import Module as SpragModule
-    from .web import Screen as SpragScreen
+    from ..runtime.mount import Mount
+    from ..runtime.page import Page
+    from ..runtime.server import Controller as SpragController
+    from ..runtime.browser import Component as SpragComponent
+    from ..runtime.browser import Module as SpragModule
+    from ..runtime.browser import Screen as SpragScreen
 
     checks = []
     project_root = Path(args.project_root).resolve()
@@ -512,7 +512,7 @@ def cmd_doctor(args):
 
 
 def cmd_inspect(args):
-    from .routing import match_page_route, normalize_route_path
+    from ..runtime.routing import match_page_route, normalize_route_path
 
     app_target, app = _load_cli_app(args)
     output_dir = Path(args.output)

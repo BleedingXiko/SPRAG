@@ -13,9 +13,9 @@ from .codegen import (
     emit_ragot_runtime,
     emit_stores_shim,
 )
-from .request import Request
-from .routing import build_entries_for_page, normalize_route_path
-from .runtime import (
+from ..runtime.request import Request
+from ..runtime.routing import build_entries_for_page, normalize_route_path
+from ..runtime.rendering import (
     build_document_html,
     build_mount_html,
     load_controller_data,
@@ -24,10 +24,10 @@ from .runtime import (
     serializable_hydration,
     store_snapshots,
 )
-from .socket_bridge import surface_socket_enabled
-from .shell import apply_shell
-from .shell import emit_shell_assets
-from .stores import declared_stores
+from ..runtime.socket_bridge import surface_socket_enabled
+from ..runtime.shell import apply_shell
+from ..runtime.shell import emit_shell_assets
+from ..runtime.stores import declared_stores
 
 
 def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict:

@@ -1,12 +1,12 @@
 """Project + route scaffolding.
 
-Project templates live under ``sprag/templates/<name>/`` with a ``.tmpl``
+Project templates live under ``sprag/dev/templates/<name>/`` with a ``.tmpl``
 suffix so that ``.py`` template sources don't get picked up by package
 discovery. Route templates (for ``sprag add``) live under
-``sprag/templates/_route/<mode>/`` — the leading underscore keeps them
+``sprag/dev/templates/_route/<mode>/`` — the leading underscore keeps them
 out of ``available_templates()`` so they don't show up as user-facing
 project templates. Mount and content collection scaffolds live under
-``sprag/templates/_mount/`` and ``sprag/templates/_content/``.
+``sprag/dev/templates/_mount/`` and ``sprag/dev/templates/_content/``.
 
 Both flows share ``_render_template_dir``, which walks a template tree,
 strips the ``.tmpl`` suffix, and substitutes ``{{key}}`` tokens from a
@@ -18,9 +18,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .discovery import discover_surfaces, validate_surface_paths
-from .mount import Mount
-from .page import Page
+from ..runtime.discovery import discover_surfaces, validate_surface_paths
+from ..runtime.mount import Mount
+from ..runtime.page import Page
 
 TEMPLATES_ROOT = Path(__file__).parent / "templates"
 TEMPLATE_SUFFIX = ".tmpl"

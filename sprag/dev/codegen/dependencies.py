@@ -19,7 +19,7 @@ from pathlib import Path
 
 def collect_browser_class_refs_for_class(cls) -> dict[str, type]:
     """Return ``{local_name: browser_class}`` visible in ``cls``'s source file."""
-    from ..web import Component, Module
+    from ...runtime.browser import Component, Module
 
     try:
         source_file = inspect.getsourcefile(cls)
