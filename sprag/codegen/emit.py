@@ -127,6 +127,12 @@ def _register_browser_class(target: dict[str, type], cls: type, kind: str) -> No
 _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
     const _store = createStateStore(initial, { name });
     const _selectorCache = new WeakMap();
+    const _globalStores = (typeof window !== 'undefined'
+        ? (window.__SPRAG_STORES__ = window.__SPRAG_STORES__ || {})
+        : {});
+    const _globalBridges = (typeof window !== 'undefined'
+        ? (window.__SPRAG_STORE_BRIDGES__ = window.__SPRAG_STORE_BRIDGES__ || {})
+        : {});
 
     function _normalizePath(path) {
         if (Array.isArray(path)) return path.map(String).filter(Boolean);
@@ -162,7 +168,18 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
         return _store.getState();
     }
 
-    return {
+    function _syncGlobalSnapshot() {
+        if (typeof window === 'undefined') return;
+        _globalStores[name] = JSON.parse(JSON.stringify(_store.getState()));
+    }
+
+    _globalBridges[name] = null;
+    _syncGlobalSnapshot();
+    _store.subscribe(() => {
+        _syncGlobalSnapshot();
+    });
+
+    const bridge = {
         name,
         get(path, fallback) {
             if (path === undefined || path === null) return _store.getState();
@@ -247,6 +264,8 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
         },
         _store
     };
+    _globalBridges[name] = bridge;
+    return bridge;
 }
 """
 
@@ -454,6 +473,7 @@ const spragRoots = [];
 let spragEventSource = null;
 let spragSocket = null;
 let spragSocketRegistryKey = null;
+let spragDevReloadUnsub = null;
 let spragBooted = false;
 
 function provideRuntimeRoot(key, value, owner) {{
@@ -511,6 +531,14 @@ function teardownSpragRuntime(reason = 'teardown') {{
             console.warn('[SPRAG] Error while unregistering shared socket bridge', error);
         }}
         spragSocketRegistryKey = null;
+    }}
+    if (typeof spragDevReloadUnsub === 'function') {{
+        try {{
+            spragDevReloadUnsub();
+        }} catch (error) {{
+            console.warn('[SPRAG] Error while unregistering dev reload listener', error);
+        }}
+        spragDevReloadUnsub = null;
     }}
 
     while (spragRoots.length > 0) {{
@@ -664,6 +692,119 @@ function connectBusBridge(route) {{
     window.__SPRAG_EVENT_SOURCE__ = source;
     spragEventSource = source;
     return source;
+}}
+
+function currentStoreSnapshots() {{
+    const stores = (typeof window !== 'undefined' && window.__SPRAG_STORES__) || {{}};
+    const bridges = (typeof window !== 'undefined' && window.__SPRAG_STORE_BRIDGES__) || {{}};
+    const snapshot = JSON.parse(JSON.stringify(stores || {{}}));
+    for (const [name, bridge] of Object.entries(bridges)) {{
+        if (!bridge || typeof bridge.snapshot !== 'function') {{
+            continue;
+        }}
+        try {{
+            snapshot[name] = bridge.snapshot();
+        }} catch (error) {{
+            console.warn('[SPRAG] Failed to snapshot store during hot reload', name, error);
+        }}
+    }}
+    return snapshot;
+}}
+
+function cloneSerializable(value, fallback = null) {{
+    if (value === undefined) {{
+        return fallback;
+    }}
+    try {{
+        return JSON.parse(JSON.stringify(value));
+    }} catch (_error) {{
+        return fallback;
+    }}
+}}
+
+function currentHydrationSnapshots() {{
+    const hydration = [];
+    for (const root of spragRoots) {{
+        if (!root || root.type !== 'hydration' || !root.id) {{
+            continue;
+        }}
+        hydration.push({{
+            id: root.id,
+            props: cloneSerializable(root.component && root.component.props, null),
+            state: cloneSerializable(root.component && root.component.state, null),
+            module_state: cloneSerializable(root.module && root.module.state, null),
+        }});
+    }}
+    return hydration;
+}}
+
+function currentMountBootData() {{
+    const mountRoot = spragRoots.find((root) => root && root.type === 'mount');
+    if (!mountRoot) {{
+        return null;
+    }}
+    const snapshot = {{}};
+    const componentProps = cloneSerializable(mountRoot.component && mountRoot.component.props, null);
+    const componentState = cloneSerializable(mountRoot.component && mountRoot.component.state, null);
+    const moduleState = cloneSerializable(mountRoot.module && mountRoot.module.state, null);
+    if (componentProps && typeof componentProps === 'object') {{
+        Object.assign(snapshot, componentProps);
+    }}
+    if (componentState && typeof componentState === 'object') {{
+        Object.assign(snapshot, componentState);
+    }}
+    if (moduleState && typeof moduleState === 'object') {{
+        Object.assign(snapshot, moduleState);
+    }}
+    return Object.keys(snapshot).length > 0 ? snapshot : null;
+}}
+
+function persistDevReloadState(payload) {{
+    const path = (surface && surface.path) || '/';
+    const key = window.__SPRAG_HOT_RELOAD_KEY__ || `sprag:reload:${{path}}`;
+    const fingerprint = (payload && payload.store_fingerprint) || window.__SPRAG_STORE_FINGERPRINT__ || null;
+    const surfaceFingerprint = window.__SPRAG_SURFACE_FINGERPRINT__ || null;
+    if (!fingerprint || !window.sessionStorage) {{
+        return false;
+    }}
+    const cache = {{
+        path,
+        build_id: payload && payload.build_id !== undefined ? payload.build_id : null,
+        changed: payload && Array.isArray(payload.changed) ? payload.changed : [],
+        saved_at: Date.now(),
+        store_fingerprint: fingerprint,
+        surface_fingerprint: surfaceFingerprint,
+        surface_kind: mount ? 'mount' : 'route',
+        stores: currentStoreSnapshots(),
+    }};
+    if (mount) {{
+        cache.boot_data = currentMountBootData();
+    }} else {{
+        cache.hydration = currentHydrationSnapshots();
+    }}
+    try {{
+        window.sessionStorage.setItem(key, JSON.stringify(cache));
+        window.__SPRAG_STORES__ = cache.stores;
+        return true;
+    }} catch (error) {{
+        console.warn('[SPRAG] Failed to persist hot reload snapshot', error);
+        return false;
+    }}
+}}
+
+function registerDevReloadListener() {{
+    if (typeof spragDevReloadUnsub === 'function') {{
+        return;
+    }}
+    const unsubscribe = bus.on('sprag:dev.rebuild', (payload) => {{
+        if (!payload || payload.ok === false) {{
+            console.warn('[SPRAG] Rebuild failed; keeping current page live.', payload && payload.error);
+            return;
+        }}
+        persistDevReloadState(payload);
+        window.location.reload();
+    }});
+    spragDevReloadUnsub = typeof unsubscribe === 'function' ? unsubscribe : null;
 }}
 
 function createSocketUrl(path) {{
@@ -842,6 +983,7 @@ function boot() {{
     if (spragBooted) return;
     try {{
         rewriteInternalLinks();
+        registerDevReloadListener();
         const socket = connectSocketBridge(surface);
         // Stores hydrate via the side-effect import of
         // './generated/stores.js' above — each store bridge reads its

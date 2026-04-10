@@ -41,6 +41,8 @@ the same role ``createStateStore`` plays in Ragot Labs and the same role
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Callable, Optional, Union
 
 
@@ -224,6 +226,23 @@ def store(name: str, *, initial: Optional[dict] = None) -> StoreBridge:
 def declared_stores() -> list[StoreBridge]:
     """Return every store declared so far. Used by the build pipeline."""
     return list(_STORE_REGISTRY)
+
+
+def store_fingerprint(stores: Optional[list[StoreBridge]] = None) -> str:
+    """Return a stable fingerprint for the declared store contract.
+
+    The fingerprint is intentionally derived from store names plus declared
+    initial snapshots, not the current live values. It is used by dev-time
+    hot reload restore logic to invalidate cached browser snapshots when the
+    store surface changes shape between rebuilds.
+    """
+    stores = stores if stores is not None else declared_stores()
+    payload = [
+        {"name": bridge.name, "initial": bridge.initial}
+        for bridge in sorted(stores, key=lambda bridge: bridge.name)
+    ]
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
 
 
 def reset_store_registry() -> None:

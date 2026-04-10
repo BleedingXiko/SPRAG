@@ -1,0 +1,20 @@
+from sprag import Controller, Field, Schema, action
+
+from app.stores import cross_wired_flow
+
+
+class CrossWiredDemoController(Controller):
+    route = "/cross-wired-demo"
+
+    def load(self):
+        return cross_wired_flow.snapshot()
+
+    @action(schema=Schema("enqueue", {"label": Field(str, required=True)}))
+    def enqueue(self, label):
+        queue = self.service("lab_cross_wired_jobs")
+        return queue.enqueue_flow_job(label)
+
+    @action(schema=Schema("reset", {}))
+    def reset(self):
+        queue = self.service("lab_cross_wired_jobs")
+        return queue.reset_flow()

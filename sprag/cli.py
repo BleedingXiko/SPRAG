@@ -22,6 +22,8 @@ from .scaffold import (
     scaffold_mount,
     scaffold_route,
 )
+from .server import bus
+from .stores import store_fingerprint
 
 
 def main(argv=None):
@@ -173,6 +175,7 @@ def cmd_build(args):
 
 def cmd_dev(args):
     app_target, app = _load_cli_app(args)
+    setattr(app, "_sprag_dev_reload", True)
     output_dir = Path(args.output)
     _build_once(app, output_dir)
     resolved_server_mode = resolve_server_mode(app, args.server_mode)
@@ -322,6 +325,7 @@ def _watch_loop(app, output_dir, project_root, interval, stop_event):
     import traceback
 
     last_mtimes = _collect_mtimes(project_root)
+    build_id = 0
     while not stop_event.is_set():
         time.sleep(interval)
         current_mtimes = _collect_mtimes(project_root)
@@ -334,8 +338,20 @@ def _watch_loop(app, output_dir, project_root, interval, stop_event):
         try:
             app.invalidate_pages()
             _build_once(app, output_dir)
+            build_id += 1
+            _emit_dev_rebuild_event(
+                ok=True,
+                build_id=build_id,
+                changed=changed,
+            )
         except Exception as exc:  # pragma: no cover - dev loop resilience
             print(f"[SPRAG] rebuild failed: {exc.__class__.__name__}: {exc}")
+            _emit_dev_rebuild_event(
+                ok=False,
+                build_id=build_id,
+                changed=changed,
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
             traceback.print_exc()
 
 
@@ -360,6 +376,21 @@ def _diff_mtimes(old, new):
         if path not in new:
             changed.append(f"{path} (deleted)")
     return sorted(changed)
+
+
+def _emit_dev_rebuild_event(*, ok, build_id, changed, error=None):
+    payload = {
+        "event": "sprag:dev.rebuild",
+        "payload": {
+            "ok": ok,
+            "build_id": build_id,
+            "changed": list(changed or []),
+            "store_fingerprint": store_fingerprint(),
+        },
+    }
+    if error:
+        payload["payload"]["error"] = error
+    bus.emit("sprag:broadcast", payload)
 
 if __name__ == "__main__":
     main()

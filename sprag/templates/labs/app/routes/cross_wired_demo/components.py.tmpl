@@ -1,0 +1,50 @@
+from sprag import Component, ui
+
+
+class CrossWiredCard(Component):
+    def render(self, props=None):
+        last = self.state.get("last_job")
+        history = self.state.get("history", [])
+        last_label = (
+            f"#{last['id']} {last['label']} ({last['status']})"
+            if last
+            else "No job recorded yet."
+        )
+        return ui.div(
+            ui.h2("Cross-Wired Demo"),
+            ui.p(
+                "One route proving the full loop: the action enqueues work, "
+                "the QueueService writes authoritative state into a shared "
+                "store, SSE mirrors server snapshots back into the browser "
+                "store, and the Module subscribes to that local store."
+            ),
+            ui.div(
+                ui.div(
+                    ui.span("Pending"),
+                    ui.strong(str(self.state["pending"])),
+                    class_="metric",
+                ),
+                ui.div(
+                    ui.span("Completed"),
+                    ui.strong(str(self.state["completed"])),
+                    class_="metric",
+                ),
+                class_="cards",
+            ),
+            ui.p(self.state["last_event"], class_="status-line"),
+            ui.p(last_label, class_="status-line"),
+            ui.div(
+                ui.button("Enqueue chained job", type="button", class_="btn", data_role="enqueue"),
+                ui.button("Reset flow", type="button", class_="btn btn-ghost", data_role="reset"),
+                style="text-align:center;",
+            ),
+            ui.div(
+                ui.h3("Recent events"),
+                ui.ul(
+                    [ui.li(entry, class_="status-line") for entry in history],
+                    class_="history-list",
+                ),
+                class_="queue-actions",
+            ),
+            class_="demo-card queue-card",
+        )

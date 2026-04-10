@@ -1,0 +1,26 @@
+from sprag import Screen, hydrate, ui
+
+from .components import CrossWiredCard
+from .modules import CrossWiredDemoModule
+
+
+class CrossWiredDemoScreen(Screen):
+    modules = [CrossWiredDemoModule]
+
+    def render(self, data):
+        flow = self.module(CrossWiredDemoModule)
+        flow.set_state(data)
+        return ui.div(
+            ui.section(
+                ui.span("QueueService · store()", class_="badge"),
+                ui.h1("Cross-Wired Demo"),
+                ui.p(
+                    "The server-side queue writes to a shared store, the "
+                    "browser mirrors snapshots into its local copy of that "
+                    "store, and the Module subscribes to the store instead "
+                    "of manually wiring every state field."
+                ),
+                class_="hero",
+            ),
+            hydrate(CrossWiredCard, module=flow),
+        )

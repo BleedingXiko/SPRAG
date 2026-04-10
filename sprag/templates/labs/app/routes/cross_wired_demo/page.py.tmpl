@@ -1,0 +1,12 @@
+from sprag import page
+
+from .server import CrossWiredDemoController
+from .web import CrossWiredDemoScreen
+
+
+cross_wired_demo = page(
+    path="/cross-wired-demo",
+    controller=CrossWiredDemoController,
+    screen=CrossWiredDemoScreen,
+    mode="hybrid",
+)

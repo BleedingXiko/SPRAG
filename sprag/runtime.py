@@ -6,6 +6,7 @@ in the live server, as well as at build time for pre-rendered HTML.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 from dataclasses import asdict, dataclass, field, is_dataclass
@@ -17,7 +18,7 @@ from .routing import normalize_route_path
 from .socket_bridge import surface_socket_enabled
 from .server import controller_context
 from .shell import apply_shell
-from .stores import declared_stores
+from .stores import declared_stores, store_fingerprint
 
 
 @dataclass
@@ -69,6 +70,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
             "action_endpoint": "/__sprag__/actions",
             "events_endpoint": "/__sprag__/events",
             "socket_bridge": surface_socket_enabled(app, page.controller),
+            "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
         },
         hydration=hydration,
         script_path=script_path,
@@ -103,6 +105,7 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
         "action_endpoint": "/__sprag__/actions",
         "events_endpoint": "/__sprag__/events",
         "socket_bridge": surface_socket_enabled(app, mount.boot),
+        "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
     }
 
     mount_meta = _resolved_surface_metadata(mount.metadata, data)
@@ -193,6 +196,22 @@ def build_document_html(
     store_snap = store_snapshot or {}
     head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
     escaped_title = html.escape(str(title))
+    dev_reload = bool(route_info.get("dev_reload"))
+    hot_reload_assignments = ""
+    hot_reload_script_tag = ""
+    if dev_reload:
+        store_contract_fingerprint = store_fingerprint()
+        surface_fingerprint = _surface_fingerprint("route", route_info, hydration=hydration)
+        hot_reload_assignments = (
+            f'\n    window.__SPRAG_STORE_FINGERPRINT__ = {json.dumps(store_contract_fingerprint)};'
+            f'\n    window.__SPRAG_SURFACE_FINGERPRINT__ = {json.dumps(surface_fingerprint)};'
+        )
+        hot_reload_script = _build_hot_reload_restore_script(
+            route_info.get("path") or "/",
+            store_contract_fingerprint,
+            surface_fingerprint,
+        )
+        hot_reload_script_tag = f'\n  <script>{hot_reload_script}</script>'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -208,7 +227,8 @@ def build_document_html(
     window.__SPRAG_ROUTE_DATA__ = {json.dumps(_json_safe(route_data), sort_keys=True)};
     window.__SPRAG_HYDRATION__ = {json.dumps(serializable_hydration(hydration), sort_keys=True)};
     window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
-  </script>
+    {hot_reload_assignments}
+  </script>{hot_reload_script_tag}
   <script type="module" src="{script_path}"></script>
 </body>
 </html>
@@ -230,6 +250,22 @@ def build_mount_html(
     store_snap = store_snapshot or {}
     head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
     escaped_title = html.escape(str(title))
+    dev_reload = bool(mount_info.get("dev_reload"))
+    hot_reload_assignments = ""
+    hot_reload_script_tag = ""
+    if dev_reload:
+        store_contract_fingerprint = store_fingerprint()
+        surface_fingerprint = _surface_fingerprint("mount", mount_info)
+        hot_reload_assignments = (
+            f'\n    window.__SPRAG_STORE_FINGERPRINT__ = {json.dumps(store_contract_fingerprint)};'
+            f'\n    window.__SPRAG_SURFACE_FINGERPRINT__ = {json.dumps(surface_fingerprint)};'
+        )
+        hot_reload_script = _build_hot_reload_restore_script(
+            mount_info.get("path") or "/",
+            store_contract_fingerprint,
+            surface_fingerprint,
+        )
+        hot_reload_script_tag = f'\n  <script>{hot_reload_script}</script>'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -247,7 +283,8 @@ def build_mount_html(
     window.__SPRAG_ROUTE_DATA__ = {json.dumps(_json_safe(boot_data), sort_keys=True)};
     window.__SPRAG_HYDRATION__ = [];
     window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
-  </script>
+    {hot_reload_assignments}
+  </script>{hot_reload_script_tag}
   <script type="module" src="{script_path}"></script>
 </body>
 </html>
@@ -277,6 +314,103 @@ def serializable_hydration(hydration_entries):
         }
         for entry in hydration_entries
     ]
+
+
+def _build_hot_reload_restore_script(
+    surface_path: str,
+    store_contract_fingerprint: str,
+    surface_fingerprint: str,
+) -> str:
+    cache_key = f"sprag:reload:{surface_path or '/'}"
+    return f"""(function() {{
+    var cacheKey = {json.dumps(cache_key)};
+    var expectedStoreFingerprint = {json.dumps(store_contract_fingerprint)};
+    var expectedSurfaceFingerprint = {json.dumps(surface_fingerprint)};
+    window.__SPRAG_HOT_RELOAD_KEY__ = cacheKey;
+    try {{
+        if (!window.sessionStorage) return;
+        var raw = window.sessionStorage.getItem(cacheKey);
+        if (!raw) return;
+        var cached = JSON.parse(raw);
+        if (
+            !cached
+            || cached.store_fingerprint !== expectedStoreFingerprint
+            || cached.surface_fingerprint !== expectedSurfaceFingerprint
+        ) {{
+            window.sessionStorage.removeItem(cacheKey);
+            return;
+        }}
+        if (cached.stores && typeof cached.stores === 'object') {{
+            window.__SPRAG_STORES__ = cached.stores;
+        }}
+        if (
+            cached.surface_kind === 'route'
+            && Array.isArray(cached.hydration)
+            && Array.isArray(window.__SPRAG_HYDRATION__)
+        ) {{
+            var byId = {{}};
+            for (var i = 0; i < cached.hydration.length; i += 1) {{
+                var saved = cached.hydration[i];
+                if (saved && saved.id) {{
+                    byId[saved.id] = saved;
+                }}
+            }}
+            window.__SPRAG_HYDRATION__ = window.__SPRAG_HYDRATION__.map(function(entry) {{
+                var restored = byId[entry.id];
+                if (!restored) return entry;
+                return {{
+                    ...entry,
+                    props: restored.props !== undefined ? restored.props : entry.props,
+                    state: restored.state !== undefined ? restored.state : entry.state,
+                    module_state: (
+                        restored.module_state !== undefined
+                            ? restored.module_state
+                            : entry.module_state
+                    ),
+                }};
+            }});
+        }}
+        if (
+            cached.surface_kind === 'mount'
+            && cached.boot_data
+            && typeof cached.boot_data === 'object'
+        ) {{
+            window.__SPRAG_BOOT__ = cached.boot_data;
+            window.__SPRAG_ROUTE_DATA__ = cached.boot_data;
+        }}
+        window.sessionStorage.removeItem(cacheKey);
+    }} catch (_error) {{
+        try {{
+            if (window.sessionStorage) {{
+                window.sessionStorage.removeItem(cacheKey);
+            }}
+        }} catch (_innerError) {{}}
+    }}
+}})();"""
+
+
+def _surface_fingerprint(kind: str, info: dict, *, hydration: list[dict] | None = None) -> str:
+    payload = {
+        "kind": kind,
+        "path": info.get("path"),
+        "name": info.get("name"),
+        "mode": info.get("mode"),
+        "controller": info.get("controller"),
+        "component": info.get("component"),
+        "module": info.get("module"),
+        "boot": info.get("boot"),
+        "actions": sorted(info.get("actions") or []),
+        "hydration": [
+            {
+                "id": entry.get("id"),
+                "component": entry.get("component"),
+                "module": entry.get("module"),
+            }
+            for entry in (hydration or [])
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
 
 
 def _resolved_surface_metadata(static_metadata, data) -> dict:

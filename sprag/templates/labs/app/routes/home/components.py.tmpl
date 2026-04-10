@@ -67,6 +67,18 @@ class Landing(Component):
                     class_="card",
                 ),
                 ui.a(
+                    ui.h3("Cross-Wired Demo →"),
+                    ui.p(
+                        "A QueueService writes authoritative state into a "
+                        "shared store, action responses and SSE mirror that "
+                        "snapshot into the browser store, and the Module "
+                        "subscribes to it locally."
+                    ),
+                    ui.span("hybrid · QueueService · store()", class_="tag"),
+                    href="/cross-wired-demo",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Watcher Demo →"),
                     ui.p(
                         "A server Watcher polls under Service ownership and "

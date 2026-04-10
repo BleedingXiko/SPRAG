@@ -1,6 +1,6 @@
 from sprag import App, shell
 
-from app.services.job_queue import job_queue
+from app.services.job_queue import cross_wired_queue, job_queue
 from app.services.pulse import pulse_service
 
 
@@ -9,7 +9,7 @@ app_shell = shell(template="app/shell.html", css=["app/shell.css"])
 
 app = App(
     routes="app.routes",
-    services=[job_queue, pulse_service],
+    services=[job_queue, cross_wired_queue, pulse_service],
     shell=app_shell,
     server_mode="websocket",
 )

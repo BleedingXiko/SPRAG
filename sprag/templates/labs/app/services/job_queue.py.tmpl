@@ -2,6 +2,18 @@ import gevent
 
 from sprag import QueueService, bus
 
+from app.stores import cross_wired_flow
+
+
+def _cross_wired_initial():
+    return {
+        "pending": 0,
+        "completed": 0,
+        "last_event": "Ready to enqueue a chained job.",
+        "last_job": None,
+        "history": [],
+    }
+
 
 class LabJobQueue(QueueService):
     def __init__(self):
@@ -42,3 +54,111 @@ class LabJobQueue(QueueService):
 
 
 job_queue = LabJobQueue()
+
+
+class CrossWiredJobQueue(QueueService):
+    def __init__(self):
+        super().__init__(
+            "lab_cross_wired_jobs",
+            worker_count=1,
+            maxsize=16,
+            initial_state={
+                "completed": 0,
+                "issued": 0,
+                "last_job": None,
+            },
+        )
+
+    def on_start(self):
+        super().on_start()
+        self._replace_flow_store(_cross_wired_initial())
+
+    def handle_item(self, item):
+        gevent.sleep(1)
+        completed = self.state.get("completed", 0) + 1
+        last_job = {
+            "id": item["id"],
+            "label": item["label"],
+            "status": "completed",
+        }
+        self.set_state(
+            {
+                "completed": completed,
+                "last_job": last_job,
+            }
+        )
+        self._publish_flow_event("Completed " + item["label"] + ".", last_job=last_job)
+
+    def enqueue_flow_job(self, label):
+        job_id = self.state.get("issued", 0) + 1
+        accepted = self.enqueue({"id": job_id, "label": label})
+        if not accepted:
+            snapshot = self._publish_flow_event(
+                "Queue is full.",
+                last_job={
+                    "id": job_id,
+                    "label": label,
+                    "status": "rejected",
+                },
+            )
+            return {"accepted": False, "snapshot": snapshot}
+
+        self.set_state({"issued": job_id})
+        snapshot = self._publish_flow_event(
+            "Queued " + label + ".",
+            last_job={
+                "id": job_id,
+                "label": label,
+                "status": "queued",
+            },
+        )
+        return {"accepted": True, "snapshot": snapshot}
+
+    def reset_flow(self):
+        if self.pending_count():
+            snapshot = self._publish_flow_event(
+                "Wait for pending jobs to finish before reset."
+            )
+            return {"accepted": False, "snapshot": snapshot}
+
+        self.set_state(
+            {
+                "completed": 0,
+                "issued": 0,
+                "last_job": None,
+            }
+        )
+        snapshot = self._replace_flow_store(_cross_wired_initial())
+        return {"accepted": True, "snapshot": snapshot}
+
+    def _publish_flow_event(self, message, *, last_job=None):
+        snapshot = cross_wired_flow.update(
+            lambda state: {
+                "pending": self.pending_count(),
+                "completed": self.state.get("completed", 0),
+                "last_event": message,
+                "last_job": (
+                    last_job if last_job is not None else self.state.get("last_job")
+                ),
+                "history": (state.get("history", []) + [message])[-5:],
+            }
+        )
+        self._emit_flow_snapshot(snapshot)
+        return snapshot
+
+    def _replace_flow_store(self, snapshot):
+        snapshot = cross_wired_flow.update(lambda _state: dict(snapshot))
+        self._emit_flow_snapshot(snapshot)
+        return snapshot
+
+    def _emit_flow_snapshot(self, snapshot):
+        bus.emit(
+            "sprag:broadcast",
+            {
+                "event": "lab:cross-wired.snapshot",
+                "payload": snapshot,
+            },
+        )
+
+
+cross_wired_queue = CrossWiredJobQueue()

@@ -1,0 +1,42 @@
+from sprag import Module
+
+from app.stores import cross_wired_flow
+
+
+class CrossWiredDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "pending": 0,
+                "completed": 0,
+                "last_event": "Ready to enqueue a chained job.",
+                "last_job": None,
+                "history": [],
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='enqueue']", self.on_enqueue)
+        self.delegate(self.element, "click", "[data-role='reset']", self.on_reset)
+        self.listen("lab:cross-wired.snapshot", self.on_flow_event)
+        cross_wired_flow.subscribe(self.on_flow_snapshot, immediate=True)
+
+    def on_enqueue(self, event):
+        event.prevent_default()
+        label = "Chain " + str(self.state["completed"] + self.state["pending"] + 1)
+        self.call_action("enqueue", {"label": label}).then(self.on_action_result)
+
+    def on_reset(self, event):
+        event.prevent_default()
+        self.call_action("reset", {}).then(self.on_action_result)
+
+    def on_action_result(self, result):
+        cross_wired_flow.patch(result.value["snapshot"])
+
+    def on_flow_event(self, payload):
+        cross_wired_flow.patch(payload)
+
+    def on_flow_snapshot(self, snapshot):
+        self.set_state(snapshot)

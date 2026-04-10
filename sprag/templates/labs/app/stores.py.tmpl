@@ -35,3 +35,19 @@ session = store(
         "counter": 0,
     },
 )
+
+
+# Shared flow store used by the /cross-wired-demo entry. The server-side
+# QueueService writes the authoritative state here; controller actions and
+# SSE snapshots mirror that state back into the browser store so the Module
+# can subscribe to one local source of truth.
+cross_wired_flow = store(
+    "cross_wired_flow",
+    initial={
+        "pending": 0,
+        "completed": 0,
+        "last_event": "Ready to enqueue a chained job.",
+        "last_job": None,
+        "history": [],
+    },
+)
