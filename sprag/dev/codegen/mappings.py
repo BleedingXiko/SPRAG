@@ -13,6 +13,64 @@ import ast
 class JSCodegenError(RuntimeError):
     """Raised when the codegen encounters an unsupported Python construct."""
 
+    def __init__(
+        self,
+        message,
+        *,
+        source_file=None,
+        class_name=None,
+        method_name=None,
+        line=None,
+        source_line=None,
+        suggestion=None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.source_file = source_file
+        self.class_name = class_name
+        self.method_name = method_name
+        self.line = line
+        self.source_line = source_line
+        self.suggestion = suggestion
+
+    def with_context(
+        self,
+        *,
+        source_file=None,
+        class_name=None,
+        method_name=None,
+        line=None,
+        source_line=None,
+        suggestion=None,
+    ):
+        return JSCodegenError(
+            self.message,
+            source_file=self.source_file if source_file is None else source_file,
+            class_name=self.class_name if class_name is None else class_name,
+            method_name=self.method_name if method_name is None else method_name,
+            line=self.line if line is None else line,
+            source_line=self.source_line if source_line is None else source_line,
+            suggestion=self.suggestion if suggestion is None else suggestion,
+        )
+
+    def __str__(self):
+        parts = [self.message]
+        location_bits = []
+        if self.source_file:
+            location_bits.append(str(self.source_file))
+        if self.line is not None:
+            location_bits.append(f"line {self.line}")
+        owner = ".".join(bit for bit in (self.class_name, self.method_name) if bit)
+        if owner:
+            location_bits.append(owner)
+        if location_bits:
+            parts.append("Location: " + ", ".join(location_bits))
+        if self.source_line:
+            parts.append("Source: " + self.source_line.strip())
+        if self.suggestion:
+            parts.append("Hint: " + self.suggestion)
+        return "\n".join(parts)
+
 
 # Maps Pythonic snake_case ``dom.X()`` calls to the underlying Ragot helper
 # name. Functions not in this map use their attribute name verbatim.

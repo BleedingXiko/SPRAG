@@ -23,21 +23,31 @@ plus a single ``createLazyLoader`` install if any LazyImage was used.
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 
+from .diagnostics import lint_browser_method
 from .expressions import _compile_expr
 from .dependencies import used_browser_class_refs
 from .imports import _detect_ragot_imports
 from .mappings import JSCodegenError, _map_name
-from .modules import _browser_class_imports, _detect_used_stores, _method_source
+from .modules import _browser_class_imports, _detect_used_stores, _method_source, _method_source_info
 from .statements import _compile_statements
 from .stores_scan import collect_store_refs_for_class
 
 
 def compile_component_class(component_class) -> str:
-    render_source = _method_source(component_class.render)
+    render_source, render_file, render_start_line = _method_source_info(component_class.render)
     render_ast = ast.parse(render_source)
     function_def = render_ast.body[0]
+    lint_browser_method(
+        function_def,
+        source=render_source,
+        source_file=render_file,
+        class_name=component_class.__name__,
+        method_name="render",
+        line_offset=render_start_line,
+    )
 
     # Stores referenced in the source file (``from app.stores import counter``).
     store_refs = collect_store_refs_for_class(component_class)
@@ -80,7 +90,12 @@ def compile_component_class(component_class) -> str:
             return_expr = _compile_expr(stmt.value, render_env)
             continue
         raise JSCodegenError(
-            f"Unsupported component statement in {component_class.__name__}.render: {ast.dump(stmt)}"
+            f"Unsupported component statement in {component_class.__name__}.render: {ast.dump(stmt)}",
+            source_file=render_file,
+            class_name=component_class.__name__,
+            method_name="render",
+            line=render_start_line + getattr(stmt, "lineno", 1) - 1,
+            source_line=render_source.splitlines()[getattr(stmt, "lineno", 1) - 1] if render_source.splitlines() else None,
         )
 
     # ---------- Decorator metadata ----------
@@ -135,11 +150,28 @@ def compile_component_class(component_class) -> str:
         animateOut + virtual-scroll teardown).
         """
         if py_name in user_lifecycle:
-            source = _method_source(user_lifecycle[py_name])
+            source, source_file, source_start_line = _method_source_info(user_lifecycle[py_name])
             fn_ast = ast.parse(source).body[0]
-            body = _compile_statements(
-                fn_ast.body, method_names=method_names, env=_seed_env()
+            lint_browser_method(
+                fn_ast,
+                source=source,
+                source_file=source_file,
+                class_name=component_class.__name__,
+                method_name=py_name,
+                line_offset=source_start_line,
             )
+            try:
+                body = _compile_statements(
+                    fn_ast.body, method_names=method_names, env=_seed_env()
+                )
+            except JSCodegenError as exc:
+                raise exc.with_context(
+                    source_file=source_file,
+                    class_name=component_class.__name__,
+                    method_name=py_name,
+                    line=exc.line if exc.line is not None else source_start_line,
+                    source_line=exc.source_line if exc.source_line is not None else source.splitlines()[0],
+                ) from exc
         else:
             body = None
 
@@ -162,13 +194,30 @@ def compile_component_class(component_class) -> str:
             continue
         if name in ("on_start", "on_stop", "unmount"):
             continue  # handled by lifecycle synthesis below
-        source = _method_source(value)
+        source, source_file, source_start_line = _method_source_info(value)
         fn_ast = ast.parse(source).body[0]
+        lint_browser_method(
+            fn_ast,
+            source=source,
+            source_file=source_file,
+            class_name=component_class.__name__,
+            method_name=name,
+            line_offset=source_start_line,
+        )
         js_name = _map_name(name)
         is_async = isinstance(fn_ast, ast.AsyncFunctionDef)
-        body = _compile_statements(
-            fn_ast.body, method_names=method_names, env=_seed_env()
-        )
+        try:
+            body = _compile_statements(
+                fn_ast.body, method_names=method_names, env=_seed_env()
+            )
+        except JSCodegenError as exc:
+            raise exc.with_context(
+                source_file=source_file,
+                class_name=component_class.__name__,
+                method_name=name,
+                line=exc.line if exc.line is not None else source_start_line,
+                source_line=exc.source_line if exc.source_line is not None else source.splitlines()[0],
+            ) from exc
         params = ", ".join(arg.arg for arg in fn_ast.args.args[1:])
         async_prefix = "async " if is_async else ""
         extra_methods.append(f"    {async_prefix}{js_name}({params}) {{\n{body}\n    }}")

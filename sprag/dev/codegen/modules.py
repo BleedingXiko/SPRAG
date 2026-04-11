@@ -26,6 +26,7 @@ import inspect
 import json
 import textwrap
 
+from .diagnostics import lint_browser_method
 from .expressions import _compile_expr  # noqa: F401  (re-export for tests)
 from .dependencies import used_browser_class_refs
 from .imports import _detect_ragot_imports
@@ -69,6 +70,13 @@ def _method_source(method):
     return textwrap.dedent(source)
 
 
+def _method_source_info(method):
+    source_lines, start_line = inspect.getsourcelines(method)
+    source = textwrap.dedent("".join(source_lines))
+    source_file = inspect.getsourcefile(method) or inspect.getfile(method)
+    return source, source_file, start_line
+
+
 def compile_module_class(module_class) -> str:
     from ...runtime.browser import RefDescriptor  # local import to avoid circular dep
 
@@ -81,7 +89,9 @@ def compile_module_class(module_class) -> str:
         joined = ", ".join(server_only_symbols)
         raise JSCodegenError(
             f"{module_class.__name__} imports server-only SPRAG symbol(s): {joined}. "
-            "Move that code into a Controller or Service; browser Modules can only use the Ragot-side SPRAG surface."
+            "Move that code into a Controller or Service; browser Modules can only use the Ragot-side SPRAG surface.",
+            source_file=inspect.getsourcefile(module_class) or inspect.getfile(module_class),
+            class_name=module_class.__name__,
         )
 
     browser_class_refs = used_browser_class_refs(module_class)
@@ -134,15 +144,32 @@ def compile_module_class(module_class) -> str:
         if name == "__init__":
             continue
 
-        source = _method_source(value)
+        source, source_file, source_start_line = _method_source_info(value)
         method_ast = ast.parse(source)
         function_def = method_ast.body[0]
+        lint_browser_method(
+            function_def,
+            source=source,
+            source_file=source_file,
+            class_name=module_class.__name__,
+            method_name=name,
+            line_offset=source_start_line,
+        )
         js_name = _map_name(name)
         is_async = isinstance(function_def, ast.AsyncFunctionDef)
 
-        body = _compile_statements(
-            function_def.body, method_names=method_names, env=_seed_env()
-        )
+        try:
+            body = _compile_statements(
+                function_def.body, method_names=method_names, env=_seed_env()
+            )
+        except JSCodegenError as exc:
+            raise exc.with_context(
+                source_file=source_file,
+                class_name=module_class.__name__,
+                method_name=name,
+                line=exc.line if exc.line is not None else source_start_line,
+                source_line=exc.source_line if exc.source_line is not None else source.splitlines()[0],
+            ) from exc
 
         # Inject framework setup prologue into user-supplied on_start
         if name == "on_start":
@@ -324,7 +351,7 @@ def _compile_constructor_extras(module_class, *, method_names, env) -> str:
     init = module_class.__dict__.get("__init__")
     if init is None:
         return ""
-    source = _method_source(init)
+    source, source_file, source_start_line = _method_source_info(init)
     function_def = ast.parse(source).body[0]
     statements = []
     for stmt in function_def.body:
@@ -345,7 +372,12 @@ def _compile_constructor_extras(module_class, *, method_names, env) -> str:
         raise JSCodegenError(
             f"Unsupported __init__ statement in browser Module {module_class.__name__}: "
             f"{ast.dump(stmt)}. Generated Module constructors support field assignments "
-            "like `self.child = None`; put lifecycle work in on_start()."
+            "like `self.child = None`; put lifecycle work in on_start().",
+            source_file=source_file,
+            class_name=module_class.__name__,
+            method_name="__init__",
+            line=source_start_line + getattr(stmt, "lineno", 1) - 1,
+            source_line=source.splitlines()[getattr(stmt, "lineno", 1) - 1] if source.splitlines() else None,
         )
     if not statements:
         return ""
