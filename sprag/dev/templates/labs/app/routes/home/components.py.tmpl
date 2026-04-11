@@ -59,8 +59,9 @@ class Landing(Component):
                 ui.a(
                     ui.h3("Queue Demo →"),
                     ui.p(
-                        "A QueueService runs background work on the server, "
-                        "then broadcasts completion over the SSE bus bridge."
+                        "A QueueService uses the new first-class job contract: "
+                        "enqueue helper, progress updates, cancellation, and "
+                        "targeted socket invalidation plus action refetch."
                     ),
                     ui.span("hybrid · QueueService", class_="tag"),
                     href="/queue-demo",

@@ -6,37 +6,48 @@ class QueueDemoModule(Module):
         super().__init__(
             screen=screen,
             state=state or {
-                "pending": 0,
-                "completed": 0,
-                "last_job": None,
+                "job": None,
+                "queue": {"pending": 0, "active": 0, "active_jobs": [], "workers": 1},
                 "message": "Queue a short background job.",
             },
         )
 
     def on_start(self):
         self.delegate(self.element, "click", "[data-role='enqueue']", self.on_enqueue)
-        self.listen("lab:job.done", self.on_job_done)
+        self.delegate(self.element, "click", "[data-role='cancel']", self.on_cancel)
+        self.on_socket("sprag:queue.job.changed", self.on_job_signal)
 
     def on_enqueue(self, event):
         event.prevent_default()
-        label = "Job " + str(self.state["completed"] + self.state["pending"] + 1)
-        self.set_state({"pending": self.state["pending"] + 1, "message": "Queued " + label + "..."})
-        self.call_action("enqueue", {"label": label}).then(self.on_enqueued)
+        queue = self.state.get("queue") or {}
+        label = "Job " + str((queue.get("pending", 0) + queue.get("active", 0)) + 1)
+        self.set_state({"message": "Queueing " + label + "..."})
+        self.call_action("start", {"label": label}).then(self.on_job_result)
 
-    def on_enqueued(self, result):
-        data = result.value
-        if not data["accepted"]:
-            self.set_state(data)
+    def on_cancel(self, event):
+        event.prevent_default()
+        job = self.state.get("job") or {}
+        job_id = job.get("id")
+        if not job_id:
+            return
+        self.set_state({"message": "Requesting cancellation..."})
+        self.call_action("cancel", {"job_id": job_id}).then(self.on_job_result)
 
-    def on_job_done(self, payload):
+    def on_job_result(self, result):
+        self.apply_snapshot(result.value)
+
+    def on_job_signal(self, payload):
+        job = self.state.get("job") or {}
+        job_id = payload.get("job_id") or job.get("id")
+        if not job_id:
+            return
+        self.call_action("status", {"job_id": job_id}).then(self.on_job_result)
+
+    def apply_snapshot(self, snapshot):
         self.set_state(
             {
-                "pending": payload["queue_size"],
-                "completed": payload["completed"],
-                "last_job": {
-                    "id": payload["id"],
-                    "label": payload["label"],
-                },
-                "message": "Completed " + payload["label"] + ".",
+                "job": snapshot.get("job"),
+                "queue": snapshot.get("queue", self.state.get("queue", {})),
+                "message": snapshot.get("message", self.state.get("message")),
             }
         )

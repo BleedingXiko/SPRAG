@@ -3,34 +3,64 @@ from sprag import Component, ui
 
 class QueueCard(Component):
     def render(self, props=None):
-        last = self.state.get("last_job")
-        last_label = (
-            f"#{last['id']} {last['label']} completed"
-            if last
-            else "No jobs completed yet."
-        )
+        job = self.state.get("job") or {}
+        queue = self.state.get("queue") or {}
         message = self.state.get("message", "Queue a short background job.")
+        progress = job.get("progress") or {}
+        percent = progress.get("percent", 0)
+        status = job.get("status", "idle")
+        detail = (
+            (
+                job.get("label", "")
+                + " · "
+                + status
+                + " · "
+                + str(percent)
+                + "%"
+            )
+            if job.get("id")
+            else "No queued job yet."
+        )
+        can_cancel = status in ("queued", "running", "cancelling")
         return ui.div(
             ui.h2("Queue"),
             ui.p(
-                "A controller action enqueues work into a server QueueService. "
-                "The worker emits a bus event, SSE carries it to the browser, "
-                "and the Module updates this Component."
+                "A controller action uses the first-class queue helper, the "
+                "worker reports authoritative progress on the server, and a "
+                "session-targeted socket signal tells the Module to refetch "
+                "status through a normal action."
             ),
             ui.div(
                 ui.span("Pending"),
-                ui.strong(str(self.state["pending"])),
+                ui.strong(str(queue.get("pending", 0))),
                 class_="metric",
             ),
             ui.div(
-                ui.span("Completed"),
-                ui.strong(str(self.state["completed"])),
+                ui.span("Active"),
+                ui.strong(str(queue.get("active", 0))),
                 class_="metric",
             ),
             ui.p(message, class_="status-line"),
-            ui.p(last_label, class_="status-line"),
+            ui.p(detail, class_="status-line"),
+            ui.div(
+                ui.progress(
+                    "",
+                    value=str(percent),
+                    max="100",
+                    class_="field-input",
+                ),
+                ui.span(str(percent) + "%", class_="field-hint"),
+                class_="form-field",
+            ),
             ui.div(
                 ui.button("Enqueue job", type="button", class_="btn", data_role="enqueue"),
+                ui.button(
+                    "Cancel job",
+                    type="button",
+                    class_="btn btn-secondary",
+                    data_role="cancel",
+                    disabled=not can_cancel,
+                ),
                 class_="queue-actions",
             ),
             class_="demo-card queue-card",

@@ -9,11 +9,5 @@ class QueueDemoScreen(Screen):
 
     def render(self, data):
         queue = self.module(QueueDemoModule)
-        queue.set_state(
-            {
-                "pending": data["pending"],
-                "completed": data["completed"],
-                "last_job": data["last_job"],
-            }
-        )
+        queue.set_state(data)
         return hydrate(QueueCard, module=queue)

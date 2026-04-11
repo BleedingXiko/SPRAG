@@ -263,6 +263,48 @@ files on `self.request.files`, `self.request.file(name)`, and
 store the authoritative upload snapshot on the server, emit a lightweight
 socket signal, and let the browser refetch status through a normal action.
 
+### Background Jobs
+
+`QueueService` now has a first-class SPRAG job contract on top of Specter's
+raw queue workers:
+
+```python
+class BuildQueue(QueueService):
+    def handle_item(self, item):
+        total = 3
+        for step in range(total):
+            self.check_cancelled()
+            self.report_progress(
+                current=step + 1,
+                total=total,
+                message=f"Building {item['label']} ({step + 1}/{total})...",
+            )
+        return {"label": item["label"]}
+
+
+class BuildController(Controller):
+    route = "/jobs"
+
+    @action(name="start", schema=Schema("start", {"label": Field(str, required=True)}))
+    def queue_start(self, label):
+        return self.enqueue("build_queue", {"label": label}, label=label)
+
+    @action(schema=Schema("status", {"job_id": Field(str, required=True)}))
+    def status(self, job_id):
+        return self.job_status("build_queue", job_id)
+
+    @action(schema=Schema("cancel", {"job_id": Field(str, required=True)}))
+    def cancel(self, job_id):
+        return self.request_job_cancel("build_queue", job_id)
+```
+
+`self.enqueue(...)` returns one stable payload shape:
+`{"accepted": ..., "job": ..., "queue": ..., "message": ...}`.
+The queue owns the authoritative job record (`queued`/`running`/`cancelling`/
+`completed`/`failed`/`cancelled`), progress, result/error fields, and targeted
+socket invalidation metadata. The intended browser pattern is: call the action,
+listen for `sprag:queue.job.changed`, then refetch `status(...)` for the job.
+
 ### Dynamic Routes and Content
 
 File-based dynamic params and catch-all segments:

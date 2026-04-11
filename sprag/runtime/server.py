@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import inspect
+import logging
+import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
 from specter import Controller as SPECTERController
 from specter import Field, Outcome, Schema
+from specter import QueueService as SPECTERQueueService
 from specter import Service as SPECTERService
 from specter import registry
+from gevent.queue import Empty
 
 # -- HTTP / routing ----------------------------------------------------------
 from specter import HTTPError, Router, expect_json, json_endpoint, require_fields, route
@@ -23,9 +28,6 @@ from specter import Cache, Model, Store, create_cache, create_model, create_stor
 
 # -- Communication -----------------------------------------------------------
 from specter import bus
-
-# -- Workers -----------------------------------------------------------------
-from specter import QueueService
 
 # -- Realtime ----------------------------------------------------------------
 from specter import Handler, SocketIngress
@@ -42,7 +44,10 @@ from .routing import match_page_route
 _UNSET = object()
 _current_request = ContextVar("sprag_current_request", default=_UNSET)
 _current_app = ContextVar("sprag_current_app", default=_UNSET)
+_current_queue_job = ContextVar("sprag_current_queue_job", default=None)
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_JOB_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -253,6 +258,408 @@ class Service(SPECTERService):
         _server_only("Service.call_action")
 
 
+class _JobCancelled(RuntimeError):
+    """Internal control-flow signal for cooperative queue cancellation."""
+
+
+class QueueService(SPECTERQueueService):
+    """SPRAG queue convention layer on top of Specter's raw worker queue.
+
+    Specter's ``QueueService`` gives SPRAG the lifecycle-owned worker pool.
+    This subclass adds the author-facing conventions the framework was
+    missing: structured job records, progress updates, cancellation requests,
+    a stable action result shape, and optional targeted socket invalidation so
+    the browser can refetch authoritative job state.
+    """
+
+    signal_event = "sprag:queue.job.changed"
+
+    def __init__(
+        self,
+        name,
+        *,
+        worker_count=1,
+        maxsize=0,
+        poll_interval=0.5,
+        initial_state=None,
+        job_history_limit=24,
+    ):
+        state = {
+            "jobs": {},
+            "job_order": [],
+            "active_jobs": [],
+        }
+        if initial_state:
+            state.update(initial_state)
+        super().__init__(
+            name,
+            worker_count=worker_count,
+            maxsize=maxsize,
+            poll_interval=poll_interval,
+            initial_state=state,
+        )
+        self.job_history_limit = max(1, int(job_history_limit or 24))
+
+    def emit_socket(self, event, data=None, *, route=None, client_id=None, session_id=None, topic=None):
+        """Emit a websocket event to connected browser clients."""
+        transport = registry.resolve("socket_transport")
+        if transport is None:
+            return False
+        return bool(
+            transport.emit(
+                event,
+                data,
+                route=route,
+                client_id=client_id,
+                session_id=session_id,
+                topic=topic,
+            )
+        )
+
+    def enqueue_job(
+        self,
+        payload,
+        *,
+        job_id=None,
+        label=None,
+        meta=None,
+        route=None,
+        session_id=None,
+        client_id=None,
+        topic=None,
+    ):
+        """Queue structured work and return the standard SPRAG action payload."""
+        job_id = str(job_id or uuid.uuid4().hex[:12])
+        label = str(label or f"Job {job_id}").strip()
+        if not label:
+            label = f"Job {job_id}"
+        target = {
+            "route": route,
+            "session_id": session_id,
+            "client_id": client_id,
+            "topic": topic,
+        }
+        job = {
+            "id": job_id,
+            "label": label,
+            "status": "queued",
+            "message": f"Queued {label}.",
+            "progress": {
+                "current": 0,
+                "total": None,
+                "percent": 0,
+            },
+            "result": None,
+            "error": None,
+            "cancel_requested": False,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "meta": dict(meta or {}),
+            "target": target,
+        }
+        accepted = super().enqueue(
+            {"__sprag_job__": True, "job_id": job_id, "payload": payload},
+            block=False,
+        )
+        if not accepted:
+            rejected = dict(job)
+            rejected["status"] = "rejected"
+            rejected["message"] = f"Queue is full. Could not queue {label}."
+            rejected["updated_at"] = time.time()
+            return self.job_action_result(job=rejected, accepted=False)
+
+        self._merge_job_state(job_id, lambda _existing: job)
+        self.emit_job_signal(job_id)
+        return self.job_action_result(job_id=job_id, accepted=True)
+
+    def job_action_result(self, *, job_id=None, job=None, accepted=True, message=None):
+        """Return the documented action payload for queue actions."""
+        snapshot = dict(job or self.get_job(job_id) or {})
+        queue = self.queue_snapshot()
+        if message is None:
+            message = snapshot.get("message")
+        return {
+            "accepted": bool(accepted),
+            "job": snapshot or None,
+            "queue": queue,
+            "message": message,
+        }
+
+    def queue_snapshot(self):
+        """Return queue-level diagnostics paired with job action results."""
+        state = self.get_state()
+        active_jobs = list(state.get("active_jobs", []))
+        return {
+            "pending": self.pending_count(),
+            "active": len(active_jobs),
+            "active_jobs": active_jobs,
+            "workers": self.worker_count,
+        }
+
+    def get_job(self, job_id):
+        """Return a snapshot of a tracked job by id, if present."""
+        if job_id is None:
+            return None
+        jobs = self.get_state().get("jobs", {})
+        job = jobs.get(str(job_id))
+        return dict(job) if isinstance(job, dict) else None
+
+    def latest_job(self, *, session_id=None):
+        """Return the most recently queued job, optionally scoped to a session."""
+        state = self.get_state()
+        jobs = state.get("jobs", {})
+        for job_id in reversed(state.get("job_order", [])):
+            job = jobs.get(job_id)
+            if not isinstance(job, dict):
+                continue
+            target = job.get("target") or {}
+            if session_id is None or target.get("session_id") == session_id:
+                return dict(job)
+        return None
+
+    def report_progress(
+        self,
+        *,
+        current=None,
+        total=None,
+        percent=None,
+        message=None,
+        result=None,
+        job_id=None,
+    ):
+        """Update the in-flight job snapshot from inside ``handle_item``."""
+        resolved_job_id = self._require_current_job_id(job_id=job_id)
+
+        def update(job):
+            progress = dict(job.get("progress") or {})
+            if current is not None:
+                progress["current"] = current
+            if total is not None:
+                progress["total"] = total
+            if percent is None and progress.get("total") not in (None, 0) and progress.get("current") is not None:
+                percent_value = int(round((float(progress["current"]) / float(progress["total"])) * 100))
+                progress["percent"] = max(0, min(100, percent_value))
+            elif percent is not None:
+                progress["percent"] = max(0, min(100, int(percent)))
+            job["progress"] = progress
+            if result is not None:
+                job["result"] = result
+            if message is not None:
+                job["message"] = message
+            if job.get("status") == "queued":
+                job["status"] = "running"
+            return job
+
+        self._merge_job_state(resolved_job_id, update)
+        self.emit_job_signal(resolved_job_id)
+        return self.get_job(resolved_job_id)
+
+    def request_cancel(self, job_id, *, message=None):
+        """Mark a queued or running job for cooperative cancellation."""
+        snapshot = self.get_job(job_id)
+        if snapshot is None:
+            return self.job_action_result(
+                job={"id": str(job_id), "status": "missing"},
+                accepted=False,
+                message=f"Unknown job {job_id}.",
+            )
+        if snapshot.get("status") in _JOB_TERMINAL_STATUSES:
+            return self.job_action_result(job=snapshot, accepted=False)
+
+        def update(job):
+            job["cancel_requested"] = True
+            job["status"] = "cancelling"
+            job["message"] = message or f"Cancelling {job['label']}..."
+            return job
+
+        self._merge_job_state(job_id, update)
+        self.emit_job_signal(job_id)
+        return self.job_action_result(job_id=job_id, accepted=True)
+
+    def cancel_requested(self, job_id=None):
+        """Return whether cancellation has been requested for a tracked job."""
+        snapshot = self.get_job(self._require_current_job_id(job_id=job_id))
+        return bool(snapshot and snapshot.get("cancel_requested"))
+
+    def check_cancelled(self, *, job_id=None, message=None):
+        """Raise an internal cancellation signal when the current job was cancelled."""
+        if self.cancel_requested(job_id=job_id):
+            raise _JobCancelled(message or "Job cancelled.")
+
+    def complete_job(self, *, result=None, message=None, job_id=None):
+        """Mark a tracked job complete."""
+        resolved_job_id = self._require_current_job_id(job_id=job_id)
+
+        def update(job):
+            job["status"] = "completed"
+            job["cancel_requested"] = False
+            job["error"] = None
+            progress = dict(job.get("progress") or {})
+            progress["percent"] = 100
+            if progress.get("total") not in (None, 0) and progress.get("current") is None:
+                progress["current"] = progress["total"]
+            job["progress"] = progress
+            job["result"] = result
+            if message is not None:
+                job["message"] = message
+            else:
+                job["message"] = f"Completed {job['label']}."
+            return job
+
+        self._merge_job_state(resolved_job_id, update)
+        self._set_active_job(resolved_job_id, active=False)
+        self.emit_job_signal(resolved_job_id)
+        return self.get_job(resolved_job_id)
+
+    def fail_job(self, *, error, message=None, job_id=None):
+        """Mark a tracked job failed."""
+        resolved_job_id = self._require_current_job_id(job_id=job_id)
+
+        def update(job):
+            job["status"] = "failed"
+            job["error"] = str(error)
+            job["message"] = message or str(error)
+            return job
+
+        self._merge_job_state(resolved_job_id, update)
+        self._set_active_job(resolved_job_id, active=False)
+        self.emit_job_signal(resolved_job_id)
+        return self.get_job(resolved_job_id)
+
+    def cancel_job(self, *, message=None, job_id=None):
+        """Mark a tracked job cancelled."""
+        resolved_job_id = self._require_current_job_id(job_id=job_id)
+
+        def update(job):
+            job["status"] = "cancelled"
+            job["cancel_requested"] = True
+            job["message"] = message or f"Cancelled {job['label']}."
+            return job
+
+        self._merge_job_state(resolved_job_id, update)
+        self._set_active_job(resolved_job_id, active=False)
+        self.emit_job_signal(resolved_job_id)
+        return self.get_job(resolved_job_id)
+
+    def emit_job_signal(self, job_id, *, event=None, payload=None):
+        """Emit a targeted socket invalidation for a tracked job when possible."""
+        job = self.get_job(job_id)
+        if job is None:
+            return False
+        target = job.get("target") or {}
+        envelope = {"job_id": job_id}
+        if payload:
+            envelope.update(payload)
+        return self.emit_socket(
+            event or self.signal_event,
+            envelope,
+            route=target.get("route"),
+            session_id=target.get("session_id"),
+            client_id=target.get("client_id"),
+            topic=target.get("topic"),
+        )
+
+    def _worker_loop(self):
+        while self.running:
+            try:
+                item = self.queue.get(timeout=self.poll_interval)
+            except Empty:
+                continue
+
+            self.set_state({"queue_size": self.queue.qsize()})
+
+            try:
+                if isinstance(item, dict) and item.get("__sprag_job__"):
+                    self._handle_job_envelope(item)
+                else:
+                    self.handle_item(item)
+            except Exception as exc:
+                logger.error(
+                    f"[SPRAG] Queue worker error in '{self.name}': {exc}",
+                    exc_info=True,
+                )
+            finally:
+                try:
+                    self.queue.task_done()
+                except Exception:
+                    pass
+                self.set_state({"queue_size": self.queue.qsize()})
+
+    def _handle_job_envelope(self, item):
+        job_id = item["job_id"]
+        payload = item.get("payload")
+        token = _current_queue_job.set(job_id)
+        try:
+            snapshot = self.get_job(job_id)
+            if snapshot is None:
+                return
+            self._set_active_job(job_id, active=True)
+            if snapshot.get("cancel_requested"):
+                self.cancel_job(job_id=job_id, message=f"Cancelled {snapshot['label']}.")
+                return
+
+            def mark_running(job):
+                if job.get("status") == "queued":
+                    job["status"] = "running"
+                if not job.get("message"):
+                    job["message"] = f"Running {job['label']}..."
+                return job
+
+            self._merge_job_state(job_id, mark_running)
+            self.emit_job_signal(job_id)
+            result = self.handle_item(payload)
+            if self.cancel_requested(job_id=job_id):
+                self.cancel_job(job_id=job_id)
+                return
+            if self.get_job(job_id).get("status") not in _JOB_TERMINAL_STATUSES:
+                self.complete_job(job_id=job_id, result=result)
+        except _JobCancelled as exc:
+            self.cancel_job(job_id=job_id, message=str(exc) or None)
+        except Exception as exc:
+            self.fail_job(job_id=job_id, error=f"{exc.__class__.__name__}: {exc}")
+            raise
+        finally:
+            _current_queue_job.reset(token)
+
+    def _set_active_job(self, job_id, *, active):
+        state = self.get_state()
+        active_jobs = list(state.get("active_jobs", []))
+        if active and job_id not in active_jobs:
+            active_jobs.append(job_id)
+            self.set_state({"active_jobs": active_jobs})
+        if not active and job_id in active_jobs:
+            active_jobs = [value for value in active_jobs if value != job_id]
+            self.set_state({"active_jobs": active_jobs})
+
+    def _merge_job_state(self, job_id, update):
+        state = self.get_state()
+        jobs = dict(state.get("jobs", {}))
+        job = dict(jobs.get(job_id, {}))
+        job = update(job) or job
+        job["updated_at"] = time.time()
+        jobs[job_id] = job
+        job_order = [value for value in state.get("job_order", []) if value != job_id]
+        job_order.append(job_id)
+        if len(job_order) > self.job_history_limit:
+            trim_count = len(job_order) - self.job_history_limit
+            for stale_id in job_order[:trim_count]:
+                stale = jobs.get(stale_id)
+                if stale and stale.get("status") in _JOB_TERMINAL_STATUSES:
+                    jobs.pop(stale_id, None)
+            job_order = [value for value in job_order if value in jobs]
+        self.set_state({"jobs": jobs, "job_order": job_order})
+        return dict(job)
+
+    def _require_current_job_id(self, *, job_id=None):
+        resolved = str(job_id) if job_id is not None else _current_queue_job.get()
+        if not resolved:
+            raise RuntimeError(
+                f"{type(self).__name__} job helper requires an active queued job "
+                "or an explicit job_id."
+            )
+        return resolved
+
+
 class Controller(SPECTERController):
     """SPRAG controller with route/action convenience."""
 
@@ -329,6 +736,51 @@ class Controller(SPECTERController):
     def service(self, name):
         """Resolve a named service from the Specter registry."""
         return registry.require(name)
+
+    def queue(self, name):
+        """Resolve a named queue service and validate its SPRAG surface."""
+        service = self.service(name)
+        if not isinstance(service, QueueService):
+            raise ActionDispatchError(
+                f"Service {name!r} is not a SPRAG QueueService.",
+                status_code=500,
+            )
+        return service
+
+    def enqueue(self, queue_name, payload, *, job_id=None, label=None, meta=None):
+        """Queue background work through the standard SPRAG job contract."""
+        queue = self.queue(queue_name)
+        request = self.request
+        return queue.enqueue_job(
+            payload,
+            job_id=job_id,
+            label=label,
+            meta=meta,
+            route=getattr(self, "route", None),
+            session_id=getattr(request, "session_id", None) if request is not None else None,
+        )
+
+    def job_status(self, queue_name, job_id):
+        """Return the standard job payload for a tracked background job."""
+        queue = self.queue(queue_name)
+        snapshot = queue.get_job(job_id)
+        if snapshot is None:
+            raise ActionDispatchError(
+                f"Unknown job {job_id!r} for queue {queue_name!r}.",
+                status_code=404,
+            )
+        return queue.job_action_result(job_id=job_id, accepted=True)
+
+    def request_job_cancel(self, queue_name, job_id):
+        """Ask a tracked background job to cancel cooperatively."""
+        queue = self.queue(queue_name)
+        snapshot = queue.get_job(job_id)
+        if snapshot is None:
+            raise ActionDispatchError(
+                f"Unknown job {job_id!r} for queue {queue_name!r}.",
+                status_code=404,
+            )
+        return queue.request_cancel(job_id)
 
     def load(self):
         """Return route data for SSR or browser boot."""

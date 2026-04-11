@@ -28,11 +28,19 @@ class LabJobQueue(QueueService):
         )
 
     def handle_item(self, item):
-        gevent.sleep(1)
+        label = item["label"]
+        total_steps = 4
+        for step in range(total_steps):
+            self.check_cancelled(message="Cancelled " + label + ".")
+            gevent.sleep(0.35)
+            self.report_progress(
+                current=step + 1,
+                total=total_steps,
+                message=f"Working on {label} ({step + 1}/{total_steps})...",
+            )
         completed = self.state.get("completed", 0) + 1
         result = {
-            "id": item["id"],
-            "label": item["label"],
+            "label": label,
             "completed": completed,
         }
         self.set_state(
@@ -41,16 +49,7 @@ class LabJobQueue(QueueService):
                 "last_job": result,
             }
         )
-        bus.emit(
-            "sprag:broadcast",
-            {
-                "event": "lab:job.done",
-                "payload": {
-                    **result,
-                    "queue_size": self.pending_count(),
-                },
-            },
-        )
+        return result
 
 
 job_queue = LabJobQueue()

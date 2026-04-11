@@ -5,33 +5,25 @@ class QueueDemoController(Controller):
     route = "/queue-demo"
 
     def load(self):
-        queue = self.service("job_queue")
-        snapshot = queue.get_state()
-        return {
-            "pending": queue.pending_count(),
-            "completed": snapshot.get("completed", 0),
-            "last_job": snapshot.get("last_job"),
-        }
-
-    @action(schema=Schema("enqueue", {"label": Field(str, required=True)}))
-    def enqueue(self, label):
-        queue = self.service("job_queue")
-        snapshot = queue.get_state()
-        job_id = snapshot.get("completed", 0) + queue.pending_count() + 1
-        accepted = queue.enqueue({"id": job_id, "label": label})
-        snapshot = queue.get_state()
-        if not accepted:
+        queue = self.queue("job_queue")
+        job = queue.latest_job(session_id=self.request.session_id)
+        if job is None:
             return {
-                "accepted": False,
-                "pending": queue.pending_count(),
-                "completed": snapshot.get("completed", 0),
-                "last_job": snapshot.get("last_job"),
-                "message": "Queue is full.",
+                "accepted": True,
+                "job": None,
+                "queue": queue.queue_snapshot(),
+                "message": "Queue a short background job.",
             }
-        return {
-            "accepted": True,
-            "pending": queue.pending_count(),
-            "completed": snapshot.get("completed", 0),
-            "last_job": snapshot.get("last_job"),
-            "message": f"Queued {label}.",
-        }
+        return queue.job_action_result(job_id=job["id"], accepted=True)
+
+    @action(name="start", schema=Schema("start", {"label": Field(str, required=True)}))
+    def queue_start(self, label):
+        return self.enqueue("job_queue", {"label": label}, label=label)
+
+    @action(schema=Schema("status", {"job_id": Field(str, required=True)}))
+    def status(self, job_id):
+        return self.job_status("job_queue", job_id)
+
+    @action(schema=Schema("cancel", {"job_id": Field(str, required=True)}))
+    def cancel(self, job_id):
+        return self.request_job_cancel("job_queue", job_id)
