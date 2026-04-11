@@ -447,10 +447,10 @@ function resolveFormElement(source) {{
     throw new Error('[SPRAG] form_data(...) could not resolve a parent <form>.');
 }}
 
-function formDataSprag(source) {{
-    const form = resolveFormElement(source);
+function collectFormSnapshot(form, options = {{}}) {{
     const data = {{}};
     const checkboxCounts = new Map();
+    const errorOnFiles = options.errorOnFiles !== false;
 
     for (const element of Array.from(form.elements || [])) {{
         if (!element || !element.name || element.disabled) {{
@@ -471,7 +471,7 @@ function formDataSprag(source) {{
         const type = String(element.type || '').toLowerCase();
 
         if (type === 'file') {{
-            if (element.files && element.files.length > 0) {{
+            if (errorOnFiles && element.files && element.files.length > 0) {{
                 throw new Error(
                     '[SPRAG] form_data(...) does not support file inputs yet. Use the dedicated upload path.'
                 );
@@ -512,6 +512,11 @@ function formDataSprag(source) {{
     }}
 
     return data;
+}}
+
+function formDataSprag(source) {{
+    const form = resolveFormElement(source);
+    return collectFormSnapshot(form, {{ errorOnFiles: true }});
 }}
 
 window.__SPRAG_FORM_DATA__ = formDataSprag;
@@ -624,6 +629,116 @@ function createActionClient(currentRoute) {{
 
 const actionClient = createActionClient(route);
 window.__SPRAG_ACTIONS__ = actionClient;
+
+function uploadProgressPayload(event) {{
+    const loaded = Number((event && event.loaded) || 0);
+    const total = Number((event && event.total) || 0);
+    const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+    return {{
+        loaded,
+        total,
+        percent,
+        length_computable: !!(event && event.lengthComputable),
+    }};
+}}
+
+function createUploadClient(currentRoute) {{
+    const knownActions = new Set(currentRoute.actions || []);
+    const endpoint = withSpragBase(currentRoute.upload_endpoint || '/__sprag__/uploads');
+
+    return {{
+        submit(name, source, onProgress = null) {{
+            if (!name) {{
+                return Promise.reject(new Error('[SPRAG] Upload action name is required.'));
+            }}
+            if (knownActions.size && !knownActions.has(name)) {{
+                return Promise.reject(
+                    new Error(`[SPRAG] Unknown upload action "${{name}}" for route "${{currentRoute.path || 'unknown'}}".`)
+                );
+            }}
+
+            const form = resolveFormElement(source);
+            const body = new FormData(form);
+            body.append('__sprag_route', currentRoute.path || '/');
+            body.append('__sprag_action', name);
+            body.append('__sprag_payload', JSON.stringify(collectFormSnapshot(form, {{ errorOnFiles: false }})));
+
+            return new Promise((resolve, reject) => {{
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', endpoint, true);
+                xhr.setRequestHeader('Accept', 'application/json');
+
+                xhr.upload.addEventListener('progress', (event) => {{
+                    if (typeof onProgress === 'function') {{
+                        onProgress(uploadProgressPayload(event));
+                    }}
+                }});
+
+                xhr.onerror = () => {{
+                    const message =
+                        `[SPRAG] Upload "${{name}}" could not reach "${{endpoint}}". ` +
+                        'This usually means you are viewing a static build and this example needs a live SPRAG server.';
+                    const error = new Error(message);
+                    error.status = 0;
+                    error.response = {{
+                        ok: false,
+                        code: 'SPRAG_SERVER_UNAVAILABLE',
+                        error: message,
+                    }};
+                    reject(error);
+                }};
+
+                xhr.onload = () => {{
+                    const contentType = xhr.getResponseHeader('content-type') || '';
+                    let result = null;
+                    if (contentType.includes('application/json')) {{
+                        try {{
+                            result = JSON.parse(xhr.responseText || '{{}}');
+                        }} catch (_error) {{
+                            result = {{
+                                ok: false,
+                                error: `[SPRAG] Upload "${{name}}" returned invalid JSON.`
+                            }};
+                        }}
+                    }} else {{
+                        result = {{
+                            ok: false,
+                            error: `[SPRAG] Expected JSON response for upload "${{name}}" but received status ${{xhr.status}}.`
+                        }};
+                    }}
+
+                    if (typeof onProgress === 'function') {{
+                        onProgress({{
+                            loaded: 0,
+                            total: 0,
+                            percent: xhr.status >= 200 && xhr.status < 300 ? 100 : 0,
+                            length_computable: false,
+                        }});
+                    }}
+
+                    if (xhr.status < 200 || xhr.status >= 300 || !result.ok) {{
+                        const error = new Error(result.error || `[SPRAG] Upload "${{name}}" failed.`);
+                        error.status = xhr.status;
+                        error.response = result;
+                        reject(error);
+                        return;
+                    }}
+
+                    if (result.redirect && result.redirect.location) {{
+                        navigateSprag(result.redirect.location, {{ replace: !!result.redirect.replace }});
+                    }}
+
+                    resolve(result);
+                }};
+
+                xhr.send(body);
+            }});
+        }}
+    }};
+}}
+
+const uploadClient = createUploadClient(route);
+window.__SPRAG_UPLOADS__ = uploadClient;
 
 const spragRoots = [];
 let spragEventSource = null;
@@ -985,6 +1100,7 @@ function createSharedSocketClient(surface) {{
     const socketPath = '/__sprag__/socket';
     const listeners = new Map();
     const outboundQueue = [];
+    const joinedTopics = new Set();
     let ws = null;
     let reconnectTimer = null;
     let closed = false;
@@ -1025,6 +1141,23 @@ function createSharedSocketClient(surface) {{
         }}, 1000);
     }}
 
+    function normalizeTopic(topic) {{
+        if (topic === null || topic === undefined) {{
+            return null;
+        }}
+        const raw = String(topic).trim();
+        return raw || null;
+    }}
+
+    function encodeTopicMessage(action, topic) {{
+        return JSON.stringify({{
+            type: 'topic',
+            action,
+            topic,
+            route: surface.path || '/',
+        }});
+    }}
+
     function connect() {{
         if (closed) return;
         if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {{
@@ -1037,6 +1170,9 @@ function createSharedSocketClient(surface) {{
                 type: 'hello',
                 route: surface.path || '/',
             }}));
+            for (const topic of Array.from(joinedTopics)) {{
+                ws.send(encodeTopicMessage('join', topic));
+            }}
             flushQueue();
             bus.emit('sprag:socket:open', {{ path: surface.path || '/' }});
         }};
@@ -1112,6 +1248,31 @@ function createSharedSocketClient(surface) {{
             connect();
             return false;
         }},
+        joinTopic(topic) {{
+            const normalized = normalizeTopic(topic);
+            if (!normalized) {{
+                return false;
+            }}
+            joinedTopics.add(normalized);
+            if (ws && ws.readyState === WebSocket.OPEN) {{
+                ws.send(encodeTopicMessage('join', normalized));
+                return true;
+            }}
+            connect();
+            return false;
+        }},
+        leaveTopic(topic) {{
+            const normalized = normalizeTopic(topic);
+            if (!normalized) {{
+                return false;
+            }}
+            joinedTopics.delete(normalized);
+            if (ws && ws.readyState === WebSocket.OPEN) {{
+                ws.send(encodeTopicMessage('leave', normalized));
+                return true;
+            }}
+            return false;
+        }},
         close() {{
             closed = true;
             if (reconnectTimer) {{
@@ -1120,6 +1281,7 @@ function createSharedSocketClient(surface) {{
             }}
             listeners.clear();
             outboundQueue.length = 0;
+            joinedTopics.clear();
             if (ws && ws.readyState !== WebSocket.CLOSED) {{
                 ws.close();
             }}

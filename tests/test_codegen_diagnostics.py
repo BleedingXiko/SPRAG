@@ -28,6 +28,12 @@ class BareReturnModule(Module):
         self.set_state({"ready": True})
 
 
+class TopicHelpersModule(Module):
+    def on_start(self):
+        self.join_topic("room:alpha")
+        self.leave_topic("room:alpha")
+
+
 class UnsupportedWithModule(Module):
     def on_start(self):
         with open("ignored.txt") as handle:
@@ -54,6 +60,13 @@ class CodegenDiagnosticsTests(unittest.TestCase):
     def test_compile_module_supports_bare_return(self):
         compiled = compile_module_class(BareReturnModule)
         self.assertIn("return undefined;", compiled)
+
+    def test_compile_module_supports_topic_helpers(self):
+        compiled = compile_module_class(TopicHelpersModule)
+        self.assertIn("joinTopic(topic)", compiled)
+        self.assertIn("leaveTopic(topic)", compiled)
+        self.assertIn('this.joinTopic("room:alpha")', compiled)
+        self.assertIn('this.leaveTopic("room:alpha")', compiled)
 
     def test_module_diagnostic_includes_context_and_hint(self):
         with self.assertRaises(JSCodegenError) as ctx:

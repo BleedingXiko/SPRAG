@@ -1,0 +1,103 @@
+from sprag import Module
+
+
+class UploadDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "form": {
+                    "title": "GhostHub launch assets",
+                    "notes": (
+                        "Upload a release note bundle and optional supporting files. "
+                        "The upload path is multipart; the metadata payload stays JSON-safe."
+                    ),
+                    "publish": True,
+                },
+                "errors": {},
+                "status": "idle",
+                "message": "Choose files in the native inputs, then upload.",
+                "progress": {"percent": 0},
+                "result": None,
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "submit", "[data-role='upload-form']", self.on_submit)
+        self.on_socket("lab:upload.changed", self.on_upload_changed)
+        topic = self.state.get("upload_topic")
+        if topic:
+            self.join_topic(topic)
+
+    def on_submit(self, event):
+        event.prevent_default()
+        self.set_progress_dom(0, "Uploading files...")
+        request = self.upload_form("upload_asset", event, self.on_upload_progress)
+        request.then(self.on_upload_result).catch(self.on_upload_error)
+
+    def on_upload_progress(self, progress):
+        percent = progress.get("percent", 0)
+        loaded = progress.get("loaded", 0)
+        total = progress.get("total", 0)
+        if total > 0:
+            message = f"Uploading... {percent}% ({loaded}/{total} bytes)"
+        else:
+            message = f"Uploading... {percent}%"
+        self.set_progress_dom(percent, message)
+
+    def on_upload_result(self, result):
+        data = result.value or {}
+        topic = data.get("topic")
+        if topic:
+            self.join_topic(topic)
+        if data.get("accepted"):
+            self.set_state(
+                {
+                    "status": data.get("status", "uploaded"),
+                    "message": data.get("message", "Upload complete."),
+                    "upload_topic": topic or self.state.get("upload_topic"),
+                }
+            )
+            return
+        self.set_state(
+            {
+                "form": data.get("form", self.state.get("form", {})),
+                "errors": data.get("errors", {}),
+                "status": data.get("status", "uploaded"),
+                "message": data.get("message", "Upload complete."),
+                "progress": {"percent": 100},
+                "result": data.get("result"),
+                "upload_topic": topic or self.state.get("upload_topic"),
+            }
+        )
+
+    def on_upload_changed(self, payload):
+        self.call_action("status", {}).then(self.on_status_result).catch(self.on_upload_error)
+
+    def on_status_result(self, result):
+        snapshot = result.value or {}
+        self.set_state(snapshot)
+
+    def on_upload_error(self, error):
+        response = error.response
+        message = response["error"] if response else error.message
+        self.set_progress_dom(0, message)
+        self.set_state(
+            {
+                "status": "error",
+                "message": message,
+                "progress": {"percent": 0},
+            }
+        )
+
+    def set_progress_dom(self, percent, message):
+        meter = self.element.querySelector("[data-role='upload-progress']")
+        label = self.element.querySelector("[data-role='upload-progress-label']")
+        status = self.element.querySelector("[data-role='upload-status']")
+        if meter:
+            meter.value = percent
+        if label:
+            label.textContent = str(percent) + "%"
+        if status:
+            status.textContent = message

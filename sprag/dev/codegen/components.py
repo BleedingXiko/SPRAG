@@ -328,6 +328,14 @@ def compile_component_class(component_class) -> str:
         return helper(source);
     }}
 
+    uploadForm(name, source, onProgress = null) {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_UPLOADS__ : null;
+        if (!helper || typeof helper.submit !== 'function') {{
+            return Promise.reject(new Error('[SPRAG] Upload client unavailable.'));
+        }}
+        return helper.submit(name, source, onProgress);
+    }}
+
     navigate(target, options = {{}}) {{
         const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;
         if (typeof navigator !== 'function') {{

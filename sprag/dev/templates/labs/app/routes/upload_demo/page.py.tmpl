@@ -1,0 +1,12 @@
+from sprag import page
+
+from .server import UploadDemoController
+from .web import UploadDemoScreen
+
+
+upload_demo = page(
+    path="/upload-demo",
+    controller=UploadDemoController,
+    screen=UploadDemoScreen,
+    mode="hybrid",
+)

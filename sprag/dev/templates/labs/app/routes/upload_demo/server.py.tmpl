@@ -1,0 +1,142 @@
+from sprag import Controller, Field, Schema, action
+
+
+def normalize_form(title, notes="", publish=False):
+    return {
+        "title": title.strip(),
+        "notes": notes.strip(),
+        "publish": bool(publish),
+    }
+
+
+def validate_upload(payload, primary):
+    errors = {}
+    if len(payload["title"]) < 3:
+        errors["title"] = "Use at least three characters."
+    if primary is None:
+        errors["asset"] = "Choose a primary asset before uploading."
+    return errors
+
+
+class UploadDemoController(Controller):
+    route = "/upload-demo"
+    _session_snapshots = {}
+
+    def _upload_topic(self):
+        return "upload:" + (self.request.session_id or "anonymous")
+
+    def _default_snapshot(self):
+        return {
+            "form": {
+                "title": "GhostHub launch assets",
+                "notes": (
+                    "Upload a release note bundle and optional supporting files. "
+                    "The upload path is multipart; the metadata payload stays JSON-safe."
+                ),
+                "publish": True,
+            },
+            "errors": {},
+            "status": "idle",
+            "message": "Choose files in the native inputs, then upload.",
+            "progress": {"percent": 0},
+            "result": None,
+            "upload_topic": self._upload_topic(),
+        }
+
+    def _snapshot(self):
+        session_id = self.request.session_id or "anonymous"
+        snapshot = self._session_snapshots.get(session_id)
+        if snapshot is None:
+            return self._default_snapshot()
+        return {
+            **snapshot,
+            "upload_topic": self._upload_topic(),
+        }
+
+    def _store_snapshot(self, snapshot):
+        session_id = self.request.session_id or "anonymous"
+        self._session_snapshots[session_id] = dict(snapshot)
+        return self._snapshot()
+
+    def load(self):
+        return self._snapshot()
+
+    @action(schema=Schema("status", {}))
+    def status(self):
+        return self._snapshot()
+
+    @action(
+        schema=Schema(
+            "upload_asset",
+            {
+                "title": Field(str, required=True),
+                "notes": Field(str, required=False, default=""),
+                "publish": Field(bool, required=False, default=False),
+            },
+        )
+    )
+    def upload_asset(self, title, notes="", publish=False):
+        payload = normalize_form(title, notes, publish)
+        primary = self.request.file("asset")
+        gallery = self.request.files_list("gallery")
+        errors = validate_upload(payload, primary)
+        if errors:
+            return {
+                "uploaded": False,
+                "status": "invalid",
+                "message": "Fix the metadata and choose a primary asset.",
+                "errors": errors,
+                "form": payload,
+                "result": None,
+                "upload_topic": self._upload_topic(),
+            }
+
+        if primary.content_type and primary.content_type.startswith("text/"):
+            preview = primary.text(errors="replace")[:80]
+        else:
+            preview = f"{primary.size} bytes"
+
+        snapshot = self._store_snapshot(
+            {
+                "form": payload,
+                "errors": {},
+                "status": "uploaded",
+                "message": f"Uploaded {primary.filename} with {len(gallery)} supporting file(s).",
+                "progress": {"percent": 100},
+                "result": {
+                    "primary": {
+                        "filename": primary.filename,
+                        "content_type": primary.content_type or "application/octet-stream",
+                        "size": primary.size,
+                        "preview": preview,
+                    },
+                    "gallery": [
+                        {
+                            "filename": item.filename,
+                            "content_type": item.content_type or "application/octet-stream",
+                            "size": item.size,
+                        }
+                        for item in gallery
+                    ],
+                    "publish": payload["publish"],
+                    "notes": payload["notes"],
+                    "raw_form_keys": sorted(self.request.form.keys()),
+                },
+            }
+        )
+        topic = snapshot["upload_topic"]
+        self.emit_socket(
+            "lab:upload.changed",
+            {
+                "reason": "uploaded",
+                "topic": topic,
+            },
+            session_id=self.request.session_id,
+            topic=topic,
+        )
+        return {
+            "accepted": True,
+            "status": "uploaded",
+            "message": "Upload stored on the server. Waiting for authoritative refresh...",
+            "topic": topic,
+        }

@@ -8,7 +8,7 @@ from .runtime.content import ContentDocument, load_markdown_document, load_markd
 from .runtime.env import env, public_env
 from .runtime.mount import Mount, mount
 from .runtime.page import Page, page
-from .runtime.request import Request
+from .runtime.request import Request, UploadedFile
 from .runtime.shell import Shell, shell
 from .runtime.server import (
     Redirect,
@@ -80,6 +80,7 @@ __all__ = [
     "Request",
     "Redirect",
     "Shell",
+    "UploadedFile",
     "action",
     "mount",
     "load_markdown_document",

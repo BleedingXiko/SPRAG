@@ -1,0 +1,13 @@
+from sprag import Screen, hydrate
+
+from .components import UploadDemoCard
+from .modules import UploadDemoModule
+
+
+class UploadDemoScreen(Screen):
+    modules = [UploadDemoModule]
+
+    def render(self, data):
+        uploader = self.module(UploadDemoModule)
+        uploader.set_state(data)
+        return hydrate(UploadDemoCard, module=uploader)

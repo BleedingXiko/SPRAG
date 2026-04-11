@@ -330,6 +330,23 @@ def compile_module_class(module_class) -> str:
         return socket.emit(event, payload);
     }}
 
+    joinTopic(topic) {{
+        const socket = this._spragSocket();
+        if (!socket || typeof socket.joinTopic !== 'function') {{
+            console.warn('[SPRAG] Module.join_topic(...) called before the shared socket bridge was ready.');
+            return false;
+        }}
+        return socket.joinTopic(topic);
+    }}
+
+    leaveTopic(topic) {{
+        const socket = this._spragSocket();
+        if (!socket || typeof socket.leaveTopic !== 'function') {{
+            return false;
+        }}
+        return socket.leaveTopic(topic);
+    }}
+
     callAction(name, payload = {{}}) {{
         if (!this.actions || typeof this.actions.call !== 'function') {{
             return Promise.reject(new Error('[SPRAG] Action client unavailable.'));
@@ -343,6 +360,14 @@ def compile_module_class(module_class) -> str:
             throw new Error('[SPRAG] Form helper unavailable.');
         }}
         return helper(source);
+    }}
+
+    uploadForm(name, source, onProgress = null) {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_UPLOADS__ : null;
+        if (!helper || typeof helper.submit !== 'function') {{
+            return Promise.reject(new Error('[SPRAG] Upload client unavailable.'));
+        }}
+        return helper.submit(name, source, onProgress);
     }}
 
     navigate(target, options = {{}}) {{

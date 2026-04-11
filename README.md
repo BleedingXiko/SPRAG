@@ -233,6 +233,36 @@ Same authoring rule as the rest of SPRAG:
 - `cast=` supports `bool`, `int`, `float`, and `str`.
 - Use plain `env("SECRET_KEY", required=True)` on the server for secrets; do not prefix secrets with `SPRAG_PUBLIC_`.
 
+### File Uploads
+
+Keep ordinary forms on the JSON action path, and use the dedicated multipart
+upload path when native file inputs are involved:
+
+```python
+class AssetModule(Module):
+    def on_submit(self, event):
+        event.prevent_default()
+        self.upload_form("upload_asset", event, self.on_progress).then(self.on_uploaded)
+```
+
+```python
+class AssetController(Controller):
+    route = "/assets"
+
+    @action(schema=Schema("upload_asset", {"title": Field(str, required=True)}))
+    def upload_asset(self, title):
+        primary = self.request.file("asset")
+        extras = self.request.files_list("gallery")
+        return {"title": title, "filename": primary.filename, "extra_count": len(extras)}
+```
+
+`upload_form(...)` sends `multipart/form-data` to a separate upload endpoint,
+keeps non-file fields JSON-safe for schema validation, and exposes uploaded
+files on `self.request.files`, `self.request.file(name)`, and
+`self.request.files_list(name)`. The intended realtime pairing is:
+store the authoritative upload snapshot on the server, emit a lightweight
+socket signal, and let the browser refetch status through a normal action.
+
 ### Dynamic Routes and Content
 
 File-based dynamic params and catch-all segments:
@@ -288,6 +318,34 @@ class ChatModule(Module):
     def send(self, text):
         self.emit_socket("chat:message", {"text": text})
 ```
+
+Targeting stays websocket-first in this milestone:
+
+```python
+self.emit_socket("upload:changed", {"reason": "stored"}, session_id=self.request.session_id)
+self.emit_socket("room:notice", {"room": "alpha"}, topic="room:alpha")
+self.emit_socket("private:notice", {"ok": True}, client_id="sprag-socket-7")
+```
+
+Browser Modules can opt into topics on the shared socket:
+
+```python
+class UploadModule(Module):
+    def on_start(self):
+        self.join_topic("upload:123")
+        self.on_socket("upload:changed", self.on_changed)
+
+    def on_changed(self, payload):
+        self.call_action("status", {}).then(self.on_status)
+```
+
+Recommended pattern: treat sockets as a selective invalidation channel, not
+the source of truth. Mutate authoritative server state first, emit a small
+signal event, then refetch the current snapshot through normal SPRAG actions
+or route loads. Topic names should be app-namespaced strings such as
+`upload:123` or `room:alpha`.
+
+SSE remains the broadcast-only path in this release.
 
 If any surface declares socket ingress, `server_mode="auto"` promotes to websocket transport automatically.
 

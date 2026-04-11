@@ -385,6 +385,14 @@ class Module:
         """Emit a websocket event through SPRAG's shared runtime socket."""
         _browser_only("Module.emit_socket")
 
+    def join_topic(self, topic):
+        """Join a named socket topic on the shared runtime socket."""
+        _browser_only("Module.join_topic")
+
+    def leave_topic(self, topic):
+        """Leave a named socket topic on the shared runtime socket."""
+        _browser_only("Module.leave_topic")
+
     # -- Actions (SPRAG-specific bridge to controllers) --------------------
     def call_action(self, name, payload=None):
         """Call a server-side controller action; returns a Promise in JS."""
@@ -393,6 +401,10 @@ class Module:
     def form_data(self, source):
         """Read a form or form event into a plain JSON-safe dict."""
         _browser_only("Module.form_data")
+
+    def upload_form(self, name, source, on_progress=None):
+        """Submit a multipart form upload with progress; returns a Promise in JS."""
+        _browser_only("Module.upload_form")
 
     def navigate(self, target, options=None):
         """Navigate the browser to another route or URL."""
@@ -502,6 +514,10 @@ class Component:
     def form_data(self, source):
         """Read a form or form event into a plain JSON-safe dict."""
         _browser_only("Component.form_data")
+
+    def upload_form(self, name, source, on_progress=None):
+        """Submit a multipart form upload with progress; returns a Promise in JS."""
+        _browser_only("Component.upload_form")
 
     def navigate(self, target, options=None):
         """Navigate the browser to another route or URL."""

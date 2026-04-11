@@ -1,0 +1,171 @@
+from sprag import Component, ui
+
+
+class UploadDemoCard(Component):
+    def render(self, props=None):
+        form = self.state.get("form", {})
+        errors = self.state.get("errors", {})
+        result = self.state.get("result") or {}
+        primary = result.get("primary") or {}
+        gallery = result.get("gallery") or []
+        return ui.div(
+            ui.h2("Upload Demo"),
+            ui.p(
+                "Native file inputs stay DOM-owned until submit. "
+                "upload_form(...) sends multipart to a dedicated upload endpoint, "
+                "keeps metadata JSON-safe, and the authoritative server snapshot "
+                "comes back through a socket signal plus status refetch."
+            ),
+            ui.div(
+                ui.span("Status"),
+                ui.strong(self.state.get("status", "idle")),
+                class_="metric",
+            ),
+            ui.div(
+                ui.span("Publish after upload"),
+                ui.strong("yes" if form.get("publish") else "no"),
+                class_="metric",
+            ),
+            ui.div(
+                ui.span("Topic"),
+                ui.strong(self.state.get("upload_topic", "missing")),
+                class_="metric",
+            ),
+            ui.p(
+                self.state.get("message", "Choose files in the native inputs, then upload."),
+                class_="status-line",
+                data_role="upload-status",
+            ),
+            ui.form(
+                ui.div(
+                    ui.span("Bundle title", class_="field-label"),
+                    ui.input(
+                        type="text",
+                        name="title",
+                        value=form.get("title", ""),
+                        class_="field-input",
+                    ),
+                    ui.p(errors.get("title", ""), class_="field-error"),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Release notes", class_="field-label"),
+                    ui.textarea(
+                        form.get("notes", ""),
+                        name="notes",
+                        rows="4",
+                        class_="field-input field-textarea",
+                    ),
+                    ui.p(
+                        "These fields still land in the controller action as a normal JSON payload.",
+                        class_="field-hint",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Primary asset", class_="field-label"),
+                    ui.input(
+                        type="file",
+                        name="asset",
+                        class_="field-input",
+                    ),
+                    ui.p(errors.get("asset", ""), class_="field-error"),
+                    ui.p(
+                        "Pick the main file in the native control above. The controller reads it from request.file('asset') and emits a session-targeted upload signal.",
+                        class_="field-hint",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Supporting files", class_="field-label"),
+                    ui.input(
+                        type="file",
+                        name="gallery",
+                        multiple=True,
+                        class_="field-input",
+                    ),
+                    ui.p(
+                        "Optional extra files. The controller reads them from request.files_list('gallery').",
+                        class_="field-hint",
+                    ),
+                    class_="form-field",
+                ),
+                ui.label(
+                    ui.input(
+                        type="checkbox",
+                        name="publish",
+                        checked=bool(form.get("publish", False)),
+                    ),
+                    ui.span("Mark this bundle ready for publishing."),
+                    class_="checkbox-field",
+                ),
+                ui.div(
+                    ui.progress(
+                        "",
+                        value=str(self.state.get("progress", {}).get("percent", 0)),
+                        max="100",
+                        class_="field-input",
+                        data_role="upload-progress",
+                    ),
+                    ui.span(
+                        f"{self.state.get('progress', {}).get('percent', 0)}%",
+                        class_="field-hint",
+                        data_role="upload-progress-label",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.button(
+                        "Upload Bundle",
+                        type="submit",
+                        class_="btn btn-inline",
+                    ),
+                    class_="form-actions",
+                ),
+                class_="sprag-form",
+                data_role="upload-form",
+            ),
+            ui.div(
+                ui.h3("Server result"),
+                ui.p(
+                    "No upload yet."
+                    if not primary.get("filename")
+                    else (
+                        primary.get("filename", "")
+                        + " · "
+                        + primary.get("content_type", "")
+                        + " · "
+                        + str(primary.get("size", 0))
+                        + " bytes"
+                    ),
+                    class_="status-line",
+                ),
+                ui.p(
+                    ""
+                    if not primary.get("preview")
+                    else "Preview: " + primary.get("preview", ""),
+                    class_="field-hint",
+                ),
+                ui.p(
+                    ""
+                    if len(gallery) == 0
+                    else "Supporting files: "
+                    + ", ".join([item.get("filename", "") for item in gallery]),
+                    class_="field-hint",
+                ),
+                ui.p(
+                    ""
+                    if not result.get("raw_form_keys")
+                    else "Raw multipart fields: " + ", ".join(result.get("raw_form_keys", [])),
+                    class_="field-hint",
+                ),
+                ui.p(
+                    "Pattern: emit a lightweight change signal, then refetch the authoritative status action."
+                    if primary.get("filename")
+                    else "",
+                    class_="field-hint",
+                ),
+                class_="form-snapshot",
+            ),
+            class_="demo-card form-demo-card",
+        )
