@@ -1,0 +1,114 @@
+from sprag import Controller, Field, Schema, action, slugify
+
+
+def normalize_form(title, email, summary, visibility, newsletter):
+    return {
+        "title": title.strip(),
+        "email": email.strip().lower(),
+        "summary": summary.strip(),
+        "visibility": visibility,
+        "newsletter": bool(newsletter),
+    }
+
+
+def validate_form(payload):
+    errors = {}
+    if len(payload["title"]) < 3:
+        errors["title"] = "Use at least three characters."
+    if "@" not in payload["email"] or "." not in payload["email"]:
+        errors["email"] = "Use a plausible email address."
+    if len(payload["summary"]) > 160:
+        errors["summary"] = "Keep the summary under 160 characters."
+    if payload["visibility"] not in {"private", "team", "public"}:
+        errors["visibility"] = "Pick private, team, or public."
+    return errors
+
+
+def has_errors(errors):
+    return bool(
+        errors.get("title")
+        or errors.get("email")
+        or errors.get("summary")
+        or errors.get("visibility")
+    )
+
+
+class FormDemoController(Controller):
+    route = "/form-demo"
+
+    def load(self):
+        return {
+            "form": {
+                "title": "Quiet Signal",
+                "email": "ops@ghosthub.test",
+                "summary": (
+                    "A redirect-aware publish form that keeps the draft in browser "
+                    "state and sends plain JSON actions to the server."
+                ),
+                "visibility": "team",
+                "newsletter": True,
+            },
+            "errors": {},
+            "dirty": False,
+            "status": "idle",
+            "saved_message": "No saves yet.",
+            "server_snapshot": None,
+            "autosave": True,
+        }
+
+    @action(
+        schema=Schema(
+            "save_draft",
+            {
+                "title": Field(str, required=True),
+                "email": Field(str, required=True),
+                "summary": Field(str, required=False, default=""),
+                "visibility": Field(str, required=True),
+                "newsletter": Field(bool, required=False, default=False),
+            },
+        )
+    )
+    def save_draft(self, title, email, summary="", visibility="team", newsletter=False):
+        payload = normalize_form(title, email, summary, visibility, newsletter)
+        errors = validate_form(payload)
+        if has_errors(errors):
+            return {
+                "saved": False,
+                "status": "invalid",
+                "message": "Fix the highlighted fields before saving.",
+                "errors": errors,
+                "server_snapshot": None,
+            }
+        return {
+            "saved": True,
+            "status": "saved",
+            "message": "Draft saved on the server.",
+            "errors": {},
+            "server_snapshot": payload,
+        }
+
+    @action(
+        schema=Schema(
+            "publish",
+            {
+                "title": Field(str, required=True),
+                "email": Field(str, required=True),
+                "summary": Field(str, required=False, default=""),
+                "visibility": Field(str, required=True),
+                "newsletter": Field(bool, required=False, default=False),
+            },
+        )
+    )
+    def publish(self, title, email, summary="", visibility="team", newsletter=False):
+        payload = normalize_form(title, email, summary, visibility, newsletter)
+        errors = validate_form(payload)
+        if has_errors(errors):
+            return {
+                "published": False,
+                "status": "invalid",
+                "message": "Fix the highlighted fields before publishing.",
+                "errors": errors,
+                "server_snapshot": None,
+            }
+        slug = slugify(payload["title"]) or "untitled"
+        return self.redirect(f"/form-demo/success?title={slug}", status=303)

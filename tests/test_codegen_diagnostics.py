@@ -21,6 +21,13 @@ class SupportedModule(Module):
             self.set_state({"total": total})
 
 
+class BareReturnModule(Module):
+    def on_start(self):
+        if True:
+            return
+        self.set_state({"ready": True})
+
+
 class UnsupportedWithModule(Module):
     def on_start(self):
         with open("ignored.txt") as handle:
@@ -43,6 +50,10 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         compiled = compile_module_class(SupportedModule)
         self.assertIn("export class SupportedModule extends Module", compiled)
         self.assertIn("for (let i = 0; i < 3; i++)", compiled)
+
+    def test_compile_module_supports_bare_return(self):
+        compiled = compile_module_class(BareReturnModule)
+        self.assertIn("return undefined;", compiled)
 
     def test_module_diagnostic_includes_context_and_hint(self):
         with self.assertRaises(JSCodegenError) as ctx:

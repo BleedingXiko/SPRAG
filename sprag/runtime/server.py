@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 
 from specter import Controller as SPECTERController
 from specter import Field, Outcome, Schema
@@ -41,6 +42,54 @@ from .routing import match_page_route
 _UNSET = object()
 _current_request = ContextVar("sprag_current_request", default=_UNSET)
 _current_app = ContextVar("sprag_current_app", default=_UNSET)
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+
+
+@dataclass(frozen=True)
+class ActionResult:
+    """Structured browser-action response payload."""
+
+    ok: bool
+    value: object = None
+    error: str | None = None
+    status: int = 200
+    redirect: "Redirect | None" = None
+
+
+class Redirect(Exception):
+    """First-class redirect contract for page loads and browser actions."""
+
+    def __init__(self, location, *, status=302, replace=None):
+        if not isinstance(location, str) or not location.strip():
+            raise ValueError("redirect(location, ...) requires a non-empty string location.")
+        if status not in _REDIRECT_STATUSES:
+            raise ValueError(
+                "redirect(status=...) must be one of 301, 302, 303, 307, or 308."
+            )
+        if replace is not None and not isinstance(replace, bool):
+            raise ValueError("redirect(replace=...) must be True, False, or None.")
+        super().__init__(location)
+        self.location = location
+        self.status = int(status)
+        self.replace = replace
+
+    @property
+    def browser_replace(self) -> bool:
+        if self.replace is not None:
+            return self.replace
+        return self.status in {301, 308}
+
+    def as_payload(self) -> dict:
+        return {
+            "location": self.location,
+            "status": self.status,
+            "replace": self.browser_replace,
+        }
+
+
+def redirect(location, *, status=302, replace=None) -> Redirect:
+    """Return a first-class redirect response for page loads or actions."""
+    return Redirect(location, status=status, replace=replace)
 
 
 def action(fn=None, *, schema=None, name=None):
@@ -267,6 +316,10 @@ class Controller(SPECTERController):
         """Return route data for SSR or browser boot."""
         return {}
 
+    def redirect(self, location, *, status=302, replace=None):
+        """Return a first-class redirect response from ``load()`` or an action."""
+        return redirect(location, status=status, replace=replace)
+
 
 class ActionDispatchError(RuntimeError):
     """Structured action-dispatch failure for SPRAG bridge responses."""
@@ -317,6 +370,8 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
     try:
         with controller_context(request=request, app=app):
             result = bound_action(*args, **kwargs)
+    except Redirect as exc:
+        return ActionResult(ok=True, status=exc.status, redirect=exc)
     except ActionDispatchError:
         raise
     except Exception as exc:
@@ -325,9 +380,7 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
             status_code=500,
         ) from exc
 
-    if isinstance(result, Outcome):
-        return result
-    return Outcome.success(result)
+    return _coerce_action_result(result)
 
 
 def _resolve_surface_controller(pages, mounts, route_path, *, app=None):
@@ -363,3 +416,19 @@ def _bind_action_payload(bound_action, payload):
     else:
         binding = signature.bind(payload)
     return binding.args, binding.kwargs
+
+
+def _coerce_action_result(result) -> ActionResult:
+    if isinstance(result, Redirect):
+        return ActionResult(ok=True, status=result.status, redirect=result)
+    if isinstance(result, Outcome):
+        redirect_response = result.value if isinstance(result.value, Redirect) else None
+        value = None if redirect_response is not None else result.value
+        return ActionResult(
+            ok=result.ok,
+            value=value,
+            error=result.error,
+            status=redirect_response.status if redirect_response is not None else result.status,
+            redirect=redirect_response,
+        )
+    return ActionResult(ok=True, value=result, status=200)

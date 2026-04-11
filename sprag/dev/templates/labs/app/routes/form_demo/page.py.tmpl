@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import FormDemoController
+from .web import FormDemoScreen
+
+
+form_demo = page(
+    path="/form-demo",
+    controller=FormDemoController,
+    screen=FormDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Form Demo — SPRAG Labs"},
+)

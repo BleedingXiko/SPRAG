@@ -1,0 +1,195 @@
+from sprag import Module, debounce
+
+
+class FormDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "form": {
+                    "title": "",
+                    "email": "",
+                    "summary": "",
+                    "visibility": "team",
+                    "newsletter": False,
+                },
+                "errors": {},
+                "dirty": False,
+                "status": "idle",
+                "saved_message": "No saves yet.",
+                "server_snapshot": None,
+                "autosave": True,
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "input", "[data-role='profile-form']", self.on_form_change)
+        self.delegate(self.element, "change", "[data-role='profile-form']", self.on_form_change)
+        self.delegate(self.element, "submit", "[data-role='profile-form']", self.on_submit)
+        self.delegate(self.element, "click", "[data-role='save-draft']", self.on_save_click)
+        self.delegate(
+            self.element,
+            "click",
+            "[data-role='toggle-autosave']",
+            self.on_toggle_autosave,
+        )
+
+    def on_form_change(self, event):
+        snapshot = self.form_data(event)
+        errors = self.validate_form(snapshot)
+        invalid = self.has_errors(errors)
+        self.set_state(
+            {
+                "form": snapshot,
+                "errors": errors,
+                "dirty": True,
+                "status": "invalid" if invalid else "editing",
+                "saved_message": (
+                    "Fix the highlighted fields."
+                    if invalid
+                    else "Changes captured locally."
+                ),
+            }
+        )
+        if self.state.get("autosave") and not invalid:
+            self.autosave_draft()
+
+    def on_save_click(self, event):
+        event.prevent_default()
+        snapshot = self.form_data(event)
+        errors = self.validate_form(snapshot)
+        if self.has_errors(errors):
+            self.set_state(
+                {
+                    "form": snapshot,
+                    "errors": errors,
+                    "dirty": True,
+                    "status": "invalid",
+                    "saved_message": "Fix the highlighted fields before saving.",
+                }
+            )
+            return
+        self.request_save(snapshot, "Saving draft...")
+
+    @debounce(0.45)
+    def autosave_draft(self):
+        snapshot = self.state.get("form", {})
+        errors = self.validate_form(snapshot)
+        if self.has_errors(errors):
+            return
+        self.request_save(snapshot, "Autosaving draft...")
+
+    def request_save(self, snapshot, message):
+        self.set_state(
+            {
+                "form": snapshot,
+                "errors": {},
+                "dirty": True,
+                "status": "saving",
+                "saved_message": message,
+            }
+        )
+        self.call_action("save_draft", snapshot).then(self.on_save_result).catch(self.on_action_error)
+
+    def on_submit(self, event):
+        event.prevent_default()
+        snapshot = self.form_data(event)
+        errors = self.validate_form(snapshot)
+        if self.has_errors(errors):
+            self.set_state(
+                {
+                    "form": snapshot,
+                    "errors": errors,
+                    "dirty": True,
+                    "status": "invalid",
+                    "saved_message": "Fix the highlighted fields before publishing.",
+                }
+            )
+            return
+        self.set_state(
+            {
+                "form": snapshot,
+                "errors": {},
+                "dirty": True,
+                "status": "publishing",
+                "saved_message": "Publishing and redirecting...",
+            }
+        )
+        self.call_action("publish", snapshot).then(self.on_publish_result).catch(self.on_action_error)
+
+    def on_publish_result(self, result):
+        data = result.value or {}
+        if not data:
+            return
+        self.apply_action_feedback(data)
+
+    def on_save_result(self, result):
+        data = result.value or {}
+        self.apply_action_feedback(data)
+
+    def on_toggle_autosave(self, event):
+        event.prevent_default()
+        enabled = not self.state.get("autosave")
+        self.set_state(
+            {
+                "autosave": enabled,
+                "saved_message": (
+                    "Autosave enabled. Clean drafts will save after a pause."
+                    if enabled
+                    else "Autosave paused. Use Save draft or Publish."
+                ),
+            }
+        )
+        if enabled and not self.has_errors(self.state.get("errors", {})) and self.state.get("dirty"):
+            self.autosave_draft()
+
+    def on_action_error(self, error):
+        response = error.response
+        message = response["error"] if response else error.message
+        self.set_state(
+            {
+                "status": "error",
+                "saved_message": message,
+            }
+        )
+
+    def apply_action_feedback(self, data):
+        errors = data.get("errors", {})
+        saved = bool(data.get("saved"))
+        self.set_state(
+            {
+                "errors": errors,
+                "dirty": not saved,
+                "status": data.get("status", "saved" if saved else "invalid"),
+                "saved_message": data.get(
+                    "message",
+                    "Draft saved." if saved else "Fix the highlighted fields.",
+                ),
+                "server_snapshot": data.get("server_snapshot"),
+            }
+        )
+
+    def validate_form(self, snapshot):
+        errors = {}
+        title = snapshot.get("title", "").strip()
+        email = snapshot.get("email", "").strip()
+        summary = snapshot.get("summary", "").strip()
+        visibility = snapshot.get("visibility", "team")
+        if len(title) < 3:
+            errors = errors | {"title": "Use at least three characters."}
+        if "@" not in email or "." not in email:
+            errors = errors | {"email": "Use a plausible email address."}
+        if len(summary) > 160:
+            errors = errors | {"summary": "Keep the summary under 160 characters."}
+        if visibility not in ["private", "team", "public"]:
+            errors = errors | {"visibility": "Pick private, team, or public."}
+        return errors
+
+    def has_errors(self, errors):
+        return bool(
+            errors.get("title")
+            or errors.get("email")
+            or errors.get("summary")
+            or errors.get("visibility")
+        )

@@ -415,6 +415,148 @@ function rewriteInternalLinks() {{
     }}
 }}
 
+function appendFormValue(target, name, value) {{
+    if (Object.prototype.hasOwnProperty.call(target, name)) {{
+        if (Array.isArray(target[name])) {{
+            target[name].push(value);
+        }} else {{
+            target[name] = [target[name], value];
+        }}
+        return;
+    }}
+    target[name] = value;
+}}
+
+function resolveFormElement(source) {{
+    if (!source) {{
+        throw new Error('[SPRAG] form_data(...) requires a form element or DOM event.');
+    }}
+    if (source.tagName === 'FORM') {{
+        return source;
+    }}
+    if (source.currentTarget && source.currentTarget.tagName === 'FORM') {{
+        return source.currentTarget;
+    }}
+    const candidate = source.target || source.currentTarget || source;
+    if (candidate && typeof candidate.closest === 'function') {{
+        const form = candidate.closest('form');
+        if (form) {{
+            return form;
+        }}
+    }}
+    throw new Error('[SPRAG] form_data(...) could not resolve a parent <form>.');
+}}
+
+function formDataSprag(source) {{
+    const form = resolveFormElement(source);
+    const data = {{}};
+    const checkboxCounts = new Map();
+
+    for (const element of Array.from(form.elements || [])) {{
+        if (!element || !element.name || element.disabled) {{
+            continue;
+        }}
+        const type = String(element.type || '').toLowerCase();
+        if (type === 'checkbox') {{
+            checkboxCounts.set(element.name, (checkboxCounts.get(element.name) || 0) + 1);
+        }}
+    }}
+
+    for (const element of Array.from(form.elements || [])) {{
+        if (!element || !element.name || element.disabled) {{
+            continue;
+        }}
+        const name = element.name;
+        const tagName = String(element.tagName || '').toUpperCase();
+        const type = String(element.type || '').toLowerCase();
+
+        if (type === 'file') {{
+            if (element.files && element.files.length > 0) {{
+                throw new Error(
+                    '[SPRAG] form_data(...) does not support file inputs yet. Use the dedicated upload path.'
+                );
+            }}
+            continue;
+        }}
+
+        if (type === 'submit' || type === 'button' || type === 'reset') {{
+            continue;
+        }}
+
+        if (type === 'checkbox') {{
+            const isBoolean = (checkboxCounts.get(name) || 0) === 1
+                && ((!element.hasAttribute || !element.hasAttribute('value')) || element.value === 'on');
+            if (isBoolean) {{
+                data[name] = !!element.checked;
+            }} else if (element.checked) {{
+                appendFormValue(data, name, element.value);
+            }} else if (!Object.prototype.hasOwnProperty.call(data, name)) {{
+                data[name] = [];
+            }}
+            continue;
+        }}
+
+        if (type === 'radio') {{
+            if (element.checked) {{
+                data[name] = element.value;
+            }}
+            continue;
+        }}
+
+        if (tagName === 'SELECT' && element.multiple) {{
+            data[name] = Array.from(element.selectedOptions || []).map((option) => option.value);
+            continue;
+        }}
+
+        appendFormValue(data, name, element.value);
+    }}
+
+    return data;
+}}
+
+window.__SPRAG_FORM_DATA__ = formDataSprag;
+
+function resolveNavigationTarget(target) {{
+    if (target === null || target === undefined || target === '') {{
+        throw new Error('[SPRAG] navigate(...) requires a non-empty target.');
+    }}
+    const rawTarget = String(target);
+    if (
+        rawTarget.startsWith('#')
+        || rawTarget.startsWith('mailto:')
+        || rawTarget.startsWith('tel:')
+        || rawTarget.startsWith('javascript:')
+        || rawTarget.startsWith('data:')
+    ) {{
+        return rawTarget;
+    }}
+    try {{
+        const parsed = new URL(rawTarget, window.location.origin);
+        if (parsed.origin !== window.location.origin) {{
+            return parsed.toString();
+        }}
+        const canonical = spragInternalPathMap.get(normalizeComparablePath(parsed.pathname)) || parsed.pathname || '/';
+        return `${{withSpragBase(canonical)}}${{parsed.search}}${{parsed.hash}}`;
+    }} catch (_error) {{
+        return rawTarget;
+    }}
+}}
+
+function navigateSprag(target, options = {{}}) {{
+    const resolved = resolveNavigationTarget(target);
+    const replace = typeof options === 'boolean'
+        ? options
+        : Boolean(options && options.replace);
+    if (replace) {{
+        window.location.replace(resolved);
+    }} else {{
+        window.location.assign(resolved);
+    }}
+    return resolved;
+}}
+
+window.__SPRAG_NAVIGATE__ = navigateSprag;
+
 function createActionClient(currentRoute) {{
     const knownActions = new Set(currentRoute.actions || []);
     const endpoint = withSpragBase(currentRoute.action_endpoint || '/__sprag__/actions');
@@ -469,6 +611,10 @@ function createActionClient(currentRoute) {{
                 error.status = response.status;
                 error.response = result;
                 throw error;
+            }}
+
+            if (result.redirect && result.redirect.location) {{
+                navigateSprag(result.redirect.location, {{ replace: !!result.redirect.replace }});
             }}
 
             return result;

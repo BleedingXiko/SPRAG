@@ -1,0 +1,8 @@
+from sprag import Screen, ssr
+
+from .components import FormSuccessCard
+
+
+class FormSuccessScreen(Screen):
+    def render(self, data):
+        return ssr(FormSuccessCard, title=data["title"], slug=data["slug"])

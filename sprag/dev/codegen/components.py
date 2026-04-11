@@ -320,6 +320,22 @@ def compile_component_class(component_class) -> str:
         this.refs = {{}};
     }}
 
+    formData(source) {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_FORM_DATA__ : null;
+        if (typeof helper !== 'function') {{
+            throw new Error('[SPRAG] Form helper unavailable.');
+        }}
+        return helper(source);
+    }}
+
+    navigate(target, options = {{}}) {{
+        const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;
+        if (typeof navigator !== 'function') {{
+            throw new Error('[SPRAG] Browser navigator unavailable.');
+        }}
+        return navigator(target, options);
+    }}
+
     render(propsOverride = null) {{
         const props = propsOverride || this.props || {{}};
 {chr(10).join(body_lines)}

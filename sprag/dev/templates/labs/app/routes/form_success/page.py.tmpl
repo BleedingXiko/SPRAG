@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import FormSuccessController
+from .web import FormSuccessScreen
+
+
+form_success = page(
+    path="/form-demo/success",
+    controller=FormSuccessController,
+    screen=FormSuccessScreen,
+    mode="document",
+    metadata={"title": "Form Published — SPRAG Labs"},
+)

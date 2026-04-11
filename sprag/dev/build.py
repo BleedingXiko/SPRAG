@@ -18,6 +18,7 @@ from ..runtime.routing import build_entries_for_page, normalize_route_path
 from ..runtime.rendering import (
     build_document_html,
     build_mount_html,
+    build_redirect_html,
     load_controller_data,
     load_mount_data,
     render_screen,
@@ -73,16 +74,22 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             page_dir.mkdir(parents=True, exist_ok=True)
 
             build_request = Request(path=actual_path, params=build_entry.params, method="BUILD")
-            data, data_error = load_controller_data(page, request=build_request, app=app)
-            body_html, hydration, render_error = render_screen(page, data)
+            data, data_error, redirect = load_controller_data(page, request=build_request, app=app)
+            hydration = []
+            render_error = None
             page_meta = _resolved_surface_metadata(page.metadata, data)
-            body_html, shell_head, shell_assets = apply_shell(
-                body_html,
-                app=app,
-                surface_shell=getattr(page, "shell", None),
-                document_path=actual_path,
-            )
-            emit_shell_assets(output_dir, shell_assets)
+            if redirect is None:
+                body_html, hydration, render_error = render_screen(page, data)
+                body_html, shell_head, shell_assets = apply_shell(
+                    body_html,
+                    app=app,
+                    surface_shell=getattr(page, "shell", None),
+                    document_path=actual_path,
+                )
+                emit_shell_assets(output_dir, shell_assets)
+            else:
+                body_html = ""
+                shell_head = ""
 
             if data_error:
                 build_errors.append({"path": actual_path, "stage": "load", "error": data_error})
@@ -92,27 +99,31 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 )
 
             script_path = _relative_web_path(page_dir, output_dir / "app.js")
-            document_html = build_document_html(
-                title=_resolved_page_title(page, data, actual_path),
-                body_html=body_html,
-                route_data=data,
-                route_info={
-                    "path": actual_path,
-                    "mode": page.mode,
-                    "name": page.name or route_slug,
-                    "controller": page.controller.__name__,
-                    "actions": route_actions,
-                    "action_endpoint": "/__sprag__/actions",
-                    "events_endpoint": "/__sprag__/events",
-                    "socket_bridge": surface_socket_enabled(app, page.controller),
-                    "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
-                    "providers": {k: v.__name__ for k, v in page.providers.items()},
-                },
-                hydration=hydration,
-                script_path=script_path,
-                store_snapshot=store_snapshots(),
-                metadata=page_meta,
-                head_html=shell_head,
+            document_html = (
+                build_redirect_html(redirect.location)
+                if redirect is not None
+                else build_document_html(
+                    title=_resolved_page_title(page, data, actual_path),
+                    body_html=body_html,
+                    route_data=data,
+                    route_info={
+                        "path": actual_path,
+                        "mode": page.mode,
+                        "name": page.name or route_slug,
+                        "controller": page.controller.__name__,
+                        "actions": route_actions,
+                        "action_endpoint": "/__sprag__/actions",
+                        "events_endpoint": "/__sprag__/events",
+                        "socket_bridge": surface_socket_enabled(app, page.controller),
+                        "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                        "providers": {k: v.__name__ for k, v in page.providers.items()},
+                    },
+                    hydration=hydration,
+                    script_path=script_path,
+                    store_snapshot=store_snapshots(),
+                    metadata=page_meta,
+                    head_html=shell_head,
+                )
             )
             (page_dir / "index.html").write_text(document_html, encoding="utf-8")
             if actual_path == "/":
@@ -143,40 +154,48 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         mount_actions = sorted(mt.boot.sprag_actions().keys()) if mt.boot else []
 
         build_request = Request(path=mt.path, method="BUILD")
-        data, data_error = load_mount_data(mt, request=build_request, app=app)
+        data, data_error, redirect = load_mount_data(mt, request=build_request, app=app)
         if data_error:
             build_errors.append({"path": mt.path, "stage": "mount_load", "error": data_error})
         mount_meta = _resolved_surface_metadata(mt.metadata, data)
-        body_html, shell_head, shell_assets = apply_shell(
-            '<div id="app-root"></div>',
-            app=app,
-            surface_shell=getattr(mt, "shell", None),
-            document_path=mt.path,
-        )
-        emit_shell_assets(output_dir, shell_assets)
+        if redirect is None:
+            body_html, shell_head, shell_assets = apply_shell(
+                '<div id="app-root"></div>',
+                app=app,
+                surface_shell=getattr(mt, "shell", None),
+                document_path=mt.path,
+            )
+            emit_shell_assets(output_dir, shell_assets)
+        else:
+            body_html = ""
+            shell_head = ""
 
         script_path = _relative_web_path(mount_dir, output_dir / "app.js")
-        document_html = build_mount_html(
-            title=mount_meta.get("title") or mt.name or mt.path,
-            mount_info={
-                "path": mt.path,
-                "name": mount_slug,
-                "component": mt.component.__name__,
-                "module": mt.module.__name__ if mt.module else None,
-                "boot": mt.boot.__name__ if mt.boot else None,
-                "actions": mount_actions,
-                "action_endpoint": "/__sprag__/actions",
-                "events_endpoint": "/__sprag__/events",
-                "socket_bridge": surface_socket_enabled(app, mt.boot),
-                "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
-                "providers": {k: v.__name__ for k, v in mt.providers.items()},
-            },
-            boot_data=data,
-            script_path=script_path,
-            store_snapshot=store_snapshots(),
-            body_html=body_html,
-            metadata=mount_meta,
-            head_html=shell_head,
+        document_html = (
+            build_redirect_html(redirect.location)
+            if redirect is not None
+            else build_mount_html(
+                title=mount_meta.get("title") or mt.name or mt.path,
+                mount_info={
+                    "path": mt.path,
+                    "name": mount_slug,
+                    "component": mt.component.__name__,
+                    "module": mt.module.__name__ if mt.module else None,
+                    "boot": mt.boot.__name__ if mt.boot else None,
+                    "actions": mount_actions,
+                    "action_endpoint": "/__sprag__/actions",
+                    "events_endpoint": "/__sprag__/events",
+                    "socket_bridge": surface_socket_enabled(app, mt.boot),
+                    "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                    "providers": {k: v.__name__ for k, v in mt.providers.items()},
+                },
+                boot_data=data,
+                script_path=script_path,
+                store_snapshot=store_snapshots(),
+                body_html=body_html,
+                metadata=mount_meta,
+                head_html=shell_head,
+            )
         )
         (mount_dir / "index.html").write_text(document_html, encoding="utf-8")
         if mt.path == "/":

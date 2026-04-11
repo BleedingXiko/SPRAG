@@ -1,0 +1,13 @@
+from sprag import Controller
+
+
+class FormSuccessController(Controller):
+    route = "/form-demo/success"
+
+    def load(self):
+        slug = self.request.query.get("title", "untitled")
+        title = " ".join(part.capitalize() for part in slug.split("-") if part) or "Untitled"
+        return {
+            "title": title,
+            "slug": slug,
+        }

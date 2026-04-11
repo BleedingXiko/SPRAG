@@ -1,0 +1,22 @@
+from sprag import Component, ui
+
+
+class FormSuccessCard(Component):
+    def render(self, props=None):
+        props = props or self.props
+        return ui.div(
+            ui.span("Redirect landed", class_="badge"),
+            ui.h1(props["title"]),
+            ui.p(
+                "The publish action returned a redirect envelope, the browser "
+                "followed it automatically, and this document route loaded "
+                "fresh server data from the query string."
+            ),
+            ui.div(
+                ui.span("Slug"),
+                ui.strong(props["slug"]),
+                class_="metric",
+            ),
+            ui.a("Back to the form demo", href="/form-demo", class_="btn back-link"),
+            class_="demo-card success-card",
+        )

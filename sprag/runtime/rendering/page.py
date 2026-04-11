@@ -18,7 +18,7 @@ from ..env import public_env
 from ..request import Request
 from ..routing import normalize_route_path
 from ..socket_bridge import surface_socket_enabled
-from ..server import controller_context
+from ..server import Redirect, controller_context
 from ..shell import apply_shell
 from ..stores import declared_stores, store_fingerprint
 
@@ -33,6 +33,7 @@ class PageResult:
     hydration: list[dict]
     data_error: str | None = None
     render_error: str | None = None
+    redirect: Redirect | None = None
 
 
 @dataclass
@@ -42,13 +43,24 @@ class MountResult:
     html: str
     data: dict
     data_error: str | None = None
+    redirect: Redirect | None = None
 
 
 def render_page(page, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> PageResult:
     """Render a page through its controller and screen, returning full HTML."""
     request = request or Request(path=normalize_route_path(page.path), method="GET")
     with _ensure_app_booted(app):
-        data, data_error = load_controller_data(page, request=request, app=app)
+        data, data_error, redirect = load_controller_data(page, request=request, app=app)
+        if redirect is not None:
+            return PageResult(
+                html=build_redirect_html(redirect.location),
+                body_html="",
+                data={},
+                hydration=[],
+                data_error=data_error,
+                render_error=None,
+                redirect=redirect,
+            )
         body_html, hydration, render_error = render_screen(page, data)
         page_meta = _resolved_surface_metadata(page.metadata, data)
         body_html, shell_head, _ = apply_shell(
@@ -96,7 +108,14 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
 def render_mount(mount, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> MountResult:
     """Render the boot document for a client app mount."""
     with _ensure_app_booted(app):
-        data, data_error = load_mount_data(mount, request=request, app=app)
+        data, data_error, redirect = load_mount_data(mount, request=request, app=app)
+        if redirect is not None:
+            return MountResult(
+                html=build_redirect_html(redirect.location),
+                data={},
+                data_error=data_error,
+                redirect=redirect,
+            )
 
         mount_slug = mount.name or _route_slug(mount.path)
         boot_actions = sorted(mount.boot.sprag_actions().keys()) if mount.boot else []
@@ -148,7 +167,9 @@ def _ensure_app_booted(app):
             app.shutdown()
 
 
-def load_controller_data(page, *, request: Request | None = None, app=None) -> tuple[dict, str | None]:
+def load_controller_data(
+    page, *, request: Request | None = None, app=None
+) -> tuple[dict, str | None, Redirect | None]:
     """Load route data through the lifecycle-owned page controller."""
     if app is not None and hasattr(app, "controller_for_page"):
         controller = app.controller_for_page(page)
@@ -157,15 +178,21 @@ def load_controller_data(page, *, request: Request | None = None, app=None) -> t
     try:
         with controller_context(request=request, app=app):
             data = controller.load()
-        return (data if isinstance(data, dict) else {"value": data}), None
+        if isinstance(data, Redirect):
+            return {}, None, data
+        return (data if isinstance(data, dict) else {"value": data}), None, None
+    except Redirect as exc:
+        return {}, None, exc
     except Exception as exc:
-        return {}, f"{exc.__class__.__name__}: {exc}"
+        return {}, f"{exc.__class__.__name__}: {exc}", None
 
 
-def load_mount_data(mount, *, request: Request | None = None, app=None) -> tuple[dict, str | None]:
+def load_mount_data(
+    mount, *, request: Request | None = None, app=None
+) -> tuple[dict, str | None, Redirect | None]:
     """Load boot data through the lifecycle-owned mount controller."""
     if mount.boot is None:
-        return {}, None
+        return {}, None, None
     if app is not None and hasattr(app, "controller_for_mount"):
         controller = app.controller_for_mount(mount)
     else:
@@ -173,9 +200,13 @@ def load_mount_data(mount, *, request: Request | None = None, app=None) -> tuple
     try:
         with controller_context(request=request, app=app):
             data = controller.load()
-        return (data if isinstance(data, dict) else {"value": data}), None
+        if isinstance(data, Redirect):
+            return {}, None, data
+        return (data if isinstance(data, dict) else {"value": data}), None, None
+    except Redirect as exc:
+        return {}, None, exc
     except Exception as exc:
-        return {}, f"{exc.__class__.__name__}: {exc}"
+        return {}, f"{exc.__class__.__name__}: {exc}", None
 
 
 def render_screen(page, data) -> tuple[str, list[dict], str | None]:
@@ -314,6 +345,25 @@ def build_mount_html(
     window.__SPRAG_PAYLOAD__ = {json.dumps(payload, sort_keys=True)};
   </script>{hot_reload_script_tag}
   <script type="module" src="{script_path}"></script>
+</body>
+</html>
+"""
+
+
+def build_redirect_html(location: str, *, title: str = "Redirecting") -> str:
+    """Build a minimal static-safe redirect document."""
+    escaped_title = html.escape(str(title))
+    escaped_location = html.escape(str(location), quote=True)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url={escaped_location}">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escaped_title}</title>
+</head>
+<body>
+  <p>Redirecting to <a href="{escaped_location}">{escaped_location}</a>...</p>
 </body>
 </html>
 """

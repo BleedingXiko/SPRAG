@@ -390,6 +390,14 @@ class Module:
         """Call a server-side controller action; returns a Promise in JS."""
         _browser_only("Module.call_action")
 
+    def form_data(self, source):
+        """Read a form or form event into a plain JSON-safe dict."""
+        _browser_only("Module.form_data")
+
+    def navigate(self, target, options=None):
+        """Navigate the browser to another route or URL."""
+        _browser_only("Module.navigate")
+
 
 @dataclass
 class Component:
@@ -490,6 +498,14 @@ class Component:
     def create_selector(self, deps, fn):
         """Build a memoised derived value over store dependencies."""
         _browser_only("Component.create_selector")
+
+    def form_data(self, source):
+        """Read a form or form event into a plain JSON-safe dict."""
+        _browser_only("Component.form_data")
+
+    def navigate(self, target, options=None):
+        """Navigate the browser to another route or URL."""
+        _browser_only("Component.navigate")
 
 
 @dataclass

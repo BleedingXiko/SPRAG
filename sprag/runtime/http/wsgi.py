@@ -115,6 +115,12 @@ class SpragWSGIApp:
             print(f"[SPRAG] render error on {page.path}: {result.render_error}", file=sys.stderr)
         if result.data_error:
             print(f"[SPRAG] data error on {page.path}: {result.data_error}", file=sys.stderr)
+        if result.redirect is not None:
+            return self._respond_redirect(
+                start_response,
+                result.redirect.location,
+                status=result.redirect.status,
+            )
 
         body = result.html.encode("utf-8")
         return self._respond_gzip(environ, start_response, 200, "text/html; charset=utf-8", body)
@@ -148,6 +154,12 @@ class SpragWSGIApp:
 
         if result.data_error:
             print(f"[SPRAG] mount data error on {mount.path}: {result.data_error}", file=sys.stderr)
+        if result.redirect is not None:
+            return self._respond_redirect(
+                start_response,
+                result.redirect.location,
+                status=result.redirect.status,
+            )
 
         body = result.html.encode("utf-8")
         return self._respond_gzip(environ, start_response, 200, "text/html; charset=utf-8", body)
@@ -206,7 +218,7 @@ class SpragWSGIApp:
             )
 
         return self._json_response(
-            start_response, result.status,
+            start_response, 200,
             {
                 "ok": result.ok,
                 "route": route_path,
@@ -214,6 +226,7 @@ class SpragWSGIApp:
                 "value": result.value,
                 "error": result.error,
                 "status": result.status,
+                "redirect": result.redirect.as_payload() if result.redirect is not None else None,
             },
         )
 
@@ -336,6 +349,15 @@ class SpragWSGIApp:
         start_response(status_line, headers)
         return [body]
 
+    def _respond_redirect(self, start_response, location, *, status=302):
+        headers = [
+            ("Location", location),
+            ("Content-Length", "0"),
+        ]
+        status_line = f"{status} {_STATUS_PHRASES.get(status, 'Redirect')}"
+        start_response(status_line, headers)
+        return [b""]
+
     def _respond_gzip(self, environ, start_response, status, content_type, body, *, extra_headers=None):
         return self._respond(
             start_response, status, content_type, body,
@@ -349,6 +371,11 @@ class SpragWSGIApp:
 
 _STATUS_PHRASES = {
     200: "OK",
+    301: "Moved Permanently",
+    302: "Found",
+    303: "See Other",
+    307: "Temporary Redirect",
+    308: "Permanent Redirect",
     400: "Bad Request",
     403: "Forbidden",
     404: "Not Found",

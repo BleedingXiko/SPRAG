@@ -98,7 +98,12 @@ def _compile_statements(statements, *, method_names=None, env=None, indent=8):
             lines.append(f"{pad}{_compile_expr(stmt.value, env, method_names=method_names)};")
             continue
         if isinstance(stmt, ast.Return):
-            lines.append(f"{pad}return {_compile_expr(stmt.value, env, method_names=method_names)};")
+            if stmt.value is None:
+                lines.append(f"{pad}return undefined;")
+            else:
+                lines.append(
+                    f"{pad}return {_compile_expr(stmt.value, env, method_names=method_names)};"
+                )
             continue
         if isinstance(stmt, ast.If):
             lines.append(_compile_if(stmt, env, method_names=method_names, indent=indent))

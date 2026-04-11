@@ -1,0 +1,140 @@
+from sprag import Component, ui
+
+
+class FormDemoCard(Component):
+    def render(self, props=None):
+        form = self.state.get("form", {})
+        errors = self.state.get("errors", {})
+        snapshot = self.state.get("server_snapshot") or {}
+        autosave = self.state.get("autosave", False)
+        newsletter = bool(form.get("newsletter", False))
+        title = form.get("title", "")
+        email = form.get("email", "")
+        summary = form.get("summary", "")
+        visibility = form.get("visibility", "team")
+        snapshot_text = (
+            "No server snapshot yet."
+            if not snapshot.get("title")
+            else (
+                snapshot.get("title", "")
+                + " · "
+                + snapshot.get("email", "")
+                + " · "
+                + snapshot.get("visibility", "")
+            )
+        )
+        return ui.div(
+            ui.h2("Form Demo"),
+            ui.p(
+                "Convention: let the DOM own the native form, snapshot it with "
+                "form_data(...), keep draft/errors/dirty state on the Module, "
+                "and use normal JSON actions for save + redirect flows."
+            ),
+            ui.div(
+                ui.span("Status"),
+                ui.strong(self.state.get("status", "idle")),
+                class_="metric",
+            ),
+            ui.div(
+                ui.span("Autosave"),
+                ui.strong("on" if autosave else "off"),
+                class_="metric",
+            ),
+            ui.div(
+                ui.span("Dirty"),
+                ui.strong("yes" if self.state.get("dirty") else "no"),
+                class_="metric",
+            ),
+            ui.p(self.state.get("saved_message", ""), class_="status-line"),
+            ui.form(
+                ui.div(
+                    ui.span("Project title", class_="field-label"),
+                    ui.input(
+                        type="text",
+                        name="title",
+                        value=title,
+                        placeholder="Quiet Signal",
+                        class_="field-input",
+                    ),
+                    ui.p(errors.get("title", ""), class_="field-error"),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Contact email", class_="field-label"),
+                    ui.input(
+                        type="email",
+                        name="email",
+                        value=email,
+                        placeholder="ops@example.com",
+                        class_="field-input",
+                    ),
+                    ui.p(errors.get("email", ""), class_="field-error"),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Visibility", class_="field-label"),
+                    ui.select(
+                        ui.option("Private", value="private", selected=(visibility == "private")),
+                        ui.option("Team", value="team", selected=(visibility == "team")),
+                        ui.option("Public", value="public", selected=(visibility == "public")),
+                        name="visibility",
+                        class_="field-input",
+                    ),
+                    ui.p(errors.get("visibility", ""), class_="field-error"),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Summary", class_="field-label"),
+                    ui.textarea(
+                        summary,
+                        name="summary",
+                        rows="4",
+                        class_="field-input field-textarea",
+                    ),
+                    ui.div(
+                        ui.span("160 char max", class_="field-hint"),
+                        ui.span(f"{len(summary)}/160", class_="field-hint"),
+                        class_="field-hint-row",
+                    ),
+                    ui.p(errors.get("summary", ""), class_="field-error"),
+                    class_="form-field",
+                ),
+                ui.label(
+                    ui.input(
+                        type="checkbox",
+                        name="newsletter",
+                        checked=newsletter,
+                    ),
+                    ui.span("Send release notes to this address."),
+                    class_="checkbox-field",
+                ),
+                ui.div(
+                    ui.button(
+                        "Save draft",
+                        type="button",
+                        class_="btn btn-ghost btn-inline",
+                        data_role="save-draft",
+                    ),
+                    ui.button(
+                        "Publish + redirect",
+                        type="submit",
+                        class_="btn btn-inline",
+                    ),
+                    ui.button(
+                        "Autosave: on" if autosave else "Autosave: off",
+                        type="button",
+                        class_="btn btn-ghost btn-inline",
+                        data_role="toggle-autosave",
+                    ),
+                    class_="form-actions",
+                ),
+                class_="sprag-form",
+                data_role="profile-form",
+            ),
+            ui.div(
+                ui.h3("Server snapshot"),
+                ui.p(snapshot_text, class_="status-line"),
+                class_="form-snapshot",
+            ),
+            class_="demo-card form-demo-card",
+        )

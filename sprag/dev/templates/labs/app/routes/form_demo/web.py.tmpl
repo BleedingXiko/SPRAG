@@ -1,0 +1,13 @@
+from sprag import Screen, hydrate
+
+from .components import FormDemoCard
+from .modules import FormDemoModule
+
+
+class FormDemoScreen(Screen):
+    modules = [FormDemoModule]
+
+    def render(self, data):
+        form_demo = self.module(FormDemoModule)
+        form_demo.set_state(data)
+        return hydrate(FormDemoCard, module=form_demo)

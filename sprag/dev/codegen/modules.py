@@ -337,6 +337,22 @@ def compile_module_class(module_class) -> str:
         return this.actions.call(name, payload);
     }}
 
+    formData(source) {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_FORM_DATA__ : null;
+        if (typeof helper !== 'function') {{
+            throw new Error('[SPRAG] Form helper unavailable.');
+        }}
+        return helper(source);
+    }}
+
+    navigate(target, options = {{}}) {{
+        const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;
+        if (typeof navigator !== 'function') {{
+            throw new Error('[SPRAG] Browser navigator unavailable.');
+        }}
+        return navigator(target, options);
+    }}
+
 {methods_block}
 }}
 """
