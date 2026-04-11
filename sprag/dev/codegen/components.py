@@ -31,7 +31,14 @@ from .expressions import _compile_expr
 from .dependencies import used_browser_class_refs
 from .imports import _detect_ragot_imports
 from .mappings import JSCodegenError, _map_name
-from .modules import _browser_class_imports, _detect_used_stores, _method_source, _method_source_info
+from .modules import (
+    _browser_class_imports,
+    _detect_used_stores,
+    _emit_env_helper_prelude,
+    _method_source,
+    _method_source_info,
+    collect_env_helper_refs_for_class,
+)
 from .statements import _compile_statements
 from .stores_scan import collect_store_refs_for_class
 
@@ -52,6 +59,7 @@ def compile_component_class(component_class) -> str:
     # Stores referenced in the source file (``from app.stores import counter``).
     store_refs = collect_store_refs_for_class(component_class)
     browser_class_refs = used_browser_class_refs(component_class)
+    env_helper_refs = collect_env_helper_refs_for_class(component_class)
 
     # ----- Render-context collector -----
     # The render env carries an ``__sprag_mounts__`` list. When
@@ -64,6 +72,8 @@ def compile_component_class(component_class) -> str:
         render_env["__sprag_stores__"] = store_refs
     if browser_class_refs:
         render_env["__sprag_classes__"] = browser_class_refs
+    if env_helper_refs:
+        render_env["__sprag_env_helpers__"] = env_helper_refs
 
     def _seed_env() -> dict:
         env = {}
@@ -71,6 +81,8 @@ def compile_component_class(component_class) -> str:
             env["__sprag_stores__"] = store_refs
         if browser_class_refs:
             env["__sprag_classes__"] = browser_class_refs
+        if env_helper_refs:
+            env["__sprag_env_helpers__"] = env_helper_refs
         return env
 
     body_lines = []
@@ -295,11 +307,12 @@ def compile_component_class(component_class) -> str:
         current_class=component_class,
         kind="components",
     )
+    env_helper_prelude = _emit_env_helper_prelude(all_code)
 
     return f"""import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';
 {store_import_line}
 {class_import_lines}
-export class {component_class.__name__} extends Component {{
+{env_helper_prelude}export class {component_class.__name__} extends Component {{
     constructor(initialState = {{}}, options = {{}}) {{
         super(initialState);
         this.props = options.props || {{}};

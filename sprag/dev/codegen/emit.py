@@ -330,6 +330,7 @@ import './generated/stores.js';
 const manifest = {json.dumps(serializable, indent=2, sort_keys=True)};
 window.__SPRAG_MANIFEST__ = manifest;
 const payload = window.__SPRAG_PAYLOAD__ || {{}};
+window.__SPRAG_ENV__ = payload.env || {{}};
 const route = payload.page || {{}};
 const mount = payload.mount || null;
 const surface = mount || route;

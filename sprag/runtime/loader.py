@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 
+from .env import load_project_env
+
 
 DEFAULT_APP_TARGETS = (
     "app:app",
@@ -20,6 +22,8 @@ def load_app(target=None):
         if not candidate:
             continue
         try:
+            module_name = candidate.split(":", 1)[0]
+            load_project_env(module_name)
             return candidate, _load_target(candidate)
         except Exception as exc:  # pragma: no cover - used in CLI resolution
             last_error = exc

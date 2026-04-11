@@ -14,6 +14,10 @@ sprag dev --port 8000
 
 Open <http://127.0.0.1:8000/guides/>.
 
+Optional env settings live in `.env.example`. Copy the keys you want into
+`.env` or `.env.local`. Only `SPRAG_PUBLIC_` values are exposed to browser
+Modules and Components.
+
 ## Project Layout
 
 ```
@@ -22,6 +26,7 @@ Open <http://127.0.0.1:8000/guides/>.
 │   ├── __init__.py        # App() — registers routes
 │   └── routes/            # empty — add routes with `sprag add`
 ├── requirements.txt
+├── .env.example
 └── README.md
 ```
 

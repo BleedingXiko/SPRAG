@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 
 from .tree import render_tree
+from ..env import public_env
 from ..request import Request
 from ..routing import normalize_route_path
 from ..socket_bridge import surface_socket_enabled
@@ -231,6 +232,7 @@ def build_document_html(
         "routeData": _json_safe(route_data),
         "hydration": serializable_hydration(hydration),
         "stores": store_snap,
+        "env": public_env(),
     }
     if dev_reload:
         payload["fingerprints"] = {
@@ -291,6 +293,7 @@ def build_mount_html(
         "routeData": _json_safe(boot_data),
         "hydration": [],
         "stores": store_snap,
+        "env": public_env(),
     }
     if dev_reload:
         payload["fingerprints"] = {

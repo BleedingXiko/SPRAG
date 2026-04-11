@@ -133,6 +133,11 @@ def _compile_expr(node, env, method_names=None):
         elt_js = _compile_expr(node.elt, next_env, method_names=method_names)
         return f"new Set({chain}.map(({target_js}) => {elt_js}))"
     if isinstance(node, ast.Call):
+        env_helpers = env.get("__sprag_env_helpers__") or {}
+        if isinstance(node.func, ast.Name) and env_helpers.get(node.func.id) == "env":
+            return _compile_env_call(node, env, method_names=method_names)
+        if isinstance(node.func, ast.Name) and env_helpers.get(node.func.id) == "public_env":
+            return _compile_public_env_call(node)
         # Python builtins that map to JS equivalents. These are compiled
         # before the generic callee path so the user can write idiomatic
         # Python (``len(xs)``, ``str(x)``, ``print(x)``) and have it land
@@ -324,6 +329,59 @@ _BUILTIN_CALLS = {
     "range": lambda args: _range_to_js(args),
     "sum": lambda args: _sum_to_js(args),
 }
+
+_BROWSER_ENV_CASTS = {
+    "str": "str",
+    "int": "int",
+    "float": "float",
+    "bool": "bool",
+}
+
+
+def _compile_env_call(node, env, *, method_names):
+    if not node.args:
+        raise JSCodegenError("env(...) requires at least the variable name.")
+    if len(node.args) > 2:
+        raise JSCodegenError(
+            "Browser env(...) supports at most two positional args: name and default."
+        )
+    supported_keywords = {"cast", "required"}
+    for keyword in node.keywords:
+        if keyword.arg is None or keyword.arg not in supported_keywords:
+            raise JSCodegenError(
+                f"Unsupported env(...) keyword in browser codegen: {keyword.arg!r}"
+            )
+
+    key_js = _compile_expr(node.args[0], env, method_names=method_names)
+    fallback_js = (
+        _compile_expr(node.args[1], env, method_names=method_names)
+        if len(node.args) == 2
+        else "__SPRAG_ENV_MISSING__"
+    )
+    cast_js = "null"
+    required_js = "false"
+    for keyword in node.keywords:
+        if keyword.arg == "cast":
+            cast_js = _compile_env_cast(keyword.value)
+        elif keyword.arg == "required":
+            required_js = _compile_expr(keyword.value, env, method_names=method_names)
+    return f"__spragEnv({key_js}, {fallback_js}, {{ cast: {cast_js}, required: {required_js} }})"
+
+
+def _compile_public_env_call(node):
+    if node.args or node.keywords:
+        raise JSCodegenError("public_env() does not take arguments in browser code.")
+    return "__spragPublicEnv()"
+
+
+def _compile_env_cast(node):
+    if isinstance(node, ast.Name) and node.id in _BROWSER_ENV_CASTS:
+        return json.dumps(_BROWSER_ENV_CASTS[node.id])
+    if isinstance(node, ast.Constant) and node.value is None:
+        return "null"
+    raise JSCodegenError(
+        "Browser env(..., cast=...) only supports str, int, float, bool, or None."
+    )
 
 
 def _range_to_js(args):

@@ -190,6 +190,49 @@ app = App(
 
 Per-route styling via `css=[...]` on the surface itself.
 
+### Environment Variables
+
+SPRAG has a built-in env convention that works on both runtimes.
+
+Server-side:
+
+```python
+from sprag import env
+
+app_name = env("APP_NAME", "SPRAG")
+debug = env("DEBUG", False, cast=bool)
+port = env("PORT", 8000, cast=int)
+```
+
+Browser-side:
+
+```python
+from sprag import Module, env, public_env
+
+class SettingsModule(Module):
+    def on_start(self):
+        api_url = env("SPRAG_PUBLIC_API_URL", "/api")
+        flags = public_env()
+        self.set_state({
+            "api_url": api_url,
+            "site_name": flags.get("SPRAG_PUBLIC_SITE_NAME", "SPRAG"),
+        })
+```
+
+Same authoring rule as the rest of SPRAG:
+
+- `env(...)` is the Python spelling on both server and browser.
+- On the server it reads process env after SPRAG loads `.env` / `.env.local`.
+- In browser-authored `Module` / `Component` code it reads from the public env payload shipped as `window.__SPRAG_ENV__`.
+
+- `.env` and `.env.local` are loaded automatically when SPRAG imports your app.
+- Existing process env wins over file values.
+- `.env.local` overrides `.env`.
+- Only vars prefixed with `SPRAG_PUBLIC_` are exposed to the browser.
+- `public_env()` returns the full public env mapping.
+- `cast=` supports `bool`, `int`, `float`, and `str`.
+- Use plain `env("SECRET_KEY", required=True)` on the server for secrets; do not prefix secrets with `SPRAG_PUBLIC_`.
+
 ### Dynamic Routes and Content
 
 File-based dynamic params and catch-all segments:

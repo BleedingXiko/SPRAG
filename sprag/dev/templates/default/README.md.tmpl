@@ -22,6 +22,10 @@ sprag dev --port 8000
 
 Open <http://127.0.0.1:8000/>.
 
+Optional env settings live in `.env.example`. Copy the keys you want into
+`.env` or `.env.local`. Only `SPRAG_PUBLIC_` values are exposed to browser
+Modules and Components.
+
 If you're testing against a local SPRAG checkout, install it editable
 into the project venv instead of from PyPI:
 
@@ -43,6 +47,7 @@ pip install -e /path/to/SPRAG
 │       ├── counter/       # /counter  interactive demo (hybrid mode)
 │       └── about/         # /about    info page (document mode)
 ├── requirements.txt
+├── .env.example
 └── README.md
 ```
 

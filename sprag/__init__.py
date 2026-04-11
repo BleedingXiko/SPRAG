@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 from .runtime import dom
 from .runtime.app import App
 from .runtime.content import ContentDocument, load_markdown_document, load_markdown_tree, slugify
+from .runtime.env import env, public_env
 from .runtime.mount import Mount, mount
 from .runtime.page import Page, page
 from .runtime.request import Request
@@ -81,6 +82,8 @@ __all__ = [
     "load_markdown_document",
     "load_markdown_tree",
     "page",
+    "env",
+    "public_env",
     # Web authoring
     "Component",
     "Module",

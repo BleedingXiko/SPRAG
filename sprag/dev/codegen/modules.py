@@ -26,6 +26,8 @@ import inspect
 import json
 import textwrap
 
+from ...runtime.env import env as sprag_env
+from ...runtime.env import public_env as sprag_public_env
 from .diagnostics import lint_browser_method
 from .expressions import _compile_expr  # noqa: F401  (re-export for tests)
 from .dependencies import used_browser_class_refs
@@ -64,6 +66,51 @@ _SERVER_ONLY_SYMBOLS = {
     "start_process",
 }
 
+_ENV_HELPER_PREAMBLE = """const __SPRAG_ENV_MISSING__ = Symbol('sprag.env.missing');
+
+function __spragPublicEnv() {
+    return (typeof window !== 'undefined' && window.__SPRAG_ENV__) || {};
+}
+
+function __spragEnv(name, fallback = __SPRAG_ENV_MISSING__, options = {}) {
+    const source = __spragPublicEnv();
+    const hasValue = Object.prototype.hasOwnProperty.call(source, name);
+    if (!hasValue) {
+        if (options.required || fallback === __SPRAG_ENV_MISSING__) {
+            throw new Error(`[SPRAG] Missing public environment variable "${name}".`);
+        }
+        return fallback;
+    }
+
+    const raw = source[name];
+    const cast = options.cast || null;
+    if (cast === null || cast === 'str') {
+        return raw;
+    }
+    if (cast === 'bool') {
+        const normalized = String(raw).trim().toLowerCase();
+        if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+        if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+        throw new Error(`[SPRAG] Could not cast public env "${name}" to bool.`);
+    }
+    if (cast === 'int') {
+        const value = Number(raw);
+        if (!Number.isFinite(value)) {
+            throw new Error(`[SPRAG] Could not cast public env "${name}" to int.`);
+        }
+        return Math.trunc(value);
+    }
+    if (cast === 'float') {
+        const value = Number(raw);
+        if (!Number.isFinite(value)) {
+            throw new Error(`[SPRAG] Could not cast public env "${name}" to float.`);
+        }
+        return value;
+    }
+    throw new Error(`[SPRAG] Unsupported browser env cast "${cast}".`);
+}
+"""
+
 
 def _method_source(method):
     source = inspect.getsource(method)
@@ -75,6 +122,20 @@ def _method_source_info(method):
     source = textwrap.dedent("".join(source_lines))
     source_file = inspect.getsourcefile(method) or inspect.getfile(method)
     return source, source_file, start_line
+
+
+def collect_env_helper_refs_for_class(browser_class) -> dict[str, str]:
+    """Return local names that resolve to SPRAG env helper functions."""
+    module = inspect.getmodule(browser_class)
+    if module is None:
+        return {}
+    refs = {}
+    for name, value in vars(module).items():
+        if value is sprag_env:
+            refs[name] = "env"
+        elif value is sprag_public_env:
+            refs[name] = "public_env"
+    return refs
 
 
 def compile_module_class(module_class) -> str:
@@ -95,6 +156,7 @@ def compile_module_class(module_class) -> str:
         )
 
     browser_class_refs = used_browser_class_refs(module_class)
+    env_helper_refs = collect_env_helper_refs_for_class(module_class)
 
     def _seed_env() -> dict:
         env = {}
@@ -102,6 +164,8 @@ def compile_module_class(module_class) -> str:
             env["__sprag_stores__"] = store_refs
         if browser_class_refs:
             env["__sprag_classes__"] = browser_class_refs
+        if env_helper_refs:
+            env["__sprag_env_helpers__"] = env_helper_refs
         return env
 
     # ---------- Pass 1: metadata collection ----------
@@ -221,11 +285,12 @@ def compile_module_class(module_class) -> str:
         current_class=module_class,
         kind="modules",
     )
+    env_helper_prelude = _emit_env_helper_prelude(methods_block)
 
     return f"""import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';
 {store_import_line}
 {class_import_lines}
-export class {module_class.__name__} extends Module {{
+{env_helper_prelude}export class {module_class.__name__} extends Module {{
     constructor(initialState = {{}}) {{
         super(initialState);
         this.component = null;
@@ -275,6 +340,12 @@ export class {module_class.__name__} extends Module {{
 {methods_block}
 }}
 """
+
+
+def _emit_env_helper_prelude(compiled_js: str) -> str:
+    if "__spragEnv(" not in compiled_js and "__spragPublicEnv(" not in compiled_js:
+        return ""
+    return _ENV_HELPER_PREAMBLE + "\n\n"
 
 
 def _browser_class_imports(compiled_js: str, refs: dict[str, type], *, current_class, kind: str) -> str:
