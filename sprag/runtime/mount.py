@@ -17,6 +17,7 @@ class Mount:
     name: Optional[str] = None
     metadata: dict = field(default_factory=dict)
     shell: object = None
+    providers: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not isinstance(self.path, str) or not self.path.startswith("/"):
@@ -26,7 +27,7 @@ class Mount:
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
 
 
-def mount(path, *, component, module=None, boot=None, name=None, metadata=None, shell=None, css=None):
+def mount(path, *, component, module=None, boot=None, name=None, metadata=None, shell=None, css=None, providers=None):
     """Declare a client app mount.
 
     A mount is not a route mode. It is a server URL that returns a boot
@@ -45,4 +46,5 @@ def mount(path, *, component, module=None, boot=None, name=None, metadata=None, 
         name=name,
         metadata=metadata or {},
         shell=shell,
+        providers=providers or {},
     )

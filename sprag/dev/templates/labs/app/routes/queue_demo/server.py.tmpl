@@ -5,7 +5,7 @@ class QueueDemoController(Controller):
     route = "/queue-demo"
 
     def load(self):
-        queue = self.service("lab_jobs")
+        queue = self.service("job_queue")
         snapshot = queue.get_state()
         return {
             "pending": queue.pending_count(),
@@ -15,7 +15,7 @@ class QueueDemoController(Controller):
 
     @action(schema=Schema("enqueue", {"label": Field(str, required=True)}))
     def enqueue(self, label):
-        queue = self.service("lab_jobs")
+        queue = self.service("job_queue")
         snapshot = queue.get_state()
         job_id = snapshot.get("completed", 0) + queue.pending_count() + 1
         accepted = queue.enqueue({"id": job_id, "label": label})

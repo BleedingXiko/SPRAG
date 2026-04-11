@@ -11,10 +11,10 @@ class CrossWiredDemoController(Controller):
 
     @action(schema=Schema("enqueue", {"label": Field(str, required=True)}))
     def enqueue(self, label):
-        queue = self.service("lab_cross_wired_jobs")
+        queue = self.service("cross_wired_queue")
         return queue.enqueue_flow_job(label)
 
     @action(schema=Schema("reset", {}))
     def reset(self):
-        queue = self.service("lab_cross_wired_jobs")
+        queue = self.service("cross_wired_queue")
         return queue.reset_flow()

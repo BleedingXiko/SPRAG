@@ -106,6 +106,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     "events_endpoint": "/__sprag__/events",
                     "socket_bridge": surface_socket_enabled(app, page.controller),
                     "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                    "providers": {k: v.__name__ for k, v in page.providers.items()},
                 },
                 hydration=hydration,
                 script_path=script_path,
@@ -130,6 +131,8 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     "actions": route_actions,
                     "hydration": hydration,
                     "output": output_path,
+                    "providers": {k: v.__name__ for k, v in page.providers.items()},
+                    "_provider_classes": list(page.providers.values()),
                 }
             )
 
@@ -166,6 +169,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 "events_endpoint": "/__sprag__/events",
                 "socket_bridge": surface_socket_enabled(app, mt.boot),
                 "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                "providers": {k: v.__name__ for k, v in mt.providers.items()},
             },
             boot_data=data,
             script_path=script_path,
@@ -190,6 +194,8 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 "root_component_class": mt.component,
                 "root_module_class": mt.module,
                 "output": _route_web_path(mt.path),
+                "providers": {k: v.__name__ for k, v in mt.providers.items()},
+                "_provider_classes": list(mt.providers.values()),
             }
         )
 
@@ -201,6 +207,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         output_dir,
         _collect_hydration_entries(route_manifest),
         mount_entries=mount_manifest,
+        route_entries=route_manifest,
     )
     emit_stores_shim(output_dir, declared_stores())
     emit_ragot_runtime(output_dir, Path(__file__).resolve().parent.parent)
@@ -274,12 +281,15 @@ def _serializable_manifest(manifest):
             {
                 key: value
                 for key, value in mount.items()
-                if key not in {"root_component_class", "root_module_class"}
+                if key not in {"root_component_class", "root_module_class", "_provider_classes"}
             }
             for mount in manifest.get("mounts", [])
         ],
         "routes": [
-            {**route, "hydration": serializable_hydration(route["hydration"])}
+            {
+                **{k: v for k, v in route.items() if k != "_provider_classes"},
+                "hydration": serializable_hydration(route["hydration"]),
+            }
             for route in manifest["routes"]
         ],
     }

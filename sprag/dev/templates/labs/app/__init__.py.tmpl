@@ -9,7 +9,11 @@ app_shell = shell(template="app/shell.html", css=["app/shell.css"])
 
 app = App(
     routes="app.routes",
-    services=[job_queue, cross_wired_queue, pulse_service],
+    providers={
+        "job_queue": job_queue,
+        "cross_wired_queue": cross_wired_queue,
+        "pulse_service": pulse_service,
+    },
     shell=app_shell,
     server_mode="websocket",
 )

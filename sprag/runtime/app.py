@@ -14,7 +14,7 @@ from .socket_bridge import SpragSocketBridge, controller_uses_socket_bridge
 
 @dataclass
 class App:
-    services: list = field(default_factory=list)
+    providers: dict = field(default_factory=dict)
     routes: str = "app.routes"
     mounts_package: str = "app.mounts"
     project_root: Optional[str] = None
@@ -34,6 +34,13 @@ class App:
         self._socket_bridge = None
         self._booted = False
 
+    def _provider_registry_keys(self, key, provider):
+        keys = [key]
+        legacy_name = getattr(provider, "name", None)
+        if isinstance(legacy_name, str) and legacy_name and legacy_name not in keys:
+            keys.append(legacy_name)
+        return keys
+
     def pages(self):
         self._ensure_surfaces()
         return self._pages
@@ -52,26 +59,28 @@ class App:
         self._mounts = None
 
     def boot(self):
-        """Provide services/controllers into Specter's registry and start them."""
+        """Provide app providers/controllers into Specter's registry and start them."""
         if self._booted:
             return
         self._ensure_surfaces()
         self._ensure_socket_runtime()
-        for svc in self.services:
-            registry.provide(svc.name, svc, owner=None)
-            if not svc.running:
+        for name, svc in self.providers.items():
+            for registry_key in self._provider_registry_keys(name, svc):
+                registry.provide(registry_key, svc, owner=None, replace=True)
+            if not getattr(svc, "running", True) and hasattr(svc, "start"):
                 svc.start()
         self._ensure_controllers()
         self._booted = True
 
     def shutdown(self):
-        """Stop controllers/services in reverse order and clear registry entries."""
+        """Stop controllers/providers in reverse order and clear registry entries."""
         self._shutdown_controllers()
-        for svc in reversed(self.services):
-            if svc.running:
+        for name, svc in reversed(list(self.providers.items())):
+            if getattr(svc, "running", False) and hasattr(svc, "stop"):
                 svc.stop()
-            if registry.has(svc.name):
-                registry.unregister(svc.name)
+            for registry_key in reversed(self._provider_registry_keys(name, svc)):
+                if registry.has(registry_key):
+                    registry.unregister(registry_key)
         self._shutdown_socket_runtime()
         self._booted = False
 
@@ -152,7 +161,7 @@ class App:
         max_workers=16,
         server_mode: str | None = None,
     ):
-        """Boot services, build assets, and start the application server."""
+        """Boot providers, build assets, and start the application server."""
         from .http import serve_sprag_app
 
         self.boot()

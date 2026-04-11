@@ -5,5 +5,5 @@ class WatcherDemoController(Controller):
     route = "/watcher-demo"
 
     def load(self):
-        pulse = self.service("lab_pulse")
+        pulse = self.service("pulse_service")
         return pulse.get_state()

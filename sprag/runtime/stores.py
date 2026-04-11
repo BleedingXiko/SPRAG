@@ -50,7 +50,7 @@ from typing import Any, Callable, Optional, Union
 # The build pipeline iterates this after route discovery (which transitively
 # imports any modules referencing stores) to:
 #   1. emit the JS ``stores.js`` shim
-#   2. snapshot current state into ``window.__SPRAG_STORES__`` for hydration
+#   2. snapshot current state into ``window.__SPRAG_PAYLOAD__.stores`` for hydration
 _STORE_REGISTRY: list["StoreBridge"] = []
 _STORE_BY_NAME: dict[str, "StoreBridge"] = {}
 

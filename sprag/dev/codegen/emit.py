@@ -37,8 +37,9 @@ def emit_ragot_runtime(output_dir: Path, project_root: Path) -> None:
     )
 
 
-def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mount_entries=None) -> None:
+def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mount_entries=None, route_entries=None) -> None:
     mount_entries = mount_entries or []
+    route_entries = route_entries or []
     generated_dir = output_dir / "generated"
     components_dir = generated_dir / "components"
     modules_dir = generated_dir / "modules"
@@ -62,6 +63,12 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
             _register_browser_class(component_classes, component_class, "Component")
         if module_class:
             _register_browser_class(module_classes, module_class, "Module")
+        for provider_class in entry.get("_provider_classes", []):
+            _register_browser_class(module_classes, provider_class, "Module")
+
+    for entry in route_entries:
+        for provider_class in entry.get("_provider_classes", []):
+            _register_browser_class(module_classes, provider_class, "Module")
 
     _collect_browser_dependencies(component_classes, module_classes)
 
@@ -128,7 +135,7 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
     const _store = createStateStore(initial, { name });
     const _selectorCache = new WeakMap();
     const _globalStores = (typeof window !== 'undefined'
-        ? (window.__SPRAG_STORES__ = window.__SPRAG_STORES__ || {})
+        ? ((window.__SPRAG_PAYLOAD__ = window.__SPRAG_PAYLOAD__ || {}).stores = window.__SPRAG_PAYLOAD__.stores || {})
         : {});
     const _globalBridges = (typeof window !== 'undefined'
         ? (window.__SPRAG_STORE_BRIDGES__ = window.__SPRAG_STORE_BRIDGES__ || {})
@@ -273,8 +280,8 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
 def emit_stores_shim(output_dir: Path, stores: list[StoreBridge]) -> None:
     """Emit ``generated/stores.js`` — one bridge wrapper per declared store.
 
-    Each entry hydrates from ``window.__SPRAG_STORES__[name]`` if present
-    (the SSR snapshot) or falls back to the declared initial state. The
+    Each entry hydrates from ``window.__SPRAG_PAYLOAD__.stores[name]`` if
+    present (the SSR snapshot) or falls back to the declared initial state. The
     shim exports each store under its declared name so generated
     Module/Component files can ``import { session } from '../stores.js';``
     and use it directly.
@@ -295,7 +302,8 @@ def emit_stores_shim(output_dir: Path, stores: list[StoreBridge]) -> None:
         "import { createStateStore, createSelector } from '../vendor/ragot.esm.min.js';",
         "",
         _STORES_SHIM_RUNTIME,
-        "const _hydrated = (typeof window !== 'undefined' && window.__SPRAG_STORES__) || {};",
+        "const _payload = (typeof window !== 'undefined' && window.__SPRAG_PAYLOAD__) || {};",
+        "const _hydrated = _payload.stores || {};",
         "",
     ]
     for bridge in stores:
@@ -315,14 +323,15 @@ def build_browser_entry(manifest: dict) -> str:
     serializable = _serializable_manifest(manifest)
     return f"""import {{ componentRegistry, moduleRegistry }} from './generated/index.js';
 import {{ bus, ragotRegistry }} from './vendor/ragot.esm.min.js';
-// Side-effect import: ``stores.js`` reads window.__SPRAG_STORES__ at module
+// Side-effect import: ``stores.js`` reads window.__SPRAG_PAYLOAD__ at module
 // load and creates one bridge wrapper per declared SPRAG store.
 import './generated/stores.js';
 
 const manifest = {json.dumps(serializable, indent=2, sort_keys=True)};
 window.__SPRAG_MANIFEST__ = manifest;
-const route = window.__SPRAG_PAGE__ || {{}};
-const mount = window.__SPRAG_MOUNT__ || null;
+const payload = window.__SPRAG_PAYLOAD__ || {{}};
+const route = payload.page || {{}};
+const mount = payload.mount || null;
 const surface = mount || route;
 
 function trimTrailingSlash(value) {{
@@ -481,6 +490,15 @@ function provideRuntimeRoot(key, value, owner) {{
     return key;
 }}
 
+function providerRegistryKeys(key, instance) {{
+    const keys = [key];
+    const legacyName = instance && typeof instance.name === 'string' ? instance.name.trim() : '';
+    if (legacyName && !keys.includes(legacyName)) {{
+        keys.push(legacyName);
+    }}
+    return keys;
+}}
+
 function registerRuntimeRoot(root) {{
     spragRoots.push(root);
     return root;
@@ -628,7 +646,7 @@ function mountClientApp(entry) {{
         return;
     }}
 
-    const boot = window.__SPRAG_BOOT__ || {{}};
+    const boot = payload.boot || payload.routeData || {{}};
     const ModuleClass = entry.module ? moduleRegistry[entry.module] : null;
     const component = new ComponentClass(boot || {{}}, {{
         props: boot || {{}},
@@ -695,7 +713,8 @@ function connectBusBridge(route) {{
 }}
 
 function currentStoreSnapshots() {{
-    const stores = (typeof window !== 'undefined' && window.__SPRAG_STORES__) || {{}};
+    const payload = window.__SPRAG_PAYLOAD__ || {{}};
+    const stores = payload.stores || {{}};
     const bridges = (typeof window !== 'undefined' && window.__SPRAG_STORE_BRIDGES__) || {{}};
     const snapshot = JSON.parse(JSON.stringify(stores || {{}}));
     for (const [name, bridge] of Object.entries(bridges)) {{
@@ -759,18 +778,19 @@ function currentMountBootData() {{
     return Object.keys(snapshot).length > 0 ? snapshot : null;
 }}
 
-function persistDevReloadState(payload) {{
+function persistDevReloadState(eventPayload) {{
     const path = (surface && surface.path) || '/';
     const key = window.__SPRAG_HOT_RELOAD_KEY__ || `sprag:reload:${{path}}`;
-    const fingerprint = (payload && payload.store_fingerprint) || window.__SPRAG_STORE_FINGERPRINT__ || null;
-    const surfaceFingerprint = window.__SPRAG_SURFACE_FINGERPRINT__ || null;
+    const windowPayload = window.__SPRAG_PAYLOAD__ || {{}};
+    const fingerprint = (eventPayload && eventPayload.store_fingerprint) || (windowPayload.fingerprints && windowPayload.fingerprints.store) || null;
+    const surfaceFingerprint = (windowPayload.fingerprints && windowPayload.fingerprints.surface) || null;
     if (!fingerprint || !window.sessionStorage) {{
         return false;
     }}
     const cache = {{
         path,
-        build_id: payload && payload.build_id !== undefined ? payload.build_id : null,
-        changed: payload && Array.isArray(payload.changed) ? payload.changed : [],
+        build_id: eventPayload && eventPayload.build_id !== undefined ? eventPayload.build_id : null,
+        changed: eventPayload && Array.isArray(eventPayload.changed) ? eventPayload.changed : [],
         saved_at: Date.now(),
         store_fingerprint: fingerprint,
         surface_fingerprint: surfaceFingerprint,
@@ -784,7 +804,9 @@ function persistDevReloadState(payload) {{
     }}
     try {{
         window.sessionStorage.setItem(key, JSON.stringify(cache));
-        window.__SPRAG_STORES__ = cache.stores;
+        if (window.__SPRAG_PAYLOAD__) {{
+            window.__SPRAG_PAYLOAD__.stores = cache.stores;
+        }}
         return true;
     }} catch (error) {{
         console.warn('[SPRAG] Failed to persist hot reload snapshot', error);
@@ -985,9 +1007,35 @@ function boot() {{
         rewriteInternalLinks();
         registerDevReloadListener();
         const socket = connectSocketBridge(surface);
+
+        provideRuntimeRoot('sprag.route', surface, null);
+        provideRuntimeRoot('sprag.actions', actionClient, null);
+
+        const providers = surface.providers || {{}};
+        for (const ObjectEntry of Object.entries(providers)) {{
+            const key = ObjectEntry[0];
+            const className = ObjectEntry[1];
+            const ProviderClass = moduleRegistry[className];
+            if (ProviderClass) {{
+                const instance = new ProviderClass();
+                instance.actions = actionClient;
+                instance.socket = spragSocket;
+                instance.route = surface;
+                if (typeof instance.start === 'function') instance.start();
+                const registryKeys = providerRegistryKeys(key, instance).map((registryKey) =>
+                    provideRuntimeRoot(registryKey, instance, instance)
+                );
+                registerRuntimeRoot({{
+                    type: 'provider',
+                    module: instance,
+                    registryKeys
+                }});
+            }}
+        }}
+
         // Stores hydrate via the side-effect import of
         // './generated/stores.js' above — each store bridge reads its
-        // window.__SPRAG_STORES__[name] entry at module-load time, so by
+        // window.__SPRAG_PAYLOAD__.stores[name] entry at module-load time, so by
         // the time boot() runs every store is live.
         if (mount) {{
             mountClientApp(mount);
@@ -998,7 +1046,8 @@ function boot() {{
             spragBooted = true;
             return;
         }}
-        const hydration = window.__SPRAG_HYDRATION__ || [];
+        const payload = window.__SPRAG_PAYLOAD__ || {{}};
+        const hydration = payload.hydration || [];
         hydration.forEach(mountHydrationEntry);
         if (socket && typeof socket.connect === 'function') {{
             socket.connect();
@@ -1064,6 +1113,8 @@ def _serializable_manifest(manifest):
                     "module_state": entry["module_state"],
                 }
             )
+        if "_provider_classes" in next_route:
+            del next_route["_provider_classes"]
         routes.append(next_route)
     mounts = []
     for mount in manifest.get("mounts", []):
@@ -1071,7 +1122,7 @@ def _serializable_manifest(manifest):
             {
                 key: value
                 for key, value in mount.items()
-                if key not in {"root_component_class", "root_module_class"}
+                if key not in {"root_component_class", "root_module_class", "_provider_classes"}
             }
         )
     return {"errors": manifest.get("errors", []), "mounts": mounts, "routes": routes}

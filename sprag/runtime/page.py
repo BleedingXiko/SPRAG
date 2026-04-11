@@ -14,6 +14,7 @@ class Page:
     metadata: dict = field(default_factory=dict)
     shell: object = None
     static_paths: object = None
+    providers: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.path.startswith("/"):
@@ -34,6 +35,7 @@ def page(
     shell=None,
     css=None,
     static_paths=None,
+    providers=None,
 ):
     """Create a route page manifest."""
     if css is not None:
@@ -49,4 +51,5 @@ def page(
         metadata=metadata or {},
         shell=shell,
         static_paths=static_paths,
+        providers=providers or {},
     )

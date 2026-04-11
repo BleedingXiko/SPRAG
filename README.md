@@ -167,7 +167,7 @@ session.subscribe(
 )
 ```
 
-Server-side it backs a Specter model. Browser-side SPRAG rewrites the import to a generated shim hydrated from `window.__SPRAG_STORES__`.
+Server-side it backs a Specter model. Browser-side SPRAG rewrites the import to a generated shim hydrated from `window.__SPRAG_PAYLOAD__.stores`.
 
 ### Shells
 

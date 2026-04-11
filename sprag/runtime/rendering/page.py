@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 
@@ -45,88 +46,105 @@ class MountResult:
 def render_page(page, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> PageResult:
     """Render a page through its controller and screen, returning full HTML."""
     request = request or Request(path=normalize_route_path(page.path), method="GET")
-    data, data_error = load_controller_data(page, request=request, app=app)
-    body_html, hydration, render_error = render_screen(page, data)
-    page_meta = _resolved_surface_metadata(page.metadata, data)
-    body_html, shell_head, _ = apply_shell(
-        body_html,
-        app=app,
-        surface_shell=getattr(page, "shell", None),
-    )
+    with _ensure_app_booted(app):
+        data, data_error = load_controller_data(page, request=request, app=app)
+        body_html, hydration, render_error = render_screen(page, data)
+        page_meta = _resolved_surface_metadata(page.metadata, data)
+        body_html, shell_head, _ = apply_shell(
+            body_html,
+            app=app,
+            surface_shell=getattr(page, "shell", None),
+        )
 
-    route_slug = page.name or _route_slug(page.path)
-    route_actions = sorted(page.controller.sprag_actions().keys())
+        route_slug = page.name or _route_slug(page.path)
+        route_actions = sorted(page.controller.sprag_actions().keys())
 
-    document = build_document_html(
-        title=page_meta.get("title") or page.name or request.path,
-        body_html=body_html,
-        route_data=data,
-        route_info={
-            "path": request.path,
-            "mode": page.mode,
-            "name": route_slug,
-            "controller": page.controller.__name__,
-            "actions": route_actions,
-            "action_endpoint": "/__sprag__/actions",
-            "events_endpoint": "/__sprag__/events",
-            "socket_bridge": surface_socket_enabled(app, page.controller),
-            "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
-        },
-        hydration=hydration,
-        script_path=script_path,
-        store_snapshot=store_snapshots(),
-        metadata=page_meta,
-        head_html=shell_head,
-    )
+        document = build_document_html(
+            title=page_meta.get("title") or page.name or request.path,
+            body_html=body_html,
+            route_data=data,
+            route_info={
+                "path": request.path,
+                "mode": page.mode,
+                "name": route_slug,
+                "controller": page.controller.__name__,
+                "actions": route_actions,
+                "action_endpoint": "/__sprag__/actions",
+                "events_endpoint": "/__sprag__/events",
+                "socket_bridge": surface_socket_enabled(app, page.controller),
+                "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                "providers": {key: value.__name__ for key, value in page.providers.items()},
+            },
+            hydration=hydration,
+            script_path=script_path,
+            store_snapshot=store_snapshots(),
+            metadata=page_meta,
+            head_html=shell_head,
+        )
 
-    return PageResult(
-        html=document,
-        body_html=body_html,
-        data=data,
-        hydration=hydration,
-        data_error=data_error,
-        render_error=render_error,
-    )
+        return PageResult(
+            html=document,
+            body_html=body_html,
+            data=data,
+            hydration=hydration,
+            data_error=data_error,
+            render_error=render_error,
+        )
 
 
 def render_mount(mount, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> MountResult:
     """Render the boot document for a client app mount."""
-    data, data_error = load_mount_data(mount, request=request, app=app)
+    with _ensure_app_booted(app):
+        data, data_error = load_mount_data(mount, request=request, app=app)
 
-    mount_slug = mount.name or _route_slug(mount.path)
-    boot_actions = sorted(mount.boot.sprag_actions().keys()) if mount.boot else []
-    mount_info = {
-        "path": mount.path,
-        "name": mount_slug,
-        "component": mount.component.__name__,
-        "module": mount.module.__name__ if mount.module else None,
-        "boot": mount.boot.__name__ if mount.boot else None,
-        "actions": boot_actions,
-        "action_endpoint": "/__sprag__/actions",
-        "events_endpoint": "/__sprag__/events",
-        "socket_bridge": surface_socket_enabled(app, mount.boot),
-        "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
-    }
+        mount_slug = mount.name or _route_slug(mount.path)
+        boot_actions = sorted(mount.boot.sprag_actions().keys()) if mount.boot else []
+        mount_info = {
+            "path": mount.path,
+            "name": mount_slug,
+            "component": mount.component.__name__,
+            "module": mount.module.__name__ if mount.module else None,
+            "boot": mount.boot.__name__ if mount.boot else None,
+            "actions": boot_actions,
+            "action_endpoint": "/__sprag__/actions",
+            "events_endpoint": "/__sprag__/events",
+            "socket_bridge": surface_socket_enabled(app, mount.boot),
+            "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+            "providers": {key: value.__name__ for key, value in mount.providers.items()},
+        }
 
-    mount_meta = _resolved_surface_metadata(mount.metadata, data)
-    body_html, shell_head, _ = apply_shell(
-        '<div id="app-root"></div>',
-        app=app,
-        surface_shell=getattr(mount, "shell", None),
-    )
+        mount_meta = _resolved_surface_metadata(mount.metadata, data)
+        body_html, shell_head, _ = apply_shell(
+            '<div id="app-root"></div>',
+            app=app,
+            surface_shell=getattr(mount, "shell", None),
+        )
 
-    document = build_mount_html(
-        title=mount_meta.get("title") or mount.name or mount.path,
-        mount_info=mount_info,
-        boot_data=data,
-        script_path=script_path,
-        store_snapshot=store_snapshots(),
-        body_html=body_html,
-        metadata=mount_meta,
-        head_html=shell_head,
-    )
+        document = build_mount_html(
+            title=mount_meta.get("title") or mount.name or mount.path,
+            mount_info=mount_info,
+            boot_data=data,
+            script_path=script_path,
+            store_snapshot=store_snapshots(),
+            body_html=body_html,
+            metadata=mount_meta,
+            head_html=shell_head,
+        )
 
-    return MountResult(html=document, data=data, data_error=data_error)
+        return MountResult(html=document, data=data, data_error=data_error)
+
+
+@contextmanager
+def _ensure_app_booted(app):
+    if app is None or not hasattr(app, "boot") or getattr(app, "_booted", False):
+        yield
+        return
+    app.boot()
+    try:
+        yield
+    finally:
+        if getattr(app, "_booted", False):
+            app.shutdown()
 
 
 def load_controller_data(page, *, request: Request | None = None, app=None) -> tuple[dict, str | None]:
@@ -189,29 +207,37 @@ def build_document_html(
     """Build a full HTML document for a SPRAG page.
 
     ``store_snapshot`` is a ``{store_name: snapshot}`` mapping captured at
-    render time. It is injected as ``window.__SPRAG_STORES__`` so the
-    generated ``stores.js`` shim can hydrate each store bridge from the
+    render time. It is injected into ``window.__SPRAG_PAYLOAD__.stores`` so
+    the generated ``stores.js`` shim can hydrate each store bridge from the
     same state the server just rendered against.
     """
     store_snap = store_snapshot or {}
     head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
     escaped_title = html.escape(str(title))
     dev_reload = bool(route_info.get("dev_reload"))
-    hot_reload_assignments = ""
     hot_reload_script_tag = ""
     if dev_reload:
         store_contract_fingerprint = store_fingerprint()
         surface_fingerprint = _surface_fingerprint("route", route_info, hydration=hydration)
-        hot_reload_assignments = (
-            f'\n    window.__SPRAG_STORE_FINGERPRINT__ = {json.dumps(store_contract_fingerprint)};'
-            f'\n    window.__SPRAG_SURFACE_FINGERPRINT__ = {json.dumps(surface_fingerprint)};'
-        )
         hot_reload_script = _build_hot_reload_restore_script(
             route_info.get("path") or "/",
             store_contract_fingerprint,
             surface_fingerprint,
         )
         hot_reload_script_tag = f'\n  <script>{hot_reload_script}</script>'
+
+    payload = {
+        "page": route_info,
+        "routeData": _json_safe(route_data),
+        "hydration": serializable_hydration(hydration),
+        "stores": store_snap,
+    }
+    if dev_reload:
+        payload["fingerprints"] = {
+            "store": store_contract_fingerprint,
+            "surface": surface_fingerprint,
+        }
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -223,11 +249,7 @@ def build_document_html(
 <body>
   <div id="app-root">{body_html}</div>
   <script>
-    window.__SPRAG_PAGE__ = {json.dumps(route_info, sort_keys=True)};
-    window.__SPRAG_ROUTE_DATA__ = {json.dumps(_json_safe(route_data), sort_keys=True)};
-    window.__SPRAG_HYDRATION__ = {json.dumps(serializable_hydration(hydration), sort_keys=True)};
-    window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
-    {hot_reload_assignments}
+    window.__SPRAG_PAYLOAD__ = {json.dumps(payload, sort_keys=True)};
   </script>{hot_reload_script_tag}
   <script type="module" src="{script_path}"></script>
 </body>
@@ -251,21 +273,30 @@ def build_mount_html(
     head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
     escaped_title = html.escape(str(title))
     dev_reload = bool(mount_info.get("dev_reload"))
-    hot_reload_assignments = ""
     hot_reload_script_tag = ""
     if dev_reload:
         store_contract_fingerprint = store_fingerprint()
         surface_fingerprint = _surface_fingerprint("mount", mount_info)
-        hot_reload_assignments = (
-            f'\n    window.__SPRAG_STORE_FINGERPRINT__ = {json.dumps(store_contract_fingerprint)};'
-            f'\n    window.__SPRAG_SURFACE_FINGERPRINT__ = {json.dumps(surface_fingerprint)};'
-        )
         hot_reload_script = _build_hot_reload_restore_script(
             mount_info.get("path") or "/",
             store_contract_fingerprint,
             surface_fingerprint,
         )
         hot_reload_script_tag = f'\n  <script>{hot_reload_script}</script>'
+
+    payload = {
+        "mount": mount_info,
+        "page": mount_info,
+        "boot": _json_safe(boot_data),
+        "routeData": _json_safe(boot_data),
+        "hydration": [],
+        "stores": store_snap,
+    }
+    if dev_reload:
+        payload["fingerprints"] = {
+            "store": store_contract_fingerprint,
+            "surface": surface_fingerprint,
+        }
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -277,13 +308,7 @@ def build_mount_html(
 <body>
   {body_html or '<div id="app-root"></div>'}
   <script>
-    window.__SPRAG_MOUNT__ = {json.dumps(mount_info, sort_keys=True)};
-    window.__SPRAG_PAGE__ = {json.dumps(mount_info, sort_keys=True)};
-    window.__SPRAG_BOOT__ = {json.dumps(_json_safe(boot_data), sort_keys=True)};
-    window.__SPRAG_ROUTE_DATA__ = {json.dumps(_json_safe(boot_data), sort_keys=True)};
-    window.__SPRAG_HYDRATION__ = [];
-    window.__SPRAG_STORES__ = {json.dumps(store_snap, sort_keys=True)};
-    {hot_reload_assignments}
+    window.__SPRAG_PAYLOAD__ = {json.dumps(payload, sort_keys=True)};
   </script>{hot_reload_script_tag}
   <script type="module" src="{script_path}"></script>
 </body>
@@ -341,12 +366,13 @@ def _build_hot_reload_restore_script(
             return;
         }}
         if (cached.stores && typeof cached.stores === 'object') {{
-            window.__SPRAG_STORES__ = cached.stores;
+            window.__SPRAG_PAYLOAD__.stores = cached.stores;
         }}
         if (
             cached.surface_kind === 'route'
             && Array.isArray(cached.hydration)
-            && Array.isArray(window.__SPRAG_HYDRATION__)
+            && window.__SPRAG_PAYLOAD__
+            && Array.isArray(window.__SPRAG_PAYLOAD__.hydration)
         ) {{
             var byId = {{}};
             for (var i = 0; i < cached.hydration.length; i += 1) {{
@@ -355,7 +381,7 @@ def _build_hot_reload_restore_script(
                     byId[saved.id] = saved;
                 }}
             }}
-            window.__SPRAG_HYDRATION__ = window.__SPRAG_HYDRATION__.map(function(entry) {{
+            window.__SPRAG_PAYLOAD__.hydration = window.__SPRAG_PAYLOAD__.hydration.map(function(entry) {{
                 var restored = byId[entry.id];
                 if (!restored) return entry;
                 return {{
@@ -374,9 +400,10 @@ def _build_hot_reload_restore_script(
             cached.surface_kind === 'mount'
             && cached.boot_data
             && typeof cached.boot_data === 'object'
+            && window.__SPRAG_PAYLOAD__
         ) {{
-            window.__SPRAG_BOOT__ = cached.boot_data;
-            window.__SPRAG_ROUTE_DATA__ = cached.boot_data;
+            window.__SPRAG_PAYLOAD__.boot = cached.boot_data;
+            window.__SPRAG_PAYLOAD__.routeData = cached.boot_data;
         }}
         window.sessionStorage.removeItem(cacheKey);
     }} catch (_error) {{
