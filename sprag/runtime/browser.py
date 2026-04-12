@@ -251,6 +251,29 @@ def _browser_only(name):
     )
 
 
+class _JSNamespaceStub:
+    """Chainable stub for generated-only browser/import namespaces."""
+
+    def __init__(self, path: str):
+        self._path = path
+
+    def __getattr__(self, name):
+        return _JSNamespaceStub(f"{self._path}.{name}")
+
+    def __call__(self, *args, **kwargs):
+        _browser_only(self._path)
+
+    def __bool__(self):
+        _browser_only(self._path)
+
+    def __repr__(self):
+        return f"<generated-only {self._path}>"
+
+
+browser = _JSNamespaceStub("browser")
+imports = _JSNamespaceStub("imports")
+
+
 @dataclass
 class Module:
     """Browser-side Module — Python mirror of Ragot ``Module``.

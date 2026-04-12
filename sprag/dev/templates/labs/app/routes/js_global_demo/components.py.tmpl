@@ -1,0 +1,16 @@
+from sprag import Component, ui
+
+
+class JSGlobalDemoCard(Component):
+    def render(self, props=None):
+        props = props or self.props
+        return ui.section(
+            ui.h2(props.get("title", "Classic/global JS")),
+            ui.p(
+                "The page loads a plain deferred script from app/static/, "
+                "then the Module reaches for its global through browser.* "
+                "and tears it down in on_stop()."
+            ),
+            ui.div("", data_role="widget-host", class_="demo-host"),
+            class_="card",
+        )

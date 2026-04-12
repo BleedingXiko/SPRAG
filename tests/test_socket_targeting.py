@@ -4,14 +4,53 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from sprag import Controller, Schema, Screen, action, page
+from sprag import Component, Controller, Module, Schema, Screen, action, mount, page
 from sprag.dev.codegen import build_browser_entry
 from sprag.runtime.http.wsgi import SpragWSGIApp
-from sprag.runtime.socket_bridge import SpragSocketBridge
+from sprag.runtime.socket_bridge import SpragSocketBridge, surface_socket_enabled
 
 
 class RealtimeScreen(Screen):
     def render(self, data):
+        return None
+
+
+class PlainModule(Module):
+    def on_start(self):
+        self.set_state({"ready": True})
+
+
+class SocketAwareModule(Module):
+    def on_start(self):
+        self.on_socket("lab:ping", self.on_ping)
+
+    def on_ping(self, payload=None):
+        self.set_state({"last": payload})
+
+
+class PlainScreen(Screen):
+    modules = [PlainModule]
+
+    def render(self, data):
+        return None
+
+
+class SocketAwareScreen(Screen):
+    modules = [SocketAwareModule]
+
+    def render(self, data):
+        return None
+
+
+class PassiveController(Controller):
+    route = "/plain"
+
+    def load(self):
+        return {}
+
+
+class MountRoot(Component):
+    def render(self, props=None):
         return None
 
 
@@ -234,6 +273,36 @@ class RealtimeTargetingTests(unittest.TestCase):
         self.assertIn("type: 'topic'", browser_entry)
         self.assertIn("encodeTopicMessage('join', topic)", browser_entry)
         self.assertIn("encodeTopicMessage('leave', normalized)", browser_entry)
+
+    def test_surface_socket_enabled_only_for_surfaces_that_use_socket_runtime(self):
+        plain_page = page(
+            path="/plain",
+            controller=PassiveController,
+            screen=PlainScreen,
+            mode="hybrid",
+        )
+        socket_page = page(
+            path="/socket-aware",
+            controller=PassiveController,
+            screen=SocketAwareScreen,
+            mode="hybrid",
+        )
+        socket_mount = mount(
+            "/socket-mount",
+            component=MountRoot,
+            module=SocketAwareModule,
+        )
+
+        self.assertFalse(
+            surface_socket_enabled(
+                SimpleNamespace(server_mode="websocket"),
+                PassiveController,
+                surface=plain_page,
+            )
+        )
+        self.assertTrue(surface_socket_enabled(None, PassiveController, surface=socket_page))
+        self.assertTrue(surface_socket_enabled(None, PassiveController, surface=socket_mount))
+        self.assertTrue(surface_socket_enabled(None, RealtimeController, surface=plain_page))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,18 @@
+from sprag import Component, ui
+
+
+class JSImportDemoCard(Component):
+    def render(self, props=None):
+        props = props or self.props
+        label = self.state.get("label", "Waiting for the ESM pulse...")
+        return ui.section(
+            ui.h2(props.get("title", "ESM imports")),
+            ui.p(
+                "This route declares a module alias on page(...), reads it "
+                "through imports.*, and destroys the imported instance in "
+                "the normal Module lifecycle."
+            ),
+            ui.p(label, class_="eyebrow"),
+            ui.div("", data_role="esm-host", class_="demo-host"),
+            class_="card",
+        )

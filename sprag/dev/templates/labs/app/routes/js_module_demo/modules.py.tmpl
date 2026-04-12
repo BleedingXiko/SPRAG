@@ -1,0 +1,15 @@
+from sprag import Module, imports
+
+
+class JSImportDemoModule(Module):
+    def on_start(self):
+        createPulse = imports.createPulse
+        host = self.element.query_selector("[data-role='esm-host']")
+        self.pulse = createPulse(host, self.on_pulse)
+
+    def on_pulse(self, payload):
+        self.set_state({"label": payload["label"]})
+
+    def on_stop(self):
+        if self.pulse and self.pulse.destroy:
+            self.pulse.destroy()

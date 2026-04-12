@@ -1,0 +1,12 @@
+from sprag import Screen, hydrate
+
+from .components import JSImportDemoCard
+from .modules import JSImportDemoModule
+
+
+class JSImportDemoScreen(Screen):
+    modules = [JSImportDemoModule]
+
+    def render(self, data):
+        module = self.module(JSImportDemoModule)
+        return hydrate(JSImportDemoCard, module=module, props=data)

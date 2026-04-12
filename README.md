@@ -188,7 +188,71 @@ app = App(
 </div>
 ```
 
-Per-route styling via `css=[...]` on the surface itself.
+Per-surface extras live on the surface itself: use `css=[...]` for route- or
+mount-specific styles, `js=[...]` for extra scripts, and put pass-through files
+under `app/static/`. Files in `app/static/` are published at `/static/...`;
+other declared local assets land under `/assets/...`.
+
+### JavaScript Interop
+
+SPRAG ships two JS integration patterns.
+
+Classic/global libraries go through `js=[...]` and `browser.*`:
+
+```python
+from sprag import Module, browser, page
+
+chart_page = page(
+    path="/charts",
+    controller=ChartController,
+    screen=ChartScreen,
+    js=["app/static/vendor/chart.umd.js"],
+)
+
+class ChartModule(Module):
+    def on_start(self):
+        Chart = browser.Chart
+        canvas = self.element.query_selector("canvas")
+        self.chart = Chart(canvas, {"type": "line"})
+
+    def on_stop(self):
+        if self.chart and self.chart.destroy:
+            self.chart.destroy()
+```
+
+ESM libraries go through `modules={...}` and `imports.*`:
+
+```python
+from sprag import Module, imports, module, page
+
+analytics = page(
+    path="/analytics",
+    controller=AnalyticsController,
+    screen=AnalyticsScreen,
+    modules={
+        "dayjs": module("app/static/vendor/dayjs.mjs"),
+        "nanoid": module("https://cdn.example/nanoid.mjs", export="nanoid"),
+    },
+)
+
+class AnalyticsModule(Module):
+    def on_start(self):
+        dayjs = imports.dayjs
+        nanoid = imports.nanoid
+        self.set_state({
+            "today": dayjs().format("YYYY-MM-DD"),
+            "id": nanoid(),
+        })
+```
+
+The authoring contract is:
+
+- Put vendored JS, CSS, workers, WASM, and tiny adapters under `app/static/`.
+- Use `js=[...]` for deferred classic scripts that expose globals.
+- Use `modules={alias: module(src, export=...)}` for browser `import()`-loaded ESM.
+- Use `browser.*` to read globals from classic scripts; it lowers to `globalThis.*`.
+- Use `imports.*` to read declared ESM aliases; undeclared aliases fail at build time.
+- Create third-party instances in `on_start()` and tear them down in `on_stop()`.
 
 ### Environment Variables
 
@@ -430,7 +494,7 @@ sprag pack --zip                     # optimize + archive
 ```
 
 `sprag pack` runs:
-- CSS/JS minification (terser/cleancss if installed, regex fallback otherwise)
+- CSS/JS minification, including local ESM `.mjs` assets (terser/cleancss if installed, regex fallback otherwise)
 - Python bytecode compilation with source stripping
 - Image optimization with WebP + responsive variants (requires Pillow)
 - Pre-gzip compression of static assets

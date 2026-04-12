@@ -15,6 +15,7 @@ from pathlib import Path
 from .. import __version__
 from ..runtime.http import SERVER_MODES, resolve_server_mode, serve_sprag_app
 from ..runtime.loader import load_app
+from ..runtime.routing import is_dynamic_path
 from .package import build_dist_bundle
 from .scaffold import (
     DEFAULT_ROUTE_MODE,
@@ -148,8 +149,43 @@ def _build_parser():
     return parser
 
 
+def _local_npm_bin(binary: str) -> str | None:
+    """Return path to binary in ./node_modules/.bin/, or None."""
+    local = Path(os.getcwd()) / "node_modules" / ".bin" / binary
+    return str(local) if local.exists() else None
+
+
+def _prompt_install_npm_tool(binary: str, npm_package: str, description: str) -> None:
+    """Prompt the user to install a missing npm tool if running interactively."""
+    import shutil
+    import subprocess
+
+    if _local_npm_bin(binary) or shutil.which(binary):
+        return
+    if not sys.stdin.isatty():
+        return
+    try:
+        answer = input(
+            f"\n  {binary} not found — install it for {description}? [y/N] "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if answer != "y":
+        return
+    print(f"  Running: npm install --save-dev {npm_package}")
+    result = subprocess.run(["npm", "install", "--save-dev", npm_package], check=False)
+    if result.returncode != 0:
+        print(f"  [!] npm install failed — continuing without {binary}")
+    else:
+        print(f"  [+] {binary} installed")
+
+
 def cmd_pack(args):
     from .pack import SpragPack
+
+    _prompt_install_npm_tool("cleancss", "clean-css-cli", "better CSS minification")
+    _prompt_install_npm_tool("terser", "terser", "better JS minification")
 
     dist_dir = Path(args.dist).resolve()
     packer = SpragPack(
@@ -247,6 +283,7 @@ def cmd_dev(args):
     output_dir = Path(args.output)
     _build_once(app, output_dir)
     resolved_server_mode = resolve_server_mode(app, args.server_mode)
+    base_url = f"http://127.0.0.1:{args.port}"
 
     stop_event = threading.Event()
     watcher = threading.Thread(
@@ -260,7 +297,7 @@ def cmd_dev(args):
     mounts = app.mounts()
     banner = [
         f"[SPRAG] app: {app_target}",
-        f"[SPRAG] dev server running at http://127.0.0.1:{args.port}/",
+        f"[SPRAG] dev server running at {base_url}/",
         f"[SPRAG] server mode: {resolved_server_mode}",
         "",
         "  Routes:",
@@ -269,9 +306,7 @@ def cmd_dev(args):
         path_width = max(len(pg.path) for _m, pg in pages)
         mode_width = max(len(pg.mode) for _m, pg in pages)
         for _module_name, pg in pages:
-            banner.append(
-                f"    {pg.path.ljust(path_width)}  [{pg.mode.ljust(mode_width)}]  -> {pg.controller.__name__}"
-            )
+            banner.append(_dev_surface_banner_line(base_url, pg.path, label=pg.mode.ljust(mode_width), width=path_width))
     else:
         banner.append("    (none)")
     banner.append("")
@@ -279,10 +314,7 @@ def cmd_dev(args):
     if mounts:
         path_width = max(len(mt.path) for _m, mt in mounts)
         for _module_name, mt in mounts:
-            module_name_js = mt.module.__name__ if mt.module else "(none)"
-            banner.append(
-                f"    {mt.path.ljust(path_width)}  [mount]  -> {mt.component.__name__} / {module_name_js}"
-            )
+            banner.append(_dev_surface_banner_line(base_url, mt.path, label="mount", width=path_width))
     else:
         banner.append("    (none)")
     banner.append("")
@@ -301,6 +333,17 @@ def cmd_dev(args):
         print("\n[SPRAG] stopping dev server")
     finally:
         stop_event.set()
+
+
+def _dev_surface_banner_line(base_url: str, path: str, *, label: str, width: int) -> str:
+    if is_dynamic_path(path):
+        return f"    {path.ljust(width)}  [{label}]  -> pattern"
+    return f"    {path.ljust(width)}  [{label}]  -> {_join_base_url(base_url, path)}"
+
+
+def _join_base_url(base_url: str, path: str) -> str:
+    normalized_path = "/" if path in {"", "/"} else "/" + str(path).strip("/")
+    return f"{base_url}{normalized_path}"
 
 
 def cmd_new(args):
@@ -771,6 +814,7 @@ def _print_surface_metadata(*, kind, entry, output_dir: Path, open_files: bool):
             f"controller: {entry.get('controller')}",
             f"screen: {entry.get('screen')}",
             f"actions: {', '.join(entry.get('actions') or []) or '(none)'}",
+            f"js modules: {', '.join(sorted((entry.get('modules') or {}).keys())) or '(none)'}",
             f"output: {entry.get('output')}",
         ]
         hydration = entry.get("hydration") or []
@@ -783,6 +827,7 @@ def _print_surface_metadata(*, kind, entry, output_dir: Path, open_files: bool):
             f"module: {entry.get('module') or '(none)'}",
             f"boot: {entry.get('boot') or '(none)'}",
             f"actions: {', '.join(entry.get('actions') or []) or '(none)'}",
+            f"js modules: {', '.join(sorted((entry.get('modules') or {}).keys())) or '(none)'}",
             f"output: {entry.get('output')}",
         ]
         hydration = [

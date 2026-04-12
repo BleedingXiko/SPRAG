@@ -1,0 +1,14 @@
+from sprag import module, page
+
+from .server import JSImportDemoController
+from .web import JSImportDemoScreen
+
+
+js_module_demo = page(
+    path="/js-module-demo",
+    controller=JSImportDemoController,
+    screen=JSImportDemoScreen,
+    mode="hybrid",
+    modules={"createPulse": module("app/static/vendor/create-pulse.mjs", export="createPulse")},
+    metadata={"title": "ESM imports — SPRAG Labs"},
+)

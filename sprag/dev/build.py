@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import posixpath
 import shutil
@@ -12,6 +13,15 @@ from .codegen import (
     emit_generated_files,
     emit_ragot_runtime,
     emit_stores_shim,
+)
+from .codegen.dependencies import used_browser_class_refs, used_js_import_aliases
+from .codegen.mappings import JSCodegenError
+from ..runtime.assets import (
+    AssetRegistry,
+    render_css_links,
+    render_script_tags,
+    resolve_project_root,
+    serialize_module_imports,
 )
 from ..runtime.request import Request
 from ..runtime.routing import build_entries_for_page, normalize_route_path
@@ -26,8 +36,7 @@ from ..runtime.rendering import (
     store_snapshots,
 )
 from ..runtime.socket_bridge import surface_socket_enabled
-from ..runtime.shell import apply_shell
-from ..runtime.shell import emit_shell_assets
+from ..runtime.shell import apply_shell, resolve_effective_surface_modules
 from ..runtime.stores import declared_stores
 
 
@@ -39,6 +48,8 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
     build_errors = []
     root_document = None
     seen_outputs = set()
+    asset_registry = AssetRegistry(project_root=resolve_project_root(app))
+    asset_registry.include_static_tree()
 
     for module_name, page in pages:
         try:
@@ -55,6 +66,9 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
 
         route_slug = _route_slug(page.path)
         route_actions = sorted(page.controller.sprag_actions().keys())
+        page_modules = serialize_module_imports(
+            resolve_effective_surface_modules(app=app, surface=page)
+        )
 
         for build_entry in build_entries:
             actual_path = normalize_route_path(build_entry.path)
@@ -80,16 +94,19 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             page_meta = _resolved_surface_metadata(page.metadata, data)
             if redirect is None:
                 body_html, hydration, render_error = render_screen(page, data)
-                body_html, shell_head, shell_assets = apply_shell(
+                body_html, shell_assets = apply_shell(
                     body_html,
                     app=app,
                     surface_shell=getattr(page, "shell", None),
                     document_path=actual_path,
                 )
-                emit_shell_assets(output_dir, shell_assets)
+                asset_registry.include(shell_assets)
+                shell_head = render_css_links(shell_assets.css, document_path=actual_path)
+                shell_scripts = render_script_tags(shell_assets.js, document_path=actual_path)
             else:
                 body_html = ""
                 shell_head = ""
+                shell_scripts = ""
 
             if data_error:
                 build_errors.append({"path": actual_path, "stage": "load", "error": data_error})
@@ -97,6 +114,11 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 build_errors.append(
                     {"path": actual_path, "stage": "render", "error": render_error}
                 )
+            _validate_surface_import_aliases(
+                actual_path,
+                declared_modules=page_modules,
+                browser_classes=_route_browser_classes(hydration, page),
+            )
 
             script_path = _relative_web_path(page_dir, output_dir / "app.js")
             document_html = (
@@ -115,8 +137,13 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                         "action_endpoint": "/__sprag__/actions",
                         "upload_endpoint": "/__sprag__/uploads",
                         "events_endpoint": "/__sprag__/events",
-                        "socket_bridge": surface_socket_enabled(app, page.controller),
+                        "socket_bridge": surface_socket_enabled(
+                            app,
+                            page.controller,
+                            surface=page,
+                        ),
                         "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                        "modules": page_modules,
                         "providers": {k: v.__name__ for k, v in page.providers.items()},
                     },
                     hydration=hydration,
@@ -124,6 +151,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     store_snapshot=store_snapshots(),
                     metadata=page_meta,
                     head_html=shell_head,
+                    extra_script_html=shell_scripts,
                 )
             )
             (page_dir / "index.html").write_text(document_html, encoding="utf-8")
@@ -143,6 +171,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     "actions": route_actions,
                     "hydration": hydration,
                     "output": output_path,
+                    "modules": page_modules,
                     "providers": {k: v.__name__ for k, v in page.providers.items()},
                     "_provider_classes": list(page.providers.values()),
                 }
@@ -150,6 +179,9 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
 
     for module_name, mt in mounts:
         mount_slug = mt.name or _route_slug(mt.path)
+        mount_modules = serialize_module_imports(
+            resolve_effective_surface_modules(app=app, surface=mt)
+        )
         mount_dir = output_dir / _route_dir(path=mt.path)
         mount_dir.mkdir(parents=True, exist_ok=True)
         mount_actions = sorted(mt.boot.sprag_actions().keys()) if mt.boot else []
@@ -160,16 +192,24 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             build_errors.append({"path": mt.path, "stage": "mount_load", "error": data_error})
         mount_meta = _resolved_surface_metadata(mt.metadata, data)
         if redirect is None:
-            body_html, shell_head, shell_assets = apply_shell(
+            body_html, shell_assets = apply_shell(
                 '<div id="app-root"></div>',
                 app=app,
                 surface_shell=getattr(mt, "shell", None),
                 document_path=mt.path,
             )
-            emit_shell_assets(output_dir, shell_assets)
+            asset_registry.include(shell_assets)
+            shell_head = render_css_links(shell_assets.css, document_path=mt.path)
+            shell_scripts = render_script_tags(shell_assets.js, document_path=mt.path)
         else:
             body_html = ""
             shell_head = ""
+            shell_scripts = ""
+        _validate_surface_import_aliases(
+            mt.path,
+            declared_modules=mount_modules,
+            browser_classes=_mount_browser_classes(mt),
+        )
 
         script_path = _relative_web_path(mount_dir, output_dir / "app.js")
         document_html = (
@@ -187,8 +227,13 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     "action_endpoint": "/__sprag__/actions",
                     "upload_endpoint": "/__sprag__/uploads",
                     "events_endpoint": "/__sprag__/events",
-                    "socket_bridge": surface_socket_enabled(app, mt.boot),
+                    "socket_bridge": surface_socket_enabled(
+                        app,
+                        mt.boot,
+                        surface=mt,
+                    ),
                     "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                    "modules": mount_modules,
                     "providers": {k: v.__name__ for k, v in mt.providers.items()},
                 },
                 boot_data=data,
@@ -197,6 +242,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 body_html=body_html,
                 metadata=mount_meta,
                 head_html=shell_head,
+                extra_script_html=shell_scripts,
             )
         )
         (mount_dir / "index.html").write_text(document_html, encoding="utf-8")
@@ -215,12 +261,19 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 "root_component_class": mt.component,
                 "root_module_class": mt.module,
                 "output": _route_web_path(mt.path),
+                "modules": mount_modules,
                 "providers": {k: v.__name__ for k, v in mt.providers.items()},
                 "_provider_classes": list(mt.providers.values()),
             }
         )
 
-    manifest = {"routes": route_manifest, "mounts": mount_manifest, "errors": build_errors}
+    asset_registry.emit(output_dir)
+    manifest = {
+        "routes": route_manifest,
+        "mounts": mount_manifest,
+        "assets": _serializable_assets(asset_registry.assets()),
+        "errors": build_errors,
+    }
     (output_dir / "manifest.json").write_text(
         json.dumps(_serializable_manifest(manifest), indent=2, sort_keys=True), encoding="utf-8"
     )
@@ -298,6 +351,7 @@ def _relative_web_path(from_dir, to_file):
 def _serializable_manifest(manifest):
     return {
         "errors": manifest["errors"],
+        "assets": manifest.get("assets", []),
         "mounts": [
             {
                 key: value
@@ -323,6 +377,18 @@ def _collect_hydration_entries(routes):
     return entries
 
 
+def _serializable_assets(assets) -> list[dict]:
+    return [
+        {
+            "kind": asset.kind,
+            "web_path": asset.web_path,
+            "external": asset.external,
+            "module": asset.module,
+        }
+        for asset in assets
+    ]
+
+
 def _resolved_page_title(page, data, fallback_path: str) -> str:
     metadata = _resolved_surface_metadata(page.metadata, data)
     return metadata.get("title") or page.name or fallback_path
@@ -335,3 +401,56 @@ def _resolved_surface_metadata(static_metadata, data) -> dict:
         if isinstance(dynamic, dict):
             metadata.update(dynamic)
     return metadata
+
+
+def _route_browser_classes(hydration, page) -> set[type]:
+    roots = {
+        entry.get("component_class")
+        for entry in hydration
+        if entry.get("component_class") is not None
+    }
+    roots.update(
+        entry.get("module_class")
+        for entry in hydration
+        if entry.get("module_class") is not None
+    )
+    roots.update(page.providers.values())
+    return _expand_browser_classes(roots)
+
+
+def _mount_browser_classes(mount) -> set[type]:
+    roots = {mount.component}
+    if mount.module is not None:
+        roots.add(mount.module)
+    roots.update(mount.providers.values())
+    return _expand_browser_classes(roots)
+
+
+def _expand_browser_classes(roots) -> set[type]:
+    queue = [cls for cls in roots if isinstance(cls, type)]
+    seen = set()
+    while queue:
+        cls = queue.pop(0)
+        if cls in seen:
+            continue
+        seen.add(cls)
+        queue.extend(used_browser_class_refs(cls).values())
+    return seen
+
+
+def _validate_surface_import_aliases(surface_path, *, declared_modules, browser_classes) -> None:
+    declared_aliases = set((declared_modules or {}).keys())
+    for browser_class in sorted(browser_classes, key=lambda value: value.__name__):
+        missing = sorted(used_js_import_aliases(browser_class) - declared_aliases)
+        if not missing:
+            continue
+        alias = missing[0]
+        raise JSCodegenError(
+            f"Unknown SPRAG JS import alias `{alias}`; declare it via page(..., modules={{...}}) or mount(..., modules={{...}}). Surface: {surface_path}",
+            source_file=inspect.getsourcefile(browser_class) or inspect.getfile(browser_class),
+            class_name=browser_class.__name__,
+            suggestion=(
+                "Add the alias on App(..., modules=...), shell(..., modules=...), "
+                "page(..., modules=...), or mount(..., modules=...)."
+            ),
+        )

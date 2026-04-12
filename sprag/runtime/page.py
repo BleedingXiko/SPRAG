@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .assets import normalize_module_imports
+
 
 @dataclass(frozen=True)
 class Page:
@@ -13,6 +15,7 @@ class Page:
     name: Optional[str] = None
     metadata: dict = field(default_factory=dict)
     shell: object = None
+    modules: dict = field(default_factory=dict)
     static_paths: object = None
     providers: dict = field(default_factory=dict)
 
@@ -23,6 +26,8 @@ class Page:
             raise ValueError(
                 f"SPRAG page mode must be one of document|hybrid|spa: {self.mode!r}"
             )
+        object.__setattr__(self, "metadata", dict(self.metadata or {}))
+        object.__setattr__(self, "modules", normalize_module_imports(self.modules))
 
 def page(
     *,
@@ -34,14 +39,16 @@ def page(
     metadata=None,
     shell=None,
     css=None,
+    js=None,
+    modules=None,
     static_paths=None,
     providers=None,
 ):
     """Create a route page manifest."""
-    if css is not None:
+    if css is not None or js is not None:
         from .shell import shell as build_shell
 
-        shell = build_shell(shell, css=css)
+        shell = build_shell(shell, css=css, js=js)
     return Page(
         path=path,
         controller=controller,
@@ -50,6 +57,7 @@ def page(
         name=name,
         metadata=metadata or {},
         shell=shell,
+        modules=modules or {},
         static_paths=static_paths,
         providers=providers or {},
     )

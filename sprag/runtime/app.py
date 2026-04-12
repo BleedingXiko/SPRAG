@@ -8,6 +8,7 @@ from typing import Optional
 
 from specter import registry
 
+from .assets import normalize_module_imports
 from .discovery import discover_surfaces
 from .socket_bridge import SpragSocketBridge, controller_uses_socket_bridge
 
@@ -19,6 +20,7 @@ class App:
     mounts_package: str = "app.mounts"
     project_root: Optional[str] = None
     shell: object = None
+    modules: dict = field(default_factory=dict)
     server_mode: str = "auto"
 
     def __post_init__(self):
@@ -27,6 +29,7 @@ class App:
                 "App(server_mode=...) must be 'auto', 'wsgi', or 'websocket', "
                 f"got {self.server_mode!r}."
             )
+        self.modules = normalize_module_imports(self.modules)
         self._pages = None
         self._mounts = None
         self._controllers = {}

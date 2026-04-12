@@ -1,0 +1,14 @@
+from sprag import page
+
+from .server import JSGlobalDemoController
+from .web import JSGlobalDemoScreen
+
+
+js_global_demo = page(
+    path="/js-global-demo",
+    controller=JSGlobalDemoController,
+    screen=JSGlobalDemoScreen,
+    mode="hybrid",
+    js=["app/static/vendor/spark-widget.js"],
+    metadata={"title": "Classic/global JS — SPRAG Labs"},
+)

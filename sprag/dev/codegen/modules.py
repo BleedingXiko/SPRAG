@@ -30,7 +30,7 @@ from ...runtime.env import env as sprag_env
 from ...runtime.env import public_env as sprag_public_env
 from .diagnostics import lint_browser_method
 from .expressions import _compile_expr  # noqa: F401  (re-export for tests)
-from .dependencies import used_browser_class_refs
+from .dependencies import used_browser_class_refs, used_js_import_aliases
 from .imports import _detect_ragot_imports
 from .mappings import JSCodegenError, _map_name
 from .statements import _compile_statements
@@ -138,7 +138,7 @@ def collect_env_helper_refs_for_class(browser_class) -> dict[str, str]:
     return refs
 
 
-def compile_module_class(module_class) -> str:
+def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
     from ...runtime.browser import RefDescriptor  # local import to avoid circular dep
 
     # Stores referenced in the source file (``from app.stores import counter``).
@@ -156,7 +156,9 @@ def compile_module_class(module_class) -> str:
         )
 
     browser_class_refs = used_browser_class_refs(module_class)
+    js_import_aliases = used_js_import_aliases(module_class)
     env_helper_refs = collect_env_helper_refs_for_class(module_class)
+    declared_import_aliases = set(declared_import_aliases or ())
 
     def _seed_env() -> dict:
         env = {}
@@ -164,6 +166,8 @@ def compile_module_class(module_class) -> str:
             env["__sprag_stores__"] = store_refs
         if browser_class_refs:
             env["__sprag_classes__"] = browser_class_refs
+        if js_import_aliases or declared_import_aliases:
+            env["__sprag_import_aliases__"] = declared_import_aliases
         if env_helper_refs:
             env["__sprag_env_helpers__"] = env_helper_refs
         return env

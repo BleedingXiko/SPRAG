@@ -48,6 +48,7 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
 
     component_classes = {}
     module_classes = {}
+    declared_import_aliases = set()
     for entry in hydration_entries:
         component_class = entry.get("component_class")
         module_class = entry.get("module_class")
@@ -57,6 +58,7 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
             _register_browser_class(module_classes, module_class, "Module")
 
     for entry in mount_entries:
+        declared_import_aliases.update((entry.get("modules") or {}).keys())
         component_class = entry.get("root_component_class")
         module_class = entry.get("root_module_class")
         if component_class:
@@ -67,6 +69,7 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
             _register_browser_class(module_classes, provider_class, "Module")
 
     for entry in route_entries:
+        declared_import_aliases.update((entry.get("modules") or {}).keys())
         for provider_class in entry.get("_provider_classes", []):
             _register_browser_class(module_classes, provider_class, "Module")
 
@@ -74,13 +77,19 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
 
     for name, component_class in component_classes.items():
         (components_dir / f"{name}.js").write_text(
-            compile_component_class(component_class),
+            compile_component_class(
+                component_class,
+                declared_import_aliases=declared_import_aliases,
+            ),
             encoding="utf-8",
         )
 
     for name, module_class in module_classes.items():
         (modules_dir / f"{name}.js").write_text(
-            compile_module_class(module_class),
+            compile_module_class(
+                module_class,
+                declared_import_aliases=declared_import_aliases,
+            ),
             encoding="utf-8",
         )
 
@@ -331,6 +340,7 @@ const manifest = {json.dumps(serializable, indent=2, sort_keys=True)};
 window.__SPRAG_MANIFEST__ = manifest;
 const payload = window.__SPRAG_PAYLOAD__ || {{}};
 window.__SPRAG_ENV__ = payload.env || {{}};
+window.__SPRAG_IMPORTS__ = window.__SPRAG_IMPORTS__ || {{}};
 const route = payload.page || {{}};
 const mount = payload.mount || null;
 const surface = mount || route;
@@ -739,6 +749,68 @@ function createUploadClient(currentRoute) {{
 
 const uploadClient = createUploadClient(route);
 window.__SPRAG_UPLOADS__ = uploadClient;
+
+function resolveJSImportSrc(src) {{
+    if (!src) {{
+        return src;
+    }}
+    if (
+        src.startsWith('http://')
+        || src.startsWith('https://')
+        || src.startsWith('//')
+        || src.startsWith('data:')
+        || src.startsWith('blob:')
+    ) {{
+        return src;
+    }}
+    if (src.startsWith('/')) {{
+        return withSpragBase(src);
+    }}
+    return src;
+}}
+
+async function resolveSurfaceImports(currentSurface) {{
+    const declared = (currentSurface && currentSurface.modules) || {{}};
+    const resolved = {{}};
+    for (const [alias, spec] of Object.entries(declared)) {{
+        const src = resolveJSImportSrc(spec && spec.src);
+        const exportName = (spec && spec.export) || 'default';
+        let namespace = null;
+        try {{
+            namespace = await import(src);
+        }} catch (error) {{
+            const detail = error && error.message ? error.message : String(error);
+            throw new Error(
+                `[SPRAG] Failed to import JS alias "${{alias}}" from "${{src}}": ${{detail}}`
+            );
+        }}
+        const value = exportName === 'default'
+            ? namespace.default
+            : namespace[exportName];
+        if (value === undefined) {{
+            throw new Error(
+                `[SPRAG] JS alias "${{alias}}" could not resolve export "${{exportName}}" from "${{src}}".`
+            );
+        }}
+        resolved[alias] = value;
+    }}
+    window.__SPRAG_IMPORTS__ = resolved;
+    return resolved;
+}}
+
+function renderBootError(error) {{
+    const message = error && error.message ? error.message : String(error);
+    const target = document.querySelector('#app-root') || document.body;
+    if (!target) {{
+        return;
+    }}
+    target.innerHTML = `
+        <section data-sprag-boot-error style="max-width: 52rem; margin: 3rem auto; padding: 1.25rem; border: 1px solid #d7b2b2; border-radius: 12px; background: #fff4f4; color: #5f1d1d; font-family: ui-sans-serif, system-ui, sans-serif;">
+          <h1 style="margin: 0 0 0.75rem; font-size: 1.25rem;">SPRAG boot error</h1>
+          <p style="margin: 0; white-space: pre-wrap;">${{message}}</p>
+        </section>
+    `;
+}}
 
 const spragRoots = [];
 let spragEventSource = null;
@@ -1310,11 +1382,12 @@ function connectSocketBridge(surface) {{
     return socket;
 }}
 
-function boot() {{
+async function boot() {{
     if (spragBooted) return;
     try {{
         rewriteInternalLinks();
         registerDevReloadListener();
+        await resolveSurfaceImports(surface);
         const socket = connectSocketBridge(surface);
 
         provideRuntimeRoot('sprag.route', surface, null);
@@ -1365,7 +1438,8 @@ function boot() {{
         spragBooted = true;
     }} catch (error) {{
         teardownSpragRuntime('boot-error');
-        throw error;
+        renderBootError(error);
+        console.error(error);
     }}
 }}
 

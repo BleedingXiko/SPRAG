@@ -1,0 +1,11 @@
+from sprag import Screen, hydrate
+
+from .components import JSGlobalDemoCard
+from .modules import JSGlobalDemoModule
+
+
+class JSGlobalDemoScreen(Screen):
+    modules = [JSGlobalDemoModule]
+
+    def render(self, data):
+        return hydrate(JSGlobalDemoCard, module=self.module(JSGlobalDemoModule), props=data)

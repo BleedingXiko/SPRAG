@@ -28,6 +28,10 @@ def _compile_expr(node, env, method_names=None):
     if isinstance(node, ast.Name):
         if node.id == "self":
             return "this"
+        if node.id == "browser":
+            return "globalThis"
+        if node.id == "imports":
+            return "(globalThis.__SPRAG_IMPORTS__ || {})"
         # Store references resolve to their JS store name (the same name
         # the generated stores.js shim exports). This is what makes
         # ``self.subscribe(counter, fn)`` compile cleanly: the ``counter``
@@ -37,6 +41,9 @@ def _compile_expr(node, env, method_names=None):
             return store_refs[node.id]
         return env.get(node.id, node.id)
     if isinstance(node, ast.Attribute):
+        special_js_namespace = _compile_special_js_namespace_attr(node, env)
+        if special_js_namespace is not None:
+            return special_js_namespace
         return f"{_compile_expr(node.value, env, method_names=method_names)}.{_map_name(node.attr)}"
     if isinstance(node, ast.Subscript):
         return (
@@ -307,6 +314,38 @@ def _compile_expr(node, env, method_names=None):
                 parts.append(f"${{{_compile_expr(expr, env, method_names=method_names)}}}")
         return "`" + "".join(parts) + "`"
     raise JSCodegenError(f"Unsupported expression: {ast.dump(node)}")
+
+
+def _compile_special_js_namespace_attr(node, env):
+    root_name, attrs = _attribute_chain(node)
+    if root_name not in {"browser", "imports"}:
+        return None
+
+    if root_name == "imports" and attrs:
+        declared = env.get("__sprag_import_aliases__")
+        alias = attrs[0]
+        if declared is not None and alias not in declared:
+            raise JSCodegenError(
+                f"Unknown SPRAG JS import alias `{alias}`; declare it via page(..., modules={{...}}) or mount(..., modules={{...}})",
+                suggestion=(
+                    "Declare the alias on App(..., modules=...), shell(..., modules=...), "
+                    "page(..., modules=...), or mount(..., modules=...)."
+                ),
+            )
+
+    base = "globalThis" if root_name == "browser" else "(globalThis.__SPRAG_IMPORTS__ || {})"
+    return base + "".join(f".{attr}" for attr in attrs)
+
+
+def _attribute_chain(node):
+    attrs = []
+    cursor = node
+    while isinstance(cursor, ast.Attribute):
+        attrs.append(cursor.attr)
+        cursor = cursor.value
+    if isinstance(cursor, ast.Name):
+        return cursor.id, list(reversed(attrs))
+    return None, []
 
 
 _PRIMITIVE_TAGS = {"For", "Grid", "LazyImage"}

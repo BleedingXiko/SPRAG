@@ -40,7 +40,7 @@ CLR_RED = "\033[31m"
 CLR_BLUE = "\033[34m"
 
 COMPRESSIBLE_SUFFIXES = {
-    ".html", ".css", ".js", ".json", ".svg", ".xml", ".txt", ".map",
+    ".html", ".css", ".js", ".mjs", ".json", ".svg", ".xml", ".txt", ".map",
 }
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff"}
@@ -49,6 +49,8 @@ WEBP_CONVERTIBLE = {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
 DEFAULT_EXCLUDE_DIRS = {
     "__pycache__", ".DS_Store", ".git",
 }
+
+_PROCESS_POOL_UNAVAILABLE_ERRORS = (PermissionError, OSError)
 
 # Bytecode importer template — loaded at dist boot before anything else.
 # Allows Python to import directly from __pycache__/*.pyc with no .py source.
@@ -313,8 +315,8 @@ class SpragPack:
         self.skip_gzip = skip_gzip
 
         self.workers = os.cpu_count() or 4
-        self.terser_bin = shutil.which("terser")
-        self.cleancss_bin = shutil.which("cleancss")
+        self.terser_bin = self._resolve_bin("terser")
+        self.cleancss_bin = self._resolve_bin("cleancss")
 
         self.start_time = time.time()
         self.stats: Dict = {
@@ -332,6 +334,13 @@ class SpragPack:
             "gzip_saved": 0,
             "errors": [],
         }
+
+    @staticmethod
+    def _resolve_bin(name: str) -> Optional[str]:
+        local = Path(os.getcwd()) / "node_modules" / ".bin" / name
+        if local.exists():
+            return str(local)
+        return shutil.which(name)
 
     def log(self, msg: str):
         print(f"{CLR_BLUE}[*]{CLR_RESET} {msg}")
@@ -380,8 +389,11 @@ class SpragPack:
 
         css_files = [p for p in public_dir.rglob("*.css") if not p.name.endswith(".min.css")]
         js_files = [
-            p for p in public_dir.rglob("*.js")
+            p
+            for pattern in ("*.js", "*.mjs")
+            for p in public_dir.rglob(pattern)
             if not p.name.endswith(".min.js")
+            and not p.name.endswith(".min.mjs")
             and "vendor" not in p.relative_to(public_dir).parts
         ]
 
@@ -389,22 +401,41 @@ class SpragPack:
             self.log("No CSS/JS files to minify")
             return
 
-        with ProcessPoolExecutor(max_workers=self.workers) as executor:
-            futures = []
-            for p in css_files:
-                futures.append(("css", executor.submit(_worker_minify_css, str(p), self.cleancss_bin)))
-            for p in js_files:
-                futures.append(("js", executor.submit(_worker_minify_js, str(p), self.terser_bin)))
+        try:
+            with ProcessPoolExecutor(max_workers=self.workers) as executor:
+                futures = []
+                for p in css_files:
+                    futures.append(("css", executor.submit(_worker_minify_css, str(p), self.cleancss_bin)))
+                for p in js_files:
+                    futures.append(("js", executor.submit(_worker_minify_js, str(p), self.terser_bin)))
 
-            for kind, future in futures:
-                ok, err, old, new = future.result()
+                for kind, future in futures:
+                    ok, err, old, new = future.result()
+                    if ok:
+                        self.stats["orig_asset_size"] += old
+                        self.stats["packed_asset_size"] += new
+                        if kind == "css":
+                            self.stats["minified_css"] += 1
+                        else:
+                            self.stats["minified_js"] += 1
+                    else:
+                        self.error(f"Minification failed: {err}")
+        except _PROCESS_POOL_UNAVAILABLE_ERRORS as exc:
+            self.log(f"Process pool unavailable for minification; falling back to sequential mode ({exc}).")
+            for p in css_files:
+                ok, err, old, new = _worker_minify_css(str(p), self.cleancss_bin)
                 if ok:
                     self.stats["orig_asset_size"] += old
                     self.stats["packed_asset_size"] += new
-                    if kind == "css":
-                        self.stats["minified_css"] += 1
-                    else:
-                        self.stats["minified_js"] += 1
+                    self.stats["minified_css"] += 1
+                else:
+                    self.error(f"Minification failed: {err}")
+            for p in js_files:
+                ok, err, old, new = _worker_minify_js(str(p), self.terser_bin)
+                if ok:
+                    self.stats["orig_asset_size"] += old
+                    self.stats["packed_asset_size"] += new
+                    self.stats["minified_js"] += 1
                 else:
                     self.error(f"Minification failed: {err}")
 
@@ -435,23 +466,42 @@ class SpragPack:
             self.log("Pillow not installed — skipping image optimization (pip install Pillow)")
             return
 
-        with ProcessPoolExecutor(max_workers=self.workers) as executor:
-            futures = []
-            for p in image_files:
-                futures.append(
-                    executor.submit(
-                        _worker_optimize_image,
-                        str(p),
-                        self.image_quality,
-                        self.image_max_width,
-                        self.generate_webp,
-                        self.generate_srcset,
-                        self.srcset_widths,
+        try:
+            with ProcessPoolExecutor(max_workers=self.workers) as executor:
+                futures = []
+                for p in image_files:
+                    futures.append(
+                        executor.submit(
+                            _worker_optimize_image,
+                            str(p),
+                            self.image_quality,
+                            self.image_max_width,
+                            self.generate_webp,
+                            self.generate_srcset,
+                            self.srcset_widths,
+                        )
                     )
-                )
 
-            for future in as_completed(futures):
-                ok, err, old, new, generated = future.result()
+                for future in as_completed(futures):
+                    ok, err, old, new, generated = future.result()
+                    if ok:
+                        self.stats["optimized_images"] += 1
+                        self.stats["orig_image_size"] += old
+                        self.stats["packed_image_size"] += new
+                        self.stats["generated_variants"] += len(generated)
+                    else:
+                        self.error(f"Image optimization failed: {err}")
+        except _PROCESS_POOL_UNAVAILABLE_ERRORS as exc:
+            self.log(f"Process pool unavailable for image optimization; falling back to sequential mode ({exc}).")
+            for p in image_files:
+                ok, err, old, new, generated = _worker_optimize_image(
+                    str(p),
+                    self.image_quality,
+                    self.image_max_width,
+                    self.generate_webp,
+                    self.generate_srcset,
+                    self.srcset_widths,
+                )
                 if ok:
                     self.stats["optimized_images"] += 1
                     self.stats["orig_image_size"] += old
@@ -487,16 +537,26 @@ class SpragPack:
             f"cpython-{sys.version_info.major}{sys.version_info.minor}",
         )
 
-        with ProcessPoolExecutor(max_workers=self.workers) as executor:
-            futures = []
+        try:
+            with ProcessPoolExecutor(max_workers=self.workers) as executor:
+                futures = []
+                for py in py_files:
+                    cfile = py.parent / "__pycache__" / f"{py.stem}.{tag}.pyc"
+                    futures.append((py, executor.submit(
+                        _worker_compile_py, str(py), str(cfile), str(self.dist_dir),
+                    )))
+
+                for py, future in futures:
+                    ok, err = future.result()
+                    if ok:
+                        self.stats["compiled_py"] += 1
+                    else:
+                        self.error(f"Compilation failed ({py.name}): {err}")
+        except _PROCESS_POOL_UNAVAILABLE_ERRORS as exc:
+            self.log(f"Process pool unavailable for bytecode compilation; falling back to sequential mode ({exc}).")
             for py in py_files:
                 cfile = py.parent / "__pycache__" / f"{py.stem}.{tag}.pyc"
-                futures.append((py, executor.submit(
-                    _worker_compile_py, str(py), str(cfile), str(self.dist_dir),
-                )))
-
-            for py, future in futures:
-                ok, err = future.result()
+                ok, err = _worker_compile_py(str(py), str(cfile), str(self.dist_dir))
                 if ok:
                     self.stats["compiled_py"] += 1
                 else:
@@ -589,7 +649,7 @@ class SpragPack:
         public_dir = self.dist_dir / "public"
         if public_dir.exists():
             html_count = len(list(public_dir.rglob("*.html")))
-            js_count = len(list(public_dir.rglob("*.js")))
+            js_count = len(list(public_dir.rglob("*.js"))) + len(list(public_dir.rglob("*.mjs")))
             self.log(f"Dist contains {html_count} HTML, {js_count} JS files")
         else:
             self.log("No public/ dir in dist (mount-only app?)")

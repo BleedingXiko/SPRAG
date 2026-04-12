@@ -7,6 +7,8 @@ controller ``build_events(handler)`` declarations.
 
 from __future__ import annotations
 
+import ast
+import inspect
 import itertools
 import json
 import logging
@@ -21,6 +23,14 @@ from .session import resolve_session_id
 from .server import controller_context
 
 logger = logging.getLogger(__name__)
+_SOCKET_RUNTIME_METHODS = {
+    "on_socket",
+    "off_socket",
+    "emit_socket",
+    "join_topic",
+    "leave_topic",
+}
+_SOCKET_RUNTIME_EVENT_PREFIX = "sprag:socket:"
 
 
 def controller_uses_socket_bridge(controller_cls) -> bool:
@@ -32,15 +42,52 @@ def controller_uses_socket_bridge(controller_cls) -> bool:
     return build_events is not None and build_events is not base_build_events
 
 
-def surface_socket_enabled(app=None, controller_cls=None) -> bool:
+def browser_class_uses_socket_runtime(browser_cls) -> bool:
+    """Return ``True`` when a browser class touches SPRAG's socket runtime."""
+    if browser_cls is None:
+        return False
+    try:
+        tree = ast.parse(inspect.getsource(browser_cls))
+    except (OSError, TypeError, SyntaxError):
+        return False
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "self"
+            and node.attr in _SOCKET_RUNTIME_METHODS
+        ):
+            return True
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.startswith(_SOCKET_RUNTIME_EVENT_PREFIX)
+        ):
+            return True
+    return False
+
+
+def surface_uses_socket_runtime(surface) -> bool:
+    """Return ``True`` when a page or mount uses the browser socket runtime."""
+    if surface is None:
+        return False
+
+    browser_classes = []
+    module_cls = getattr(surface, "module", None)
+    if module_cls is not None:
+        browser_classes.append(module_cls)
+
+    screen_cls = getattr(surface, "screen", None)
+    if screen_cls is not None:
+        browser_classes.extend(getattr(screen_cls, "modules", []) or [])
+
+    return any(browser_class_uses_socket_runtime(browser_cls) for browser_cls in browser_classes)
+
+
+def surface_socket_enabled(app=None, controller_cls=None, surface=None) -> bool:
     """Return ``True`` when the current surface should boot the socket client."""
-    if app is not None:
-        resolved = getattr(app, "_resolved_server_mode", None)
-        if resolved == "websocket":
-            return True
-        if resolved is None and getattr(app, "server_mode", None) == "websocket":
-            return True
-    return controller_uses_socket_bridge(controller_cls)
+    return controller_uses_socket_bridge(controller_cls) or surface_uses_socket_runtime(surface)
 
 
 class SpragSocketIngress(SocketIngress):

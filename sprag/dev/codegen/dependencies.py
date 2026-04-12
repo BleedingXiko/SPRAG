@@ -89,6 +89,26 @@ def used_browser_class_refs(cls) -> dict[str, type]:
     }
 
 
+def used_js_import_aliases(cls) -> set[str]:
+    """Return declared ``imports.foo`` aliases referenced by ``cls``."""
+    try:
+        source = inspect.getsource(cls)
+    except (OSError, TypeError):
+        return set()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    aliases = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        if isinstance(node.value, ast.Name) and node.value.id == "imports":
+            aliases.add(node.attr)
+    return aliases
+
+
 def _used_names_in_class(cls) -> set[str]:
     try:
         source = inspect.getsource(cls)

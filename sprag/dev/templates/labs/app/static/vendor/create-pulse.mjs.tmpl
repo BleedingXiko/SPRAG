@@ -1,0 +1,23 @@
+export function createPulse(target, onTick) {
+  let count = 0;
+
+  function emit() {
+    const label = `Pulse ${count}`;
+    target.textContent = label;
+    if (typeof onTick === "function") {
+      onTick({ label, count });
+    }
+  }
+
+  emit();
+  const timer = window.setInterval(() => {
+    count += 1;
+    emit();
+  }, 900);
+
+  return {
+    destroy() {
+      window.clearInterval(timer);
+    },
+  };
+}

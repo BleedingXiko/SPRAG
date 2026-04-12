@@ -14,12 +14,13 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 
 from .tree import render_tree
+from ..assets import render_css_links, render_script_tags, serialize_module_imports
 from ..env import public_env
 from ..request import Request
 from ..routing import normalize_route_path
 from ..socket_bridge import surface_socket_enabled
 from ..server import Redirect, controller_context
-from ..shell import apply_shell
+from ..shell import apply_shell, resolve_effective_surface_modules
 from ..stores import declared_stores, store_fingerprint
 
 
@@ -63,11 +64,16 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
             )
         body_html, hydration, render_error = render_screen(page, data)
         page_meta = _resolved_surface_metadata(page.metadata, data)
-        body_html, shell_head, _ = apply_shell(
+        surface_modules = serialize_module_imports(
+            resolve_effective_surface_modules(app=app, surface=page)
+        )
+        body_html, shell_assets = apply_shell(
             body_html,
             app=app,
             surface_shell=getattr(page, "shell", None),
         )
+        shell_head = render_css_links(shell_assets.css)
+        shell_scripts = render_script_tags(shell_assets.js)
 
         route_slug = page.name or _route_slug(page.path)
         route_actions = sorted(page.controller.sprag_actions().keys())
@@ -85,8 +91,13 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
                 "action_endpoint": "/__sprag__/actions",
                 "upload_endpoint": "/__sprag__/uploads",
                 "events_endpoint": "/__sprag__/events",
-                "socket_bridge": surface_socket_enabled(app, page.controller),
+                "socket_bridge": surface_socket_enabled(
+                    app,
+                    page.controller,
+                    surface=page,
+                ),
                 "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                "modules": surface_modules,
                 "providers": {key: value.__name__ for key, value in page.providers.items()},
             },
             hydration=hydration,
@@ -94,6 +105,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
             store_snapshot=store_snapshots(),
             metadata=page_meta,
             head_html=shell_head,
+            extra_script_html=shell_scripts,
         )
 
         return PageResult(
@@ -120,6 +132,9 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
 
         mount_slug = mount.name or _route_slug(mount.path)
         boot_actions = sorted(mount.boot.sprag_actions().keys()) if mount.boot else []
+        surface_modules = serialize_module_imports(
+            resolve_effective_surface_modules(app=app, surface=mount)
+        )
         mount_info = {
             "path": mount.path,
             "name": mount_slug,
@@ -130,17 +145,24 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
             "action_endpoint": "/__sprag__/actions",
             "upload_endpoint": "/__sprag__/uploads",
             "events_endpoint": "/__sprag__/events",
-            "socket_bridge": surface_socket_enabled(app, mount.boot),
+            "socket_bridge": surface_socket_enabled(
+                app,
+                mount.boot,
+                surface=mount,
+            ),
             "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+            "modules": surface_modules,
             "providers": {key: value.__name__ for key, value in mount.providers.items()},
         }
 
         mount_meta = _resolved_surface_metadata(mount.metadata, data)
-        body_html, shell_head, _ = apply_shell(
+        body_html, shell_assets = apply_shell(
             '<div id="app-root"></div>',
             app=app,
             surface_shell=getattr(mount, "shell", None),
         )
+        shell_head = render_css_links(shell_assets.css)
+        shell_scripts = render_script_tags(shell_assets.js)
 
         document = build_mount_html(
             title=mount_meta.get("title") or mount.name or mount.path,
@@ -151,6 +173,7 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
             body_html=body_html,
             metadata=mount_meta,
             head_html=shell_head,
+            extra_script_html=shell_scripts,
         )
 
         return MountResult(html=document, data=data, data_error=data_error)
@@ -237,6 +260,7 @@ def build_document_html(
     store_snapshot: dict | None = None,
     metadata: dict | None = None,
     head_html: str = "",
+    extra_script_html: str = "",
 ):
     """Build a full HTML document for a SPRAG page.
 
@@ -273,6 +297,8 @@ def build_document_html(
             "surface": surface_fingerprint,
         }
 
+    extra_scripts = f"\n  {extra_script_html}" if extra_script_html else ""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -285,7 +311,7 @@ def build_document_html(
   <div id="app-root">{body_html}</div>
   <script>
     window.__SPRAG_PAYLOAD__ = {json.dumps(payload, sort_keys=True)};
-  </script>{hot_reload_script_tag}
+  </script>{hot_reload_script_tag}{extra_scripts}
   <script type="module" src="{script_path}"></script>
 </body>
 </html>
@@ -302,6 +328,7 @@ def build_mount_html(
     body_html: str | None = None,
     metadata: dict | None = None,
     head_html: str = "",
+    extra_script_html: str = "",
 ):
     """Build the HTML boot document for a client app mount."""
     store_snap = store_snapshot or {}
@@ -333,6 +360,7 @@ def build_mount_html(
             "store": store_contract_fingerprint,
             "surface": surface_fingerprint,
         }
+    extra_scripts = f"\n  {extra_script_html}" if extra_script_html else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -345,7 +373,7 @@ def build_mount_html(
   {body_html or '<div id="app-root"></div>'}
   <script>
     window.__SPRAG_PAYLOAD__ = {json.dumps(payload, sort_keys=True)};
-  </script>{hot_reload_script_tag}
+  </script>{hot_reload_script_tag}{extra_scripts}
   <script type="module" src="{script_path}"></script>
 </body>
 </html>

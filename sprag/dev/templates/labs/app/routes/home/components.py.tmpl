@@ -132,6 +132,28 @@ class Landing(Component):
                     class_="card",
                 ),
                 ui.a(
+                    ui.h3("JS Global Demo →"),
+                    ui.p(
+                        "Classic/global third-party JS: load a deferred script, "
+                        "read its global via browser.*, and tear down the "
+                        "instance in Module.on_stop()."
+                    ),
+                    ui.span("hybrid · browser.*", class_="tag"),
+                    href="/js-global-demo",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("JS Module Demo →"),
+                    ui.p(
+                        "Native browser import(): declare modules={...}, use "
+                        "imports.* in browser Python, and clean up the "
+                        "returned handle in the normal lifecycle."
+                    ),
+                    ui.span("hybrid · imports.*", class_="tag"),
+                    href="/js-module-demo",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Socket Demo →"),
                     ui.p(
                         "Shared websocket runtime: Module.on_socket(...) "

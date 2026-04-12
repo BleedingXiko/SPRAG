@@ -1,0 +1,27 @@
+(function (global) {
+  function SPRAGSparkWidget(target, options) {
+    var host = target;
+    var label = (options && options.label) || "Widget ready";
+    var root = document.createElement("div");
+    root.className = "lab-widget";
+    root.style.padding = "0.9rem 1rem";
+    root.style.borderRadius = "14px";
+    root.style.background = "linear-gradient(135deg, #183153, #275d7f)";
+    root.style.color = "#f6fbff";
+    root.style.fontWeight = "600";
+    root.style.boxShadow = "0 16px 30px rgba(24, 49, 83, 0.18)";
+    root.textContent = label;
+    host.innerHTML = "";
+    host.appendChild(root);
+
+    return {
+      destroy: function () {
+        if (root.parentNode) {
+          root.parentNode.removeChild(root);
+        }
+      },
+    };
+  }
+
+  global.SPRAGSparkWidget = SPRAGSparkWidget;
+})(globalThis);

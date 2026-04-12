@@ -1,0 +1,8 @@
+from sprag import Controller
+
+
+class JSImportDemoController(Controller):
+    route = "/js-module-demo"
+
+    def load(self):
+        return {"title": "ESM imports via modules={...}"}

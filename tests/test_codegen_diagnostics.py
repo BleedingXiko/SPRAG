@@ -1,6 +1,6 @@
 import unittest
 
-from sprag import Component, Module, ui
+from sprag import Component, Module, browser, imports, ui
 from sprag.dev.codegen.components import compile_component_class
 from sprag.dev.codegen.modules import compile_module_class
 from sprag.dev.codegen.mappings import JSCodegenError
@@ -32,6 +32,19 @@ class TopicHelpersModule(Module):
     def on_start(self):
         self.join_topic("room:alpha")
         self.leave_topic("room:alpha")
+
+
+class BrowserNamespaceModule(Module):
+    def on_start(self):
+        Chart = browser.Chart
+        browser.Alpine.store("theme", {"ready": True})
+        self.set_state({"chart": Chart})
+
+
+class JSImportsModule(Module):
+    def on_start(self):
+        dayjs = imports.dayjs
+        self.set_state({"today": dayjs().format("YYYY-MM-DD")})
 
 
 class UnsupportedWithModule(Module):
@@ -67,6 +80,25 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("leaveTopic(topic)", compiled)
         self.assertIn('this.joinTopic("room:alpha")', compiled)
         self.assertIn('this.leaveTopic("room:alpha")', compiled)
+
+    def test_compile_module_lowers_browser_namespace(self):
+        compiled = compile_module_class(BrowserNamespaceModule)
+        self.assertIn("globalThis.Chart", compiled)
+        self.assertIn('globalThis.Alpine.store("theme"', compiled)
+
+    def test_compile_module_lowers_declared_js_import_aliases(self):
+        compiled = compile_module_class(
+            JSImportsModule,
+            declared_import_aliases={"dayjs"},
+        )
+        self.assertIn("(globalThis.__SPRAG_IMPORTS__ || {}).dayjs", compiled)
+
+    def test_compile_module_rejects_unknown_js_import_alias(self):
+        with self.assertRaises(JSCodegenError) as ctx:
+            compile_module_class(JSImportsModule)
+        message = str(ctx.exception)
+        self.assertIn("Unknown SPRAG JS import alias `dayjs`", message)
+        self.assertIn("declare it via page(..., modules={...}) or mount(..., modules={...})", message)
 
     def test_module_diagnostic_includes_context_and_hint(self):
         with self.assertRaises(JSCodegenError) as ctx:

@@ -65,9 +65,17 @@ Each route directory follows the same six-file convention:
 The app shell is plain HTML and CSS. `app/__init__.py` wires it with
 `sprag.shell(template="app/shell.html", css=["app/shell.css"])`, and
 SPRAG wraps document routes, hybrid routes, and mounts with the same
-shell slot. For route- or mount-specific styling, add `css=[...]`
-directly on `page(...)` or `mount(...)` and keep `shell=` for full shell
-overrides.
+shell slot. For route- or mount-specific assets, add `css=[...]` or
+`js=[...]` directly on `page(...)` / `mount(...)`, keep pass-through
+files in `app/static/`, and reserve `shell=` for full shell overrides.
+
+For JS interop, use one of two patterns:
+
+- `js=[...]` plus `browser.*` for classic/global libraries.
+- `modules={...}` plus `imports.*` for ESM imports loaded with browser `import()`.
+
+`app/static/` is the canonical place for vendored JS, CSS, images,
+workers, WASM, and tiny bridge files.
 
 ## Two Render Modes
 

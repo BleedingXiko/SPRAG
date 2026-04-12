@@ -1,0 +1,12 @@
+from sprag import Module, browser
+
+
+class JSGlobalDemoModule(Module):
+    def on_start(self):
+        Widget = browser.SPRAGSparkWidget
+        host = self.element.query_selector("[data-role='widget-host']")
+        self.widget = Widget(host, {"label": "Classic script loaded before SPRAG boot"})
+
+    def on_stop(self):
+        if self.widget and self.widget.destroy:
+            self.widget.destroy()

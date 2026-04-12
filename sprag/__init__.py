@@ -4,6 +4,7 @@ __version__ = "0.1.0"
 
 from .runtime import dom
 from .runtime.app import App
+from .runtime.assets import ModuleImport, Script, module, script
 from .runtime.content import ContentDocument, load_markdown_document, load_markdown_tree, slugify
 from .runtime.env import env, public_env
 from .runtime.mount import Mount, mount
@@ -61,9 +62,11 @@ from .runtime.browser import (
     Module,
     Screen,
     animate,
+    browser,
     debounce,
     hydrate,
     infinite_scroll,
+    imports,
     ref,
     ssr,
     throttle,
@@ -101,11 +104,17 @@ __all__ = [
     "StoreBridge",
     "declared_stores",
     "store",
+    "ModuleImport",
+    "Script",
+    "module",
+    "script",
     "slugify",
     # Client-side decorators (justified — see sprag/browser.py)
     "animate",
+    "browser",
     "debounce",
     "infinite_scroll",
+    "imports",
     "ref",
     "throttle",
     "virtual_scroll",
