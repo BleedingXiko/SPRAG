@@ -7,9 +7,12 @@ import gzip
 import json
 import mimetypes
 import os
+import re
 import sys
+import time
 import traceback
 from collections import OrderedDict
+from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
 from threading import Lock
 from urllib.parse import parse_qs, urlparse
@@ -469,6 +472,10 @@ class SpragWSGIApp:
 
         if file_path.is_file():
             content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+            cache_headers = _static_cache_headers(file_path, environ)
+            if cache_headers is None:
+                return self._respond(start_response, 304, "text/plain", b"",
+                                     extra_headers=[("Content-Length", "0")])
             # Serve pre-compressed .gz file if client accepts and it exists
             if _client_accepts_gzip(environ):
                 gz_path = file_path.with_name(file_path.name + ".gz")
@@ -479,16 +486,23 @@ class SpragWSGIApp:
                         extra_headers=[
                             ("Content-Encoding", "gzip"),
                             ("Vary", "Accept-Encoding"),
+                            *cache_headers,
                         ],
                     )
             body = file_path.read_bytes()
-            return self._respond(start_response, 200, content_type, body)
+            return self._respond(start_response, 200, content_type, body,
+                                 extra_headers=cache_headers)
 
         # Try index.html inside directory
         index = file_path / "index.html" if file_path.is_dir() else None
         if index and index.is_file():
+            cache_headers = _static_cache_headers(index, environ)
+            if cache_headers is None:
+                return self._respond(start_response, 304, "text/plain", b"",
+                                     extra_headers=[("Content-Length", "0")])
             body = index.read_bytes()
-            return self._respond(start_response, 200, "text/html; charset=utf-8", body)
+            return self._respond(start_response, 200, "text/html; charset=utf-8", body,
+                                 extra_headers=cache_headers)
 
         return self._respond(start_response, 404, "text/plain", b"Not Found")
 
@@ -666,6 +680,59 @@ def resolve_server_mode(app, override=None):
     if mode != "auto":
         return mode
     return "websocket" if app_uses_socket_bridge(app) else "wsgi"
+
+
+_HASHED_FILENAME_RE = re.compile(r'\.[0-9a-f]{8}\.\w+$')
+
+
+def _is_hashed_filename(name: str) -> bool:
+    return bool(_HASHED_FILENAME_RE.search(name))
+
+
+def _static_cache_headers(file_path: Path, environ: dict) -> list[tuple[str, str]] | None:
+    """Return cache headers for a static file, or ``None`` for a 304 response.
+
+    Content-hashed files get immutable caching.  HTML gets ``no-cache``
+    with an ETag for conditional revalidation.  Everything else gets a
+    short max-age with an ETag.
+
+    Returns ``None`` when the client's conditional headers (``If-None-Match``
+    or ``If-Modified-Since``) match — the caller should respond with 304.
+    """
+    stat = file_path.stat()
+    mtime = stat.st_mtime
+    last_modified = formatdate(mtime, usegmt=True)
+    etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    name = file_path.name
+
+    # Check conditional request headers for non-hashed files.
+    if not _is_hashed_filename(name):
+        if_none_match = environ.get("HTTP_IF_NONE_MATCH", "")
+        if if_none_match and etag in if_none_match:
+            return None
+        if_modified = environ.get("HTTP_IF_MODIFIED_SINCE", "")
+        if if_modified:
+            try:
+                client_mtime = parsedate_to_datetime(if_modified).timestamp()
+                if mtime <= client_mtime:
+                    return None
+            except (ValueError, TypeError):
+                pass
+
+    headers = [("Last-Modified", last_modified)]
+    if _is_hashed_filename(name):
+        headers.append(("Cache-Control", "public, max-age=31536000, immutable"))
+    elif name.endswith(".html"):
+        headers.extend([
+            ("Cache-Control", "no-cache"),
+            ("ETag", etag),
+        ])
+    else:
+        headers.extend([
+            ("Cache-Control", "public, max-age=60"),
+            ("ETag", etag),
+        ])
+    return headers
 
 
 def _client_accepts_gzip(environ) -> bool:

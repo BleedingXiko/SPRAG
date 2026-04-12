@@ -52,7 +52,7 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
             {
                 "app_target": app_target,
                 "app_package": app_package,
-                "app_project_root": str(app_project_root),
+                "app_project_root": ".",
                 "public_dir": "public",
                 "server_entry": "server.py",
                 "server_mode": server_mode,

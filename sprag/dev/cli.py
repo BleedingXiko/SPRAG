@@ -61,6 +61,7 @@ def _build_parser():
             sub.add_argument("--skip-minify", action="store_true", help="Skip CSS/JS minification")
             sub.add_argument("--skip-bytecode", action="store_true", help="Skip bytecode compilation")
             sub.add_argument("--skip-gzip", action="store_true", help="Skip pre-gzip compression")
+            sub.add_argument("--skip-fingerprint", action="store_true", help="Skip content-hash fingerprinting")
             sub.add_argument("--no-webp", action="store_true", help="Skip WebP variant generation")
             sub.add_argument("--no-srcset", action="store_true", help="Skip responsive image variants")
             sub.add_argument("--image-quality", type=int, default=80, help="Image compression quality (1-100)")
@@ -197,6 +198,7 @@ def cmd_pack(args):
         skip_minify=args.skip_minify,
         skip_bytecode=args.skip_bytecode,
         skip_gzip=args.skip_gzip,
+        skip_fingerprint=args.skip_fingerprint,
         generate_webp=not args.no_webp,
         generate_srcset=not args.no_srcset,
         image_quality=args.image_quality,

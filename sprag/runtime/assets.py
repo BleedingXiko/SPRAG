@@ -254,6 +254,24 @@ def render_css_links(assets: Iterable[Asset], *, document_path: str | None = Non
     return "\n".join(chunks)
 
 
+def render_preload_hints(
+    css_assets: Iterable[Asset] = (),
+    *,
+    script_path: str | None = None,
+    document_path: str | None = None,
+) -> str:
+    """Render ``<link rel="preload">`` / ``<link rel="modulepreload">`` hints."""
+    chunks = []
+    if script_path:
+        escaped = html.escape(script_path, quote=True)
+        chunks.append(f'<link rel="modulepreload" href="{escaped}">')
+    for asset in css_assets:
+        href = _relative_asset_href(document_path, asset.web_path)
+        escaped = html.escape(href, quote=True)
+        chunks.append(f'<link rel="preload" as="style" href="{escaped}">')
+    return "\n  ".join(chunks)
+
+
 def render_script_tags(assets: Iterable[Asset], *, document_path: str | None = None) -> str:
     chunks = []
     for asset in assets:

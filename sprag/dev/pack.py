@@ -16,8 +16,11 @@ Usage:
 from __future__ import annotations
 
 import gzip as gzip_mod
+import hashlib
+import json as json_mod
 import marshal
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -254,6 +257,80 @@ def _minify_js_fallback(js: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- FINGERPRINTING HELPERS ---
+
+_HASH_LENGTH = 8
+
+
+def _file_content_hash(path: Path) -> str:
+    """Return the first ``_HASH_LENGTH`` hex chars of the SHA-256 of file contents."""
+    h = hashlib.sha256(path.read_bytes())
+    return h.hexdigest()[:_HASH_LENGTH]
+
+
+def _hashed_filename(name: str, digest: str) -> str:
+    """Insert a content hash before the final extension.
+
+    ``app.js`` → ``app.a1b2c3d4.js``
+    ``ragot.esm.min.js`` → ``ragot.esm.min.a1b2c3d4.js``
+    """
+    dot = name.rfind(".")
+    if dot <= 0:
+        return f"{name}.{digest}"
+    return f"{name[:dot]}.{digest}{name[dot:]}"
+
+
+def _rewrite_js_imports(
+    content: str,
+    file_path: Path,
+    hash_map: Dict[str, str],
+    public_dir: Path,
+) -> str:
+    """Rewrite ``import ... from '...'`` paths in generated JS to use hashed filenames."""
+    file_dir = file_path.parent
+    for orig_rel, hashed_rel in hash_map.items():
+        orig_abs = public_dir / orig_rel
+        hashed_abs = public_dir / hashed_rel
+        # Compute the import path relative to this JS file's directory.
+        orig_import = "./" + posixpath.relpath(
+            orig_abs.as_posix(), file_dir.as_posix()
+        )
+        hashed_import = "./" + posixpath.relpath(
+            hashed_abs.as_posix(), file_dir.as_posix()
+        )
+        if orig_import != hashed_import:
+            content = content.replace(f"'{orig_import}'", f"'{hashed_import}'")
+    return content
+
+
+def _rewrite_html_refs(
+    content: str,
+    html_path: Path,
+    hash_map: Dict[str, str],
+    public_dir: Path,
+) -> str:
+    """Rewrite asset references in an HTML file to use hashed filenames.
+
+    Handles relative paths at any nesting depth (``app.js``, ``../app.js``,
+    ``../../app.js``, etc.) by computing the expected relative href from this
+    HTML file's directory for each hashed asset.
+    """
+    html_dir = html_path.parent
+    for orig_rel, hashed_rel in hash_map.items():
+        orig_abs = public_dir / orig_rel
+        hashed_abs = public_dir / hashed_rel
+        # The relative href as it would appear in this HTML document.
+        orig_href = posixpath.relpath(
+            orig_abs.as_posix(), html_dir.as_posix()
+        )
+        hashed_href = posixpath.relpath(
+            hashed_abs.as_posix(), html_dir.as_posix()
+        )
+        if orig_href != hashed_href:
+            content = content.replace(orig_href, hashed_href)
+    return content
+
+
 # --- BYTECODE SAFETY ---
 
 def _iter_code_filenames(code_obj: types.CodeType) -> Iterable[str]:
@@ -299,6 +376,7 @@ class SpragPack:
         skip_minify: bool = False,
         skip_bytecode: bool = False,
         skip_gzip: bool = False,
+        skip_fingerprint: bool = False,
     ):
         self.dist_dir = dist_dir.resolve()
         self.zip_output = zip_output
@@ -313,6 +391,7 @@ class SpragPack:
         self.skip_minify = skip_minify
         self.skip_bytecode = skip_bytecode
         self.skip_gzip = skip_gzip
+        self.skip_fingerprint = skip_fingerprint
 
         self.workers = os.cpu_count() or 4
         self.terser_bin = self._resolve_bin("terser")
@@ -332,6 +411,7 @@ class SpragPack:
             "orig_image_size": 0,
             "packed_image_size": 0,
             "gzip_saved": 0,
+            "fingerprinted": 0,
             "errors": [],
         }
 
@@ -371,10 +451,12 @@ class SpragPack:
             self._phase_minify()
         if not self.skip_images:
             self._phase_images()
-        if not self.skip_bytecode:
-            self._phase_bytecode()
+        if not self.skip_fingerprint:
+            self._phase_fingerprint()
         if not self.skip_gzip:
             self._phase_pregzip()
+        if not self.skip_bytecode:
+            self._phase_bytecode()
         self._phase_validate()
         if self.zip_output:
             self._phase_package()
@@ -593,6 +675,94 @@ class SpragPack:
             f"removed {self.stats['removed_py']} source files"
         )
 
+    def _phase_fingerprint(self):
+        """Content-hash rename JS/CSS assets for immutable caching.
+
+        Processes the generated import graph bottom-up so that parent
+        files reference already-hashed children before being hashed
+        themselves.  HTML documents are rewritten last.
+        """
+        self.phase("Fingerprinting Assets")
+        public_dir = self.dist_dir / "public"
+        if not public_dir.exists():
+            self.log("No public/ directory, skipping fingerprint")
+            return
+
+        # --- collect fingerprintable files by dependency level ---
+        # Level 0: leaf assets (vendor JS, component/module JS, static CSS/JS)
+        # Level 1: generated/stores.js, generated/index.js (import from level 0)
+        # Level 2: app.js (imports from generated/ and vendor/)
+        # Level 3: HTML files (reference app.js and static assets)
+
+        level_0: List[Path] = []
+        level_1: List[Path] = []
+        level_2: List[Path] = []
+
+        for p in sorted(public_dir.rglob("*")):
+            if not p.is_file():
+                continue
+            suffix = p.suffix.lower()
+            if suffix not in (".js", ".mjs", ".css"):
+                continue
+            rel = p.relative_to(public_dir)
+            rel_posix = rel.as_posix()
+
+            if rel_posix == "app.js":
+                level_2.append(p)
+            elif rel_posix in ("generated/index.js", "generated/stores.js"):
+                level_1.append(p)
+            elif rel_posix.startswith(("vendor/", "generated/components/", "generated/modules/",
+                                       "static/", "assets/")):
+                level_0.append(p)
+
+        all_targets = level_0 + level_1 + level_2
+        if not all_targets:
+            self.log("No JS/CSS files to fingerprint")
+            return
+
+        # hash_map: public-dir-relative posix path -> hashed posix path
+        hash_map: Dict[str, str] = {}
+
+        def _process_level(files: List[Path], rewrite_imports: bool):
+            for file_path in files:
+                rel = file_path.relative_to(public_dir).as_posix()
+                if rewrite_imports:
+                    content = file_path.read_text(encoding="utf-8")
+                    rewritten = _rewrite_js_imports(content, file_path, hash_map, public_dir)
+                    if rewritten != content:
+                        if not self.dry_run:
+                            file_path.write_text(rewritten, encoding="utf-8")
+                digest = _file_content_hash(file_path)
+                hashed_name = _hashed_filename(file_path.name, digest)
+                hashed_rel = str(Path(rel).parent / hashed_name) if "/" in rel else hashed_name
+                hashed_rel = hashed_rel.replace("\\", "/")
+                hash_map[rel] = hashed_rel
+                if not self.dry_run:
+                    file_path.rename(file_path.parent / hashed_name)
+                self.stats["fingerprinted"] += 1
+
+        _process_level(level_0, rewrite_imports=False)
+        _process_level(level_1, rewrite_imports=True)
+        _process_level(level_2, rewrite_imports=True)
+
+        # --- rewrite HTML references ---
+        html_files = sorted(public_dir.rglob("*.html"))
+        for html_path in html_files:
+            content = html_path.read_text(encoding="utf-8")
+            rewritten = _rewrite_html_refs(content, html_path, hash_map, public_dir)
+            if rewritten != content and not self.dry_run:
+                html_path.write_text(rewritten, encoding="utf-8")
+
+        # --- write asset manifest ---
+        if not self.dry_run:
+            manifest = {orig: hashed for orig, hashed in sorted(hash_map.items())}
+            manifest_path = public_dir / "asset-manifest.json"
+            manifest_path.write_text(
+                json_mod.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+            )
+
+        self.success(f"Fingerprinted {self.stats['fingerprinted']} files")
+
     def _phase_pregzip(self):
         self.phase("Pre-compressing Static Assets")
         public_dir = self.dist_dir / "public"
@@ -693,6 +863,8 @@ class SpragPack:
             print(f"Images optimized:   {self.stats['optimized_images']}")
             print(f"Variants generated: {self.stats['generated_variants']}")
             print(f"Image savings:      {CLR_GREEN}{img_saved:.1f} KB{CLR_RESET}")
+        if self.stats["fingerprinted"]:
+            print(f"Fingerprinted:      {self.stats['fingerprinted']}")
         if self.stats["compiled_py"]:
             print(f"Python compiled:    {self.stats['compiled_py']}")
             print(f"Sources removed:    {self.stats['removed_py']}")

@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 
 from .tree import render_tree
-from ..assets import render_css_links, render_script_tags, serialize_module_imports
+from ..assets import render_css_links, render_preload_hints, render_script_tags, serialize_module_imports
 from ..env import public_env
 from ..request import Request
 from ..routing import normalize_route_path
@@ -74,6 +74,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
         )
         shell_head = render_css_links(shell_assets.css)
         shell_scripts = render_script_tags(shell_assets.js)
+        preload_html = render_preload_hints(shell_assets.css, script_path=script_path)
 
         route_slug = page.name or _route_slug(page.path)
         route_actions = sorted(page.controller.sprag_actions().keys())
@@ -106,6 +107,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
             metadata=page_meta,
             head_html=shell_head,
             extra_script_html=shell_scripts,
+            preload_html=preload_html,
         )
 
         return PageResult(
@@ -163,6 +165,7 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
         )
         shell_head = render_css_links(shell_assets.css)
         shell_scripts = render_script_tags(shell_assets.js)
+        preload_html = render_preload_hints(shell_assets.css, script_path=script_path)
 
         document = build_mount_html(
             title=mount_meta.get("title") or mount.name or mount.path,
@@ -174,6 +177,7 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
             metadata=mount_meta,
             head_html=shell_head,
             extra_script_html=shell_scripts,
+            preload_html=preload_html,
         )
 
         return MountResult(html=document, data=data, data_error=data_error)
@@ -261,6 +265,7 @@ def build_document_html(
     metadata: dict | None = None,
     head_html: str = "",
     extra_script_html: str = "",
+    preload_html: str = "",
 ):
     """Build a full HTML document for a SPRAG page.
 
@@ -270,7 +275,7 @@ def build_document_html(
     same state the server just rendered against.
     """
     store_snap = store_snapshot or {}
-    head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
+    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata), head_html)
     escaped_title = html.escape(str(title))
     dev_reload = bool(route_info.get("dev_reload"))
     hot_reload_script_tag = ""
@@ -329,10 +334,11 @@ def build_mount_html(
     metadata: dict | None = None,
     head_html: str = "",
     extra_script_html: str = "",
+    preload_html: str = "",
 ):
     """Build the HTML boot document for a client app mount."""
     store_snap = store_snapshot or {}
-    head_bits = _join_head_html(_render_metadata_tags(metadata), head_html)
+    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata), head_html)
     escaped_title = html.escape(str(title))
     dev_reload = bool(mount_info.get("dev_reload"))
     hot_reload_script_tag = ""

@@ -19,6 +19,7 @@ from .codegen.mappings import JSCodegenError
 from ..runtime.assets import (
     AssetRegistry,
     render_css_links,
+    render_preload_hints,
     render_script_tags,
     resolve_project_root,
     serialize_module_imports,
@@ -121,6 +122,11 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             )
 
             script_path = _relative_web_path(page_dir, output_dir / "app.js")
+            preload_html = render_preload_hints(
+                shell_assets.css if redirect is None else (),
+                script_path=script_path if redirect is None else None,
+                document_path=actual_path,
+            )
             document_html = (
                 build_redirect_html(redirect.location)
                 if redirect is not None
@@ -152,6 +158,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     metadata=page_meta,
                     head_html=shell_head,
                     extra_script_html=shell_scripts,
+                    preload_html=preload_html,
                 )
             )
             (page_dir / "index.html").write_text(document_html, encoding="utf-8")
@@ -212,6 +219,11 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         )
 
         script_path = _relative_web_path(mount_dir, output_dir / "app.js")
+        preload_html = render_preload_hints(
+            shell_assets.css if redirect is None else (),
+            script_path=script_path if redirect is None else None,
+            document_path=mt.path,
+        )
         document_html = (
             build_redirect_html(redirect.location)
             if redirect is not None
@@ -243,6 +255,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 metadata=mount_meta,
                 head_html=shell_head,
                 extra_script_html=shell_scripts,
+                preload_html=preload_html,
             )
         )
         (mount_dir / "index.html").write_text(document_html, encoding="utf-8")
