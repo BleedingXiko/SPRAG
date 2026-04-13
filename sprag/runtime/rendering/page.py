@@ -50,9 +50,12 @@ class MountResult:
     status: int = 200
 
 
-def render_page(page, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> PageResult:
+def render_page(page, *, request: Request | None = None, app=None, script_path: str | None = None) -> PageResult:
     """Render a page through its controller and screen, returning full HTML."""
     request = request or Request(path=normalize_route_path(page.path), method="GET")
+    if script_path is None:
+        slug = request.path.strip("/").replace("/", "__") or "index"
+        script_path = f"/surfaces/route__{slug}.js"
     with _ensure_app_booted(app):
         data, data_error, redirect, status = load_controller_data(page, request=request, app=app)
         if redirect is not None:
@@ -135,8 +138,11 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
         )
 
 
-def render_mount(mount, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> MountResult:
+def render_mount(mount, *, request: Request | None = None, app=None, script_path: str | None = None) -> MountResult:
     """Render the boot document for a client app mount."""
+    if script_path is None:
+        slug = mount.path.strip("/").replace("/", "__") or "index"
+        script_path = f"/surfaces/mount__{slug}.js"
     with _ensure_app_booted(app):
         data, data_error, redirect, status = load_mount_data(mount, request=request, app=app)
         if redirect is not None:

@@ -321,11 +321,13 @@ class RealtimeTargetingTests(unittest.TestCase):
         finally:
             bridge.clear_registry()
 
-    def test_browser_entry_includes_topic_control_messages(self):
+    def test_browser_entry_is_a_thin_composition_layer(self):
         browser_entry = build_browser_entry({"routes": [], "mounts": [], "errors": []})
-        self.assertIn("type: 'topic'", browser_entry)
-        self.assertIn("encodeTopicMessage('join', topic)", browser_entry)
-        self.assertIn("encodeTopicMessage('leave', normalized)", browser_entry)
+        self.assertIn("import { startSurfaceBoot } from './runtime/boot.js';", browser_entry)
+        self.assertIn("import './generated/stores.js';", browser_entry)
+        self.assertIn("startSurfaceBoot({", browser_entry)
+        self.assertNotIn("encodeTopicMessage('join'", browser_entry)
+        self.assertNotIn("function createActionClient", browser_entry)
 
     def test_surface_socket_enabled_only_for_surfaces_that_use_socket_runtime(self):
         plain_page = page(

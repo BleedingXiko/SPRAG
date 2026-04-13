@@ -4,7 +4,9 @@ Every store declared here is one Python object that exists on both
 runtimes: on the server it backs a Specter ``Model`` (path-style nested
 state with selector memoization), and in the browser it compiles to a
 bridge wrapper around Ragot's ``createStateStore`` imported from the
-generated ``stores.js`` shim. The same Python ``set('user.name', value)``
+generated ``stores.js`` shim. ``store(...)`` is SPRAG's shared state
+bridge; raw Specter primitives remain available when you intentionally
+drop below the framework. The same Python ``set('user.name', value)``
 or ``patch({...})`` call works on either side.
 
 A SPRAG ``store`` is the **single** state primitive — same role

@@ -7,6 +7,8 @@ Stores declared here exist on both runtimes:
   ``createStateStore`` import from the generated ``stores.js`` shim
 
 A single ``store(...)`` declaration is enough — SPRAG handles the rest.
+Use ``store(...)`` for shared framework-managed state; reach for raw
+Specter primitives only when you intentionally want lower-level control.
 """
 
 from sprag import store

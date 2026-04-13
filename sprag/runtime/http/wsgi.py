@@ -49,6 +49,12 @@ from ..server import ActionDispatchError, bus, dispatch_controller_action
 SERVER_MODES = ("auto", "wsgi", "websocket")
 
 
+def _surface_entry_path(kind: str, surface_path: str) -> str:
+    """Return the web path to the per-surface JS entry file."""
+    slug = surface_path.strip("/").replace("/", "__") or "index"
+    return f"/surfaces/{kind}__{slug}.js"
+
+
 def _status_log_level(status_code):
     if status_code >= 500:
         return "error"
@@ -151,7 +157,8 @@ class SpragWSGIApp:
         ensure_request_id(request)
 
         try:
-            result = render_page(page, request=request, app=self._sprag_app)
+            script_path = _surface_entry_path("route", request.path)
+            result = render_page(page, request=request, app=self._sprag_app, script_path=script_path)
         except Exception:
             tb = traceback.format_exc()
             log_request_event(
@@ -237,7 +244,8 @@ class SpragWSGIApp:
         ensure_request_id(request)
 
         try:
-            result = render_mount(mount, request=request, app=self._sprag_app)
+            script_path = _surface_entry_path("mount", mount.path)
+            result = render_mount(mount, request=request, app=self._sprag_app, script_path=script_path)
         except Exception:
             tb = traceback.format_exc()
             log_request_event(

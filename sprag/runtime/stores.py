@@ -33,10 +33,11 @@ names. The translation table used by the codegen is identity for the
 bridge methods; only ``get_state -> getState`` is renamed to match Ragot's
 existing ``getState``.
 
-This is the **single** SPRAG state primitive. Use a store anywhere you'd
-reach for cross-Module reactive state with selector-based memoization —
-the same role ``createStateStore`` plays in Ragot Labs and the same role
-``appStore`` plays in GhostHub.
+This is the **single** SPRAG cross-runtime state primitive. ``store(...)``
+is a framework bridge backed by Specter ``Model`` on the server and the
+generated Ragot store shim in the browser. If an author intentionally
+wants to drop below SPRAG, the raw Specter ``Model`` / ``Store`` /
+``create_model`` / ``create_store`` exports remain the escape hatch.
 """
 
 from __future__ import annotations

@@ -307,6 +307,67 @@ def _rewrite_js_imports(
     return content
 
 
+_IMPORT_SPEC_RE = re.compile(
+    r"""(?:import\s+(?:[^'"]+?\s+from\s+)?|import\s*\()\s*['"]([^'"]+)['"]""",
+    re.M,
+)
+
+
+def _resolve_public_dependency(spec: str, file_rel: str, public_files: Set[str]) -> Optional[str]:
+    if not spec or not spec.startswith("."):
+        return None
+    normalized = posixpath.normpath(posixpath.join(posixpath.dirname(file_rel), spec))
+    candidates = [normalized]
+    if posixpath.splitext(normalized)[1] == "":
+        candidates.extend([
+            normalized + ".js",
+            normalized + ".mjs",
+            normalized + ".css",
+        ])
+    for candidate in candidates:
+        if candidate in public_files:
+            return candidate
+    return None
+
+
+def _toposort_public_assets(files: List[Path], public_dir: Path) -> List[Path]:
+    by_rel = {path.relative_to(public_dir).as_posix(): path for path in files}
+    dependencies: Dict[str, Set[str]] = {rel: set() for rel in by_rel}
+
+    for rel, path in by_rel.items():
+        if path.suffix.lower() not in (".js", ".mjs"):
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        for spec in _IMPORT_SPEC_RE.findall(content):
+            resolved = _resolve_public_dependency(spec, rel, set(by_rel))
+            if resolved and resolved != rel:
+                dependencies[rel].add(resolved)
+
+    ordered: List[str] = []
+    visiting: Set[str] = set()
+    visited: Set[str] = set()
+
+    def visit(rel: str):
+        if rel in visited:
+            return
+        if rel in visiting:
+            return
+        visiting.add(rel)
+        for dependency in sorted(dependencies.get(rel, ())):
+            visit(dependency)
+        visiting.remove(rel)
+        visited.add(rel)
+        ordered.append(rel)
+
+    for rel in sorted(by_rel):
+        visit(rel)
+
+    return [by_rel[rel] for rel in ordered]
+
+
 def _rewrite_html_refs(
     content: str,
     html_path: Path,
@@ -683,9 +744,9 @@ class SpragPack:
     def _phase_fingerprint(self):
         """Content-hash rename JS/CSS assets for immutable caching.
 
-        Processes the generated import graph bottom-up so that parent
-        files reference already-hashed children before being hashed
-        themselves.  HTML documents are rewritten last.
+        Processes the public JS import graph bottom-up so that parent files
+        reference already-hashed children before they themselves are hashed.
+        HTML documents are rewritten last.
         """
         self.phase("Fingerprinting Assets")
         public_dir = self.dist_dir / "public"
@@ -693,64 +754,33 @@ class SpragPack:
             self.log("No public/ directory, skipping fingerprint")
             return
 
-        # --- collect fingerprintable files by dependency level ---
-        # Level 0: leaf assets (vendor JS, component/module JS, static CSS/JS)
-        # Level 1: generated/stores.js, generated/index.js (import from level 0)
-        # Level 2: app.js (imports from generated/ and vendor/)
-        # Level 3: HTML files (reference app.js and static assets)
-
-        level_0: List[Path] = []
-        level_1: List[Path] = []
-        level_2: List[Path] = []
-
-        for p in sorted(public_dir.rglob("*")):
-            if not p.is_file():
-                continue
-            suffix = p.suffix.lower()
-            if suffix not in (".js", ".mjs", ".css"):
-                continue
-            rel = p.relative_to(public_dir)
-            rel_posix = rel.as_posix()
-
-            if rel_posix == "app.js":
-                level_2.append(p)
-            elif rel_posix in ("generated/index.js", "generated/stores.js"):
-                level_1.append(p)
-            elif rel_posix.startswith(("vendor/", "generated/components/", "generated/modules/",
-                                       "static/", "assets/")):
-                level_0.append(p)
-
-        all_targets = level_0 + level_1 + level_2
+        all_targets = [
+            p for p in sorted(public_dir.rglob("*"))
+            if p.is_file() and p.suffix.lower() in (".js", ".mjs", ".css")
+        ]
         if not all_targets:
             self.log("No JS/CSS files to fingerprint")
             return
 
-        # hash_map: public-dir-relative posix path -> hashed posix path
+        ordered_targets = _toposort_public_assets(all_targets, public_dir)
         hash_map: Dict[str, str] = {}
 
-        def _process_level(files: List[Path], rewrite_imports: bool):
-            for file_path in files:
-                rel = file_path.relative_to(public_dir).as_posix()
-                if rewrite_imports:
-                    content = file_path.read_text(encoding="utf-8")
-                    rewritten = _rewrite_js_imports(content, file_path, hash_map, public_dir)
-                    if rewritten != content:
-                        if not self.dry_run:
-                            file_path.write_text(rewritten, encoding="utf-8")
-                digest = _file_content_hash(file_path)
-                hashed_name = _hashed_filename(file_path.name, digest)
-                hashed_rel = str(Path(rel).parent / hashed_name) if "/" in rel else hashed_name
-                hashed_rel = hashed_rel.replace("\\", "/")
-                hash_map[rel] = hashed_rel
-                if not self.dry_run:
-                    file_path.rename(file_path.parent / hashed_name)
-                self.stats["fingerprinted"] += 1
+        for file_path in ordered_targets:
+            rel = file_path.relative_to(public_dir).as_posix()
+            if file_path.suffix.lower() in (".js", ".mjs"):
+                content = file_path.read_text(encoding="utf-8")
+                rewritten = _rewrite_js_imports(content, file_path, hash_map, public_dir)
+                if rewritten != content and not self.dry_run:
+                    file_path.write_text(rewritten, encoding="utf-8")
+            digest = _file_content_hash(file_path)
+            hashed_name = _hashed_filename(file_path.name, digest)
+            hashed_rel = str(Path(rel).parent / hashed_name) if "/" in rel else hashed_name
+            hashed_rel = hashed_rel.replace("\\", "/")
+            hash_map[rel] = hashed_rel
+            if not self.dry_run:
+                file_path.rename(file_path.parent / hashed_name)
+            self.stats["fingerprinted"] += 1
 
-        _process_level(level_0, rewrite_imports=False)
-        _process_level(level_1, rewrite_imports=True)
-        _process_level(level_2, rewrite_imports=True)
-
-        # --- rewrite HTML references ---
         html_files = sorted(public_dir.rglob("*.html"))
         for html_path in html_files:
             content = html_path.read_text(encoding="utf-8")
@@ -758,7 +788,6 @@ class SpragPack:
             if rewritten != content and not self.dry_run:
                 html_path.write_text(rewritten, encoding="utf-8")
 
-        # --- write asset manifest ---
         if not self.dry_run:
             manifest = {orig: hashed for orig, hashed in sorted(hash_map.items())}
             manifest_path = public_dir / "asset-manifest.json"

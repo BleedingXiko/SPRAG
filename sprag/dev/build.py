@@ -9,10 +9,12 @@ import shutil
 from pathlib import Path
 
 from .codegen import (
-    build_browser_entry,
     emit_generated_files,
+    emit_manifest_module,
     emit_ragot_runtime,
+    emit_surface_entries,
     emit_stores_shim,
+    surface_entry_filename,
 )
 from .codegen.dependencies import used_browser_class_refs, used_js_import_aliases
 from .codegen.mappings import JSCodegenError
@@ -129,7 +131,10 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 browser_classes=route_browser_classes,
             )
 
-            script_path = _relative_web_path(page_dir, output_dir / "app.js")
+            script_path = _relative_web_path(
+                page_dir,
+                output_dir / "surfaces" / surface_entry_filename("route", actual_path),
+            )
             preload_html = render_preload_hints(
                 shell_assets.css if redirect is None and status == 200 else (),
                 script_path=script_path if redirect is None and status == 200 else None,
@@ -234,7 +239,10 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             browser_classes=_mount_browser_classes(mt),
         )
 
-        script_path = _relative_web_path(mount_dir, output_dir / "app.js")
+        script_path = _relative_web_path(
+            mount_dir,
+            output_dir / "surfaces" / surface_entry_filename("mount", mt.path),
+        )
         preload_html = render_preload_hints(
             shell_assets.css if redirect is None else (),
             script_path=script_path if redirect is None else None,
@@ -314,9 +322,10 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         mount_entries=mount_manifest,
         route_entries=route_manifest,
     )
+    emit_manifest_module(output_dir, manifest)
     emit_stores_shim(output_dir, declared_stores())
     emit_ragot_runtime(output_dir, Path(__file__).resolve().parent.parent)
-    (output_dir / "app.js").write_text(build_browser_entry(manifest), encoding="utf-8")
+    emit_surface_entries(output_dir, manifest)
     if root_document:
         (output_dir / "index.html").write_text(root_document, encoding="utf-8")
     else:

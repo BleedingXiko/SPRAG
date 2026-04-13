@@ -208,7 +208,7 @@ class AssetContractTests(unittest.TestCase):
             self.assertIn('type="module" src="https://cdn.example.test/widget.mjs"', document)
             self.assertLess(
                 document.index('src="/static/vendor/widget.js"'),
-                document.index('src="/app.js"'),
+                document.index('src="/surfaces/mount__lab.js"'),
             )
             imports_document = render_mount(
                 mount(
@@ -248,28 +248,64 @@ class AssetContractTests(unittest.TestCase):
             self.assertEqual(component_payload["x_sprag"]["class"], "AssetRootComponent")
             self.assertEqual(component_payload["x_sprag"]["methods"][0]["name"], "render")
 
-    def test_browser_entry_waits_for_surface_module_imports_and_renders_boot_errors(self):
-        browser_entry = build_browser_entry(
-            {
-                "routes": [
-                    {
-                        "path": "/docs",
-                        "modules": {
-                            "dayjs": {"src": "/static/vendor/dayjs.mjs", "export": "default"}
-                        },
-                        "hydration": [],
-                    }
+    def test_build_web_preview_emits_thin_surface_entries_and_runtime_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            build_web_preview(
+                [
+                    (
+                        "app.routes.docs.page",
+                        page(
+                            path="/docs",
+                            controller=AssetController,
+                            screen=AssetScreen,
+                            mode="document",
+                            modules={
+                                "dayjs": module("/static/vendor/dayjs.mjs"),
+                            },
+                        ),
+                    )
                 ],
-                "mounts": [],
-                "errors": [],
-            }
-        )
-        self.assertIn("async function resolveSurfaceImports(currentSurface)", browser_entry)
-        self.assertIn("await import(src)", browser_entry)
-        self.assertIn("await resolveSurfaceImports(surface);", browser_entry)
-        self.assertIn("window.__SPRAG_IMPORTS__ = resolved;", browser_entry)
-        self.assertIn("window.__SPRAG_ACTION_ERROR_MESSAGE__ = actionErrorMessageSprag;", browser_entry)
-        self.assertIn("data-sprag-boot-error", browser_entry)
+                root / "dist",
+                app=DummyApp(root),
+                mounts=[],
+            )
+
+            entry_path = root / "dist" / "surfaces" / "route__docs.js"
+            hydration_path = root / "dist" / "runtime" / "hydration.js"
+            sockets_path = root / "dist" / "runtime" / "sockets.js"
+            manifest_module = root / "dist" / "generated" / "manifest.js"
+
+            self.assertTrue(entry_path.exists())
+            self.assertTrue(hydration_path.exists())
+            self.assertTrue(sockets_path.exists())
+            self.assertTrue(manifest_module.exists())
+
+            entry = entry_path.read_text(encoding="utf-8")
+            self.assertIn("import manifest from '../generated/manifest.js';", entry)
+            self.assertIn("import { startSurfaceBoot } from '../runtime/boot.js';", entry)
+            self.assertIn("surfaceRef:", entry)
+            self.assertNotIn("function createActionClient", entry)
+
+            hydration_runtime = hydration_path.read_text(encoding="utf-8")
+            self.assertIn("async function resolveSurfaceImports(currentSurface, resolveJSImportSrc)", hydration_runtime)
+            self.assertIn("await import(src)", hydration_runtime)
+            self.assertIn("window.__SPRAG_IMPORTS__ = resolved;", hydration_runtime)
+            self.assertIn("data-sprag-boot-error", hydration_runtime)
+
+            socket_runtime = sockets_path.read_text(encoding="utf-8")
+            self.assertIn("type: 'topic'", socket_runtime)
+            self.assertIn("encodeTopicMessage('join', topic)", socket_runtime)
+            self.assertIn("encodeTopicMessage('leave', normalized)", socket_runtime)
+
+    def test_browser_entry_stays_thin_when_built_directly(self):
+        browser_entry = build_browser_entry({"routes": [], "mounts": [], "errors": []})
+        self.assertIn("import { startSurfaceBoot } from './runtime/boot.js';", browser_entry)
+        self.assertIn("const manifest =", browser_entry)
+        self.assertIn("startSurfaceBoot({", browser_entry)
+        self.assertNotIn("async function resolveSurfaceImports", browser_entry)
+        self.assertNotIn("data-sprag-boot-error", browser_entry)
 
 
 if __name__ == "__main__":

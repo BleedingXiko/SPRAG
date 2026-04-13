@@ -175,9 +175,9 @@ class SpragSocketBridge:
     def ingress(self) -> SpragSocketIngress:
         return self._ingress
 
-    def provide_registry(self):
-        registry.provide("socket_ingress", self._ingress, owner=None, replace=True)
-        registry.provide("socket_transport", self, owner=None, replace=True)
+    def provide_registry(self, owner=None):
+        registry.provide("socket_ingress", self._ingress, owner=owner, replace=True)
+        registry.provide("socket_transport", self, owner=owner, replace=True)
 
     def clear_registry(self):
         for key in reversed(self.registry_keys):

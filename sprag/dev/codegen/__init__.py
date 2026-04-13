@@ -22,9 +22,13 @@ modules in the package are implementation details.
 
 from .emit import (
     build_browser_entry,
+    build_surface_entry,
     emit_generated_files,
+    emit_manifest_module,
     emit_ragot_runtime,
+    emit_surface_entries,
     emit_stores_shim,
+    surface_entry_filename,
 )
 from .components import compile_component_class
 from .modules import compile_module_class
@@ -32,9 +36,13 @@ from .mappings import JSCodegenError
 
 __all__ = [
     "build_browser_entry",
+    "build_surface_entry",
     "emit_generated_files",
+    "emit_manifest_module",
     "emit_ragot_runtime",
+    "emit_surface_entries",
     "emit_stores_shim",
+    "surface_entry_filename",
     "compile_component_class",
     "compile_module_class",
     "JSCodegenError",
