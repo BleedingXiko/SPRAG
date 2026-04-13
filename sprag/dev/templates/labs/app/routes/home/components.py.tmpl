@@ -114,11 +114,22 @@ class Landing(Component):
                     ui.h3("Form Demo →"),
                     ui.p(
                         "Native form DOM + form_data(...) snapshots + dirty "
-                        "state + autosave + publish redirect. The intended "
-                        "form workflow in one route."
+                        "state + inline action errors + autosave + publish "
+                        "redirect. The intended form workflow in one route."
                     ),
                     ui.span("hybrid · forms · redirect", class_="tag"),
                     href="/form-demo",
+                    class_="card",
+                ),
+                ui.a(
+                    ui.h3("Metadata Demo →"),
+                    ui.p(
+                        "A first-class set_metadata(...) contract for live "
+                        "document title, canonical, description, and OG "
+                        "updates without navigating."
+                    ),
+                    ui.span("hybrid · metadata · head", class_="tag"),
+                    href="/metadata-demo",
                     class_="card",
                 ),
                 ui.a(

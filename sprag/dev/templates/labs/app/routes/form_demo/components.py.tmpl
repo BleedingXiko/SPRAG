@@ -28,7 +28,9 @@ class FormDemoCard(Component):
             ui.p(
                 "Convention: let the DOM own the native form, snapshot it with "
                 "form_data(...), keep draft/errors/dirty state on the Module, "
-                "and use normal JSON actions for save + redirect flows."
+                "catch rejected actions in the Module, turn them into inline "
+                "state with action_error_message(...), and keep using normal "
+                "JSON actions for save + redirect flows."
             ),
             ui.div(
                 ui.span("Status"),

@@ -1,0 +1,106 @@
+from sprag import Component, ui
+
+
+class MetadataDemoCard(Component):
+    def render(self, props=None):
+        title = self.state.get("title", "")
+        description = self.state.get("description", "")
+        og_title = self.state.get("og_title", "")
+        canonical = self.state.get("canonical", "")
+        replace = bool(self.state.get("replace"))
+        return ui.div(
+            ui.h2("Metadata Demo"),
+            ui.p(
+                "Use set_metadata(...) from browser Python to update the "
+                "document title, description, canonical URL, and OG tags "
+                "without a navigation."
+            ),
+            ui.div(
+                ui.span("Mode"),
+                ui.strong("replace" if replace else "merge"),
+                class_="metric",
+            ),
+            ui.p(
+                "Open the tab title or inspect document.head while editing the "
+                "fields below. Reset restores the SSR payload; Clear canonical "
+                "removes that one managed tag.",
+                class_="status-line",
+            ),
+            ui.form(
+                ui.div(
+                    ui.span("Title", class_="field-label"),
+                    ui.input(
+                        type="text",
+                        name="title",
+                        value=title,
+                        class_="field-input",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Description", class_="field-label"),
+                    ui.textarea(
+                        description,
+                        name="description",
+                        rows="4",
+                        class_="field-input field-textarea",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("OG title", class_="field-label"),
+                    ui.input(
+                        type="text",
+                        name="og_title",
+                        value=og_title,
+                        class_="field-input",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Canonical URL", class_="field-label"),
+                    ui.input(
+                        type="url",
+                        name="canonical",
+                        value=canonical,
+                        placeholder="https://sprag.test/labs/metadata-demo",
+                        class_="field-input",
+                    ),
+                    class_="form-field",
+                ),
+                ui.label(
+                    ui.input(
+                        type="checkbox",
+                        name="replace",
+                        checked=replace,
+                    ),
+                    ui.span("Replace all SPRAG-managed metadata instead of merging updates."),
+                    class_="checkbox-field",
+                ),
+                ui.div(
+                    ui.button(
+                        "Reset SSR metadata",
+                        type="button",
+                        class_="btn btn-ghost btn-inline",
+                        data_role="reset-meta",
+                    ),
+                    ui.button(
+                        "Clear canonical",
+                        type="button",
+                        class_="btn btn-inline",
+                        data_role="clear-canonical",
+                    ),
+                    class_="form-actions",
+                ),
+                class_="sprag-form",
+                data_role="metadata-form",
+            ),
+            ui.div(
+                ui.h3("Current metadata state"),
+                ui.div("title: " + (title or "(removed)"), class_="form-snapshot"),
+                ui.div("description: " + (description or "(removed)"), class_="form-snapshot"),
+                ui.div("og:title: " + (og_title or "(removed)"), class_="form-snapshot"),
+                ui.div("canonical: " + (canonical or "(removed)"), class_="form-snapshot"),
+            ),
+            class_="demo-card form-demo-card",
+        )

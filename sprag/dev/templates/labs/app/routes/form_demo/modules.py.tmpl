@@ -145,12 +145,10 @@ class FormDemoModule(Module):
             self.autosave_draft()
 
     def on_action_error(self, error):
-        response = error.response
-        message = response["error"] if response else error.message
         self.set_state(
             {
                 "status": "error",
-                "saved_message": message,
+                "saved_message": self.action_error_message(error, "Save failed."),
             }
         )
 

@@ -305,8 +305,9 @@ def build_document_html(
     same state the server just rendered against.
     """
     store_snap = store_snapshot or {}
-    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata), head_html)
-    escaped_title = html.escape(str(title))
+    metadata_payload = _serializable_metadata(metadata, title=title)
+    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata_payload), head_html)
+    escaped_title = html.escape(str(metadata_payload.get("title") or title))
     dev_reload = bool(route_info.get("dev_reload"))
     hot_reload_script_tag = ""
     if dev_reload:
@@ -325,6 +326,7 @@ def build_document_html(
         "auth": _json_safe((route_data or {}).get("__sprag_auth__") if isinstance(route_data, dict) else None),
         "hydration": serializable_hydration(hydration),
         "stores": store_snap,
+        "metadata": _json_safe(metadata_payload),
         "env": public_env(),
     }
     if dev_reload:
@@ -369,8 +371,9 @@ def build_mount_html(
 ):
     """Build the HTML boot document for a client app mount."""
     store_snap = store_snapshot or {}
-    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata), head_html)
-    escaped_title = html.escape(str(title))
+    metadata_payload = _serializable_metadata(metadata, title=title)
+    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata_payload), head_html)
+    escaped_title = html.escape(str(metadata_payload.get("title") or title))
     dev_reload = bool(mount_info.get("dev_reload"))
     hot_reload_script_tag = ""
     if dev_reload:
@@ -391,6 +394,7 @@ def build_mount_html(
         "auth": _json_safe((boot_data or {}).get("__sprag_auth__") if isinstance(boot_data, dict) else None),
         "hydration": [],
         "stores": store_snap,
+        "metadata": _json_safe(metadata_payload),
         "env": public_env(),
     }
     if dev_reload:
@@ -512,6 +516,13 @@ def _build_hot_reload_restore_script(
             window.__SPRAG_PAYLOAD__.stores = cached.stores;
         }}
         if (
+            cached.metadata
+            && typeof cached.metadata === 'object'
+            && window.__SPRAG_PAYLOAD__
+        ) {{
+            window.__SPRAG_PAYLOAD__.metadata = cached.metadata;
+        }}
+        if (
             cached.surface_kind === 'route'
             && Array.isArray(cached.hydration)
             && window.__SPRAG_PAYLOAD__
@@ -604,12 +615,22 @@ def _render_metadata_tags(metadata) -> str:
         if not content:
             continue
         escaped_content = html.escape(content, quote=True)
-        if key == "canonical":
-            tags.append(f'<link rel="canonical" href="{escaped_content}">')
-            continue
         escaped_key = html.escape(str(key), quote=True)
+        if key == "canonical":
+            tags.append(
+                '<link rel="canonical" '
+                f'href="{escaped_content}" '
+                'data-sprag-head="true" '
+                f'data-sprag-head-key="{escaped_key}">'
+            )
+            continue
         attr = "property" if str(key).startswith("og:") else "name"
-        tags.append(f'<meta {attr}="{escaped_key}" content="{escaped_content}">')
+        tags.append(
+            f'<meta {attr}="{escaped_key}" '
+            f'content="{escaped_content}" '
+            'data-sprag-head="true" '
+            f'data-sprag-head-key="{escaped_key}">'
+        )
     return "\n  ".join(tags)
 
 
@@ -617,6 +638,22 @@ def _metadata_content(value) -> str:
     if isinstance(value, (list, tuple, set)):
         return ", ".join(str(item) for item in value if item is not None and item != "")
     return str(value)
+
+
+def _serializable_metadata(metadata, *, title: str | None = None) -> dict:
+    serializable = {}
+    if title is not None and title != "":
+        serializable["title"] = str(title)
+    if not isinstance(metadata, dict):
+        return serializable
+    for key, value in metadata.items():
+        if key == "title":
+            continue
+        content = _metadata_content(value)
+        if value is None or content == "":
+            continue
+        serializable[str(key)] = content
+    return serializable
 
 
 def _join_head_html(*chunks: str) -> str:

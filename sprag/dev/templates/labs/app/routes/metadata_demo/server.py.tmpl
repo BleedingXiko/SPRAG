@@ -1,0 +1,27 @@
+from sprag import Controller
+
+
+class MetadataDemoController(Controller):
+    route = "/metadata-demo"
+
+    def load(self):
+        initial = {
+            "title": "Metadata Demo — SPRAG Labs",
+            "description": (
+                "Browser-side head updates for title, description, canonical, "
+                "and Open Graph tags."
+            ),
+            "og_title": "Metadata Demo — SPRAG Labs",
+            "canonical": "https://sprag.test/labs/metadata-demo",
+        }
+        return {
+            **initial,
+            "initial": dict(initial),
+            "replace": False,
+            "__sprag_meta__": {
+                "title": initial["title"],
+                "description": initial["description"],
+                "og:title": initial["og_title"],
+                "canonical": initial["canonical"],
+            },
+        }

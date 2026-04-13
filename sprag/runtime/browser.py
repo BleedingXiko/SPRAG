@@ -421,6 +421,10 @@ class Module:
         """Call a server-side controller action; returns a Promise in JS."""
         _browser_only("Module.call_action")
 
+    def action_error_message(self, error, fallback=None):
+        """Resolve a user-facing message from a rejected action/upload error."""
+        _browser_only("Module.action_error_message")
+
     def form_data(self, source):
         """Read a form or form event into a plain JSON-safe dict."""
         _browser_only("Module.form_data")
@@ -432,6 +436,10 @@ class Module:
     def navigate(self, target, options=None):
         """Navigate the browser to another route or URL."""
         _browser_only("Module.navigate")
+
+    def set_metadata(self, metadata, options=None):
+        """Update the browser document title/meta/canonical tags."""
+        _browser_only("Module.set_metadata")
 
 
 @dataclass
@@ -525,11 +533,6 @@ class Component:
         """Take ownership of a child resource."""
         _browser_only("Component.adopt")
 
-    # -- Stores -------------------------------------------------------------
-    def subscribe(self, store, fn):
-        """Subscribe to a store."""
-        _browser_only("Component.subscribe")
-
     def create_selector(self, deps, fn):
         """Build a memoised derived value over store dependencies."""
         _browser_only("Component.create_selector")
@@ -542,9 +545,17 @@ class Component:
         """Submit a multipart form upload with progress; returns a Promise in JS."""
         _browser_only("Component.upload_form")
 
+    def action_error_message(self, error, fallback=None):
+        """Resolve a user-facing message from a rejected action/upload error."""
+        _browser_only("Component.action_error_message")
+
     def navigate(self, target, options=None):
         """Navigate the browser to another route or URL."""
         _browser_only("Component.navigate")
+
+    def set_metadata(self, metadata, options=None):
+        """Update the browser document title/meta/canonical tags."""
+        _browser_only("Component.set_metadata")
 
 
 @dataclass

@@ -1,0 +1,13 @@
+from sprag import Screen, hydrate
+
+from .components import MetadataDemoCard
+from .modules import MetadataDemoModule
+
+
+class MetadataDemoScreen(Screen):
+    modules = [MetadataDemoModule]
+
+    def render(self, data):
+        metadata_demo = self.module(MetadataDemoModule)
+        metadata_demo.set_state(data)
+        return hydrate(MetadataDemoCard, module=metadata_demo)

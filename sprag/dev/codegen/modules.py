@@ -358,6 +358,17 @@ def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
         return this.actions.call(name, payload);
     }}
 
+    actionErrorMessage(error, fallback = '') {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_ACTION_ERROR_MESSAGE__ : null;
+        if (typeof helper === 'function') {{
+            return helper(error, fallback);
+        }}
+        if (error && typeof error.message === 'string' && error.message.trim()) {{
+            return error.message.trim();
+        }}
+        return fallback || '[SPRAG] Action failed.';
+    }}
+
     formData(source) {{
         const helper = typeof window !== 'undefined' ? window.__SPRAG_FORM_DATA__ : null;
         if (typeof helper !== 'function') {{
@@ -380,6 +391,14 @@ def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
             throw new Error('[SPRAG] Browser navigator unavailable.');
         }}
         return navigator(target, options);
+    }}
+
+    setMetadata(metadata = {{}}, options = {{}}) {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_SET_METADATA__ : null;
+        if (typeof helper !== 'function') {{
+            throw new Error('[SPRAG] Metadata helper unavailable.');
+        }}
+        return helper(metadata, options);
     }}
 
 {methods_block}

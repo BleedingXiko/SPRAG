@@ -54,6 +54,7 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
         class_name=component_class.__name__,
         method_name="render",
         line_offset=render_start_line,
+        disallow_component_subscribe=True,
     )
 
     # Stores referenced in the source file (``from app.stores import counter``).
@@ -177,6 +178,7 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
                 class_name=component_class.__name__,
                 method_name=py_name,
                 line_offset=source_start_line,
+                disallow_component_subscribe=True,
             )
             try:
                 body = _compile_statements(
@@ -221,6 +223,7 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
             class_name=component_class.__name__,
             method_name=name,
             line_offset=source_start_line,
+            disallow_component_subscribe=True,
         )
         js_name = _map_name(name)
         is_async = isinstance(fn_ast, ast.AsyncFunctionDef)
@@ -248,9 +251,31 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
         on_start_prologue.append(f"        animateIn(this.element, {class_name});")
 
     # Mount-point setup (renderList/renderGrid for ui.For/ui.Grid; a single
-    # createLazyLoader install if any ui.LazyImage was used).
+    # createLazyLoader install if any ui.LazyImage was used). These need to
+    # run on initial mount *and* after any later component re-render so the
+    # placeholder nodes regain their client-side owners.
     mount_setup_lines, mount_imports = _emit_mount_setup(mounts, method_names=method_names)
-    on_start_prologue.extend(mount_setup_lines)
+    if mount_setup_lines:
+        extra_methods.extend(
+            [
+                "    __spragSyncMounts() {\n"
+                "        if (!this.element || !this._isMounted) {\n"
+                "            return;\n"
+                "        }\n"
+                + "\n".join(mount_setup_lines)
+                + "\n"
+                "    }",
+                "    setStateSync(next) {\n"
+                "        super.setStateSync(next);\n"
+                "        this.__spragSyncMounts();\n"
+                "    }",
+                "    _performUpdate() {\n"
+                "        super._performUpdate();\n"
+                "        this.__spragSyncMounts();\n"
+                "    }",
+            ]
+        )
+        on_start_prologue.append("        this.__spragSyncMounts();")
 
     # @virtual_scroll: instantiate the VirtualScroller against this.element.
     # The user's chunk()/total()/etc. methods are bound as the VS callbacks.
@@ -342,12 +367,31 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
         return helper.submit(name, source, onProgress);
     }}
 
+    actionErrorMessage(error, fallback = '') {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_ACTION_ERROR_MESSAGE__ : null;
+        if (typeof helper === 'function') {{
+            return helper(error, fallback);
+        }}
+        if (error && typeof error.message === 'string' && error.message.trim()) {{
+            return error.message.trim();
+        }}
+        return fallback || '[SPRAG] Action failed.';
+    }}
+
     navigate(target, options = {{}}) {{
         const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;
         if (typeof navigator !== 'function') {{
             throw new Error('[SPRAG] Browser navigator unavailable.');
         }}
         return navigator(target, options);
+    }}
+
+    setMetadata(metadata = {{}}, options = {{}}) {{
+        const helper = typeof window !== 'undefined' ? window.__SPRAG_SET_METADATA__ : null;
+        if (typeof helper !== 'function') {{
+            throw new Error('[SPRAG] Metadata helper unavailable.');
+        }}
+        return helper(metadata, options);
     }}
 
     render(propsOverride = null) {{
@@ -445,7 +489,15 @@ def _emit_mount_setup(mounts: list[dict], *, method_names) -> tuple[list[str], s
         # any [data-src] elements that the component renders, regardless of
         # how many ui.LazyImage calls produced them.
         imports.add("createLazyLoader")
-        lines.append("        this._sprLazy = createLazyLoader(this, { selector: '[data-src]' });")
+        lines.extend(
+            [
+                "        if (!this._sprLazy) {",
+                "            this._sprLazy = createLazyLoader(this, { selector: '[data-src]' });",
+                "        } else if (typeof this._sprLazy.refresh === 'function') {",
+                "            this._sprLazy.refresh();",
+                "        }",
+            ]
+        )
 
     return lines, imports
 

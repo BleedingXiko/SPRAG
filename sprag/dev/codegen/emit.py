@@ -388,6 +388,8 @@ function deriveBasePrefix(currentPathname, surfacePath) {{
 
 const spragBasePrefix = deriveBasePrefix(window.location.pathname, surface.path || '/');
 window.__SPRAG_BASE__ = spragBasePrefix || '';
+const spragBootTitle = (typeof document !== 'undefined' && document.title) || '';
+let spragMetadataState = {{}};
 
 function withSpragBase(path) {{
     const normalized = normalizePath(path || '/');
@@ -397,6 +399,151 @@ function withSpragBase(path) {{
     }}
     return normalized === '/' ? `${{prefix}}/` : `${{prefix}}${{normalized}}`;
 }}
+
+function metadataContent(value) {{
+    if (Array.isArray(value)) {{
+        return value
+            .filter((item) => item !== null && item !== undefined && item !== '')
+            .map((item) => String(item))
+            .join(', ');
+    }}
+    if (value === null || value === undefined) {{
+        return '';
+    }}
+    return String(value);
+}}
+
+function normalizeMetadataObject(input) {{
+    const next = {{}};
+    if (!input || typeof input !== 'object') {{
+        return next;
+    }}
+    for (const [rawKey, value] of Object.entries(input)) {{
+        const key = String(rawKey || '').trim();
+        if (!key) {{
+            continue;
+        }}
+        const content = metadataContent(value);
+        if (!content) {{
+            continue;
+        }}
+        next[key] = content;
+    }}
+    return next;
+}}
+
+function listManagedHeadElements() {{
+    if (typeof document === 'undefined' || !document.head) {{
+        return [];
+    }}
+    return Array.from(document.head.querySelectorAll('[data-sprag-head="true"]'));
+}}
+
+function managedHeadElementsForKey(key) {{
+    return listManagedHeadElements().filter((element) => element.getAttribute('data-sprag-head-key') === key);
+}}
+
+function ensureManagedHeadElement(key) {{
+    const matches = managedHeadElementsForKey(key);
+    const first = matches[0] || null;
+    for (const duplicate of matches.slice(1)) {{
+        duplicate.remove();
+    }}
+
+    let element = first;
+    if (key === 'canonical') {{
+        if (!element || element.tagName !== 'LINK') {{
+            if (element) {{
+                element.remove();
+            }}
+            element = document.createElement('link');
+            element.setAttribute('rel', 'canonical');
+            document.head.appendChild(element);
+        }}
+    }} else {{
+        if (!element || element.tagName !== 'META') {{
+            if (element) {{
+                element.remove();
+            }}
+            element = document.createElement('meta');
+            document.head.appendChild(element);
+        }}
+        const attr = key.startsWith('og:') ? 'property' : 'name';
+        const staleAttr = attr === 'property' ? 'name' : 'property';
+        element.removeAttribute(staleAttr);
+        element.setAttribute(attr, key);
+    }}
+
+    element.setAttribute('data-sprag-head', 'true');
+    element.setAttribute('data-sprag-head-key', key);
+    return element;
+}}
+
+function applyMetadataSprag(metadata) {{
+    const normalized = normalizeMetadataObject(metadata);
+    const nextKeys = new Set(Object.keys(normalized).filter((key) => key !== 'title'));
+    for (const element of listManagedHeadElements()) {{
+        const key = element.getAttribute('data-sprag-head-key') || '';
+        if (!nextKeys.has(key)) {{
+            element.remove();
+        }}
+    }}
+
+    for (const [key, content] of Object.entries(normalized)) {{
+        if (key === 'title') {{
+            continue;
+        }}
+        const element = ensureManagedHeadElement(key);
+        if (key === 'canonical') {{
+            element.setAttribute('href', content);
+        }} else {{
+            element.setAttribute('content', content);
+        }}
+    }}
+
+    if (typeof document !== 'undefined') {{
+        const resolvedTitle = normalized.title || spragBootTitle || surface.name || surface.path || document.title || '';
+        if (resolvedTitle) {{
+            document.title = resolvedTitle;
+        }}
+    }}
+
+    spragMetadataState = normalized;
+    window.__SPRAG_METADATA_STATE__ = {{ ...spragMetadataState }};
+    if (window.__SPRAG_PAYLOAD__) {{
+        window.__SPRAG_PAYLOAD__.metadata = {{ ...spragMetadataState }};
+    }}
+    return spragMetadataState;
+}}
+
+function setMetadataSprag(metadata = {{}}, options = {{}}) {{
+    const replace = typeof options === 'boolean'
+        ? options
+        : Boolean(options && options.replace);
+    const input = metadata && typeof metadata === 'object' ? metadata : {{}};
+    const next = replace ? {{}} : {{ ...spragMetadataState }};
+    for (const [rawKey, value] of Object.entries(input)) {{
+        const key = String(rawKey || '').trim();
+        if (!key) {{
+            continue;
+        }}
+        if (value === null || value === undefined || value === '') {{
+            delete next[key];
+            continue;
+        }}
+        const content = metadataContent(value);
+        if (!content) {{
+            delete next[key];
+            continue;
+        }}
+        next[key] = content;
+    }}
+    return applyMetadataSprag(next);
+}}
+
+spragMetadataState = normalizeMetadataObject(payload.metadata || {{}});
+window.__SPRAG_METADATA_STATE__ = {{ ...spragMetadataState }};
+window.__SPRAG_SET_METADATA__ = setMetadataSprag;
 
 const spragInternalPathMap = new Map([['/', '/']]);
 for (const entry of [...(manifest.routes || []), ...(manifest.mounts || [])]) {{
@@ -646,6 +793,30 @@ function createActionClient(currentRoute) {{
 
 const actionClient = createActionClient(route);
 window.__SPRAG_ACTIONS__ = actionClient;
+
+function actionErrorMessageSprag(error, fallback = '') {{
+    const response = error && error.response && typeof error.response === 'object'
+        ? error.response
+        : null;
+    const responseMessage = response && typeof response.error === 'string'
+        ? response.error.trim()
+        : '';
+    if (responseMessage) {{
+        return responseMessage;
+    }}
+    const directMessage = error && typeof error.message === 'string'
+        ? error.message.trim()
+        : '';
+    if (directMessage) {{
+        return directMessage;
+    }}
+    const fallbackMessage = fallback === null || fallback === undefined
+        ? ''
+        : String(fallback).trim();
+    return fallbackMessage || '[SPRAG] Action failed.';
+}}
+
+window.__SPRAG_ACTION_ERROR_MESSAGE__ = actionErrorMessageSprag;
 
 function uploadProgressPayload(event) {{
     const loaded = Number((event && event.loaded) || 0);
@@ -1137,6 +1308,10 @@ function persistDevReloadState(eventPayload) {{
         surface_fingerprint: surfaceFingerprint,
         surface_kind: mount ? 'mount' : 'route',
         stores: currentStoreSnapshots(),
+        metadata: cloneSerializable(
+            window.__SPRAG_METADATA_STATE__ || windowPayload.metadata || {{}},
+            {{}},
+        ),
     }};
     if (mount) {{
         cache.boot_data = currentMountBootData();
@@ -1392,6 +1567,7 @@ function connectSocketBridge(surface) {{
 async function boot() {{
     if (spragBooted) return;
     try {{
+        applyMetadataSprag(payload.metadata || spragMetadataState);
         rewriteInternalLinks();
         registerDevReloadListener();
         await resolveSurfaceImports(surface);

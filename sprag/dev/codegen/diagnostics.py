@@ -36,7 +36,17 @@ def lint_browser_method(
     class_name,
     method_name,
     line_offset=0,
+    disallow_component_subscribe=False,
 ):
+    if disallow_component_subscribe:
+        _lint_disallowed_component_calls(
+            function_def,
+            source=source,
+            source_file=source_file,
+            class_name=class_name,
+            method_name=method_name,
+            line_offset=line_offset,
+        )
     for stmt in function_def.body:
         _lint_stmt(
             stmt,
@@ -45,6 +55,39 @@ def lint_browser_method(
             class_name=class_name,
             method_name=method_name,
             line_offset=line_offset,
+        )
+
+
+def _lint_disallowed_component_calls(
+    function_def,
+    *,
+    source,
+    source_file,
+    class_name,
+    method_name,
+    line_offset,
+):
+    for node in ast.walk(function_def):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if not isinstance(node.func.value, ast.Name) or node.func.value.id != "self":
+            continue
+        if node.func.attr != "subscribe":
+            continue
+        _raise(
+            "Component.subscribe(...) is not part of SPRAG's browser contract.",
+            node,
+            source=source,
+            source_file=source_file,
+            class_name=class_name,
+            method_name=method_name,
+            line_offset=line_offset,
+            suggestion=(
+                "Subscribe in a Module, then pass the derived state into the Component "
+                "through props or component state."
+            ),
         )
 
 

@@ -242,6 +242,7 @@ class AssetContractTests(unittest.TestCase):
         self.assertIn("await import(src)", browser_entry)
         self.assertIn("await resolveSurfaceImports(surface);", browser_entry)
         self.assertIn("window.__SPRAG_IMPORTS__ = resolved;", browser_entry)
+        self.assertIn("window.__SPRAG_ACTION_ERROR_MESSAGE__ = actionErrorMessageSprag;", browser_entry)
         self.assertIn("data-sprag-boot-error", browser_entry)
 
 

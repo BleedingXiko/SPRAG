@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import MetadataDemoController
+from .web import MetadataDemoScreen
+
+
+metadata_demo = page(
+    path="/metadata-demo",
+    controller=MetadataDemoController,
+    screen=MetadataDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Metadata Demo — SPRAG Labs"},
+)

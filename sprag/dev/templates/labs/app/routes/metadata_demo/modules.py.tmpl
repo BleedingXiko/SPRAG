@@ -1,0 +1,60 @@
+from sprag import Module
+
+
+class MetadataDemoModule(Module):
+    def on_start(self):
+        self.delegate(self.element, "input", "[data-role='metadata-form']", self.on_form_change)
+        self.delegate(self.element, "change", "[data-role='metadata-form']", self.on_form_change)
+        self.delegate(self.element, "click", "[data-role='reset-meta']", self.on_reset_click)
+        self.delegate(
+            self.element,
+            "click",
+            "[data-role='clear-canonical']",
+            self.on_clear_canonical,
+        )
+        self.sync_metadata(True)
+
+    def on_form_change(self, event):
+        snapshot = self.form_data(event)
+        replace = bool(snapshot.get("replace"))
+        self.set_state(
+            {
+                "title": snapshot.get("title", ""),
+                "description": snapshot.get("description", ""),
+                "og_title": snapshot.get("og_title", ""),
+                "canonical": snapshot.get("canonical", ""),
+                "replace": replace,
+            }
+        )
+        self.sync_metadata(replace)
+
+    def on_reset_click(self, event):
+        event.prevent_default()
+        initial = self.state.get("initial", {})
+        self.set_state(
+            {
+                "title": initial.get("title", ""),
+                "description": initial.get("description", ""),
+                "og_title": initial.get("og_title", ""),
+                "canonical": initial.get("canonical", ""),
+                "replace": False,
+            }
+        )
+        self.sync_metadata(True)
+
+    def on_clear_canonical(self, event):
+        event.prevent_default()
+        replace = bool(self.state.get("replace"))
+        self.set_state({"canonical": ""})
+        self.sync_metadata(replace)
+
+    def sync_metadata(self, replace=False):
+        self.set_metadata(
+            {
+                "title": self.state.get("title", ""),
+                "description": self.state.get("description", ""),
+                "og:title": self.state.get("og_title", ""),
+                "canonical": self.state.get("canonical", ""),
+            },
+            {"replace": replace},
+        )
