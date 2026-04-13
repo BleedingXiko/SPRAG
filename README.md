@@ -598,9 +598,3 @@ SPRAG sits on two runtimes:
 - **Ragot** in the browser — components, modules, DOM ownership, stores, hydration, virtual scrolling, animation, and teardown
 
 SPRAG makes them feel like one framework. `set_state`, `listen`, `emit`, `subscribe`, `timeout`, `interval`, and `adopt` follow the same mental model on both sides.
-
----
-
-## License
-
-MIT
