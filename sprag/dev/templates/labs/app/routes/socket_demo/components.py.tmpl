@@ -11,8 +11,9 @@ class SocketCard(Component):
             ui.h2("Socket Demo"),
             ui.p(
                 "A shared runtime websocket client powers Module.on_socket(...) "
-                "and Module.emit_socket(...). The controller owns ingress via "
-                "build_events(handler) and can emit back out with emit_socket(...)."
+                "and Module.emit_socket(...). The framework now also blesses "
+                "signal-then-refetch via Module.refetch_on_socket(...) and "
+                "Controller.emit_socket_refetch(...)."
             ),
             ui.div(
                 ui.div(
@@ -31,7 +32,7 @@ class SocketCard(Component):
             ui.div(
                 ui.button("Send socket ping", type="button", class_="btn", data_role="socket-ping"),
                 ui.button(
-                    "Server broadcast",
+                    "Signal refetch",
                     type="button",
                     class_="btn btn-ghost",
                     data_role="server-broadcast",

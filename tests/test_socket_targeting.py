@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from sprag import Component, Controller, Module, Schema, Screen, action, mount, page
+from sprag import Component, Controller, Module, Schema, Screen, action, mount, page, socket_target
 from sprag.dev.codegen import build_browser_entry
 from sprag.runtime.http.wsgi import SpragWSGIApp
 from sprag.runtime.socket_bridge import SpragSocketBridge, surface_socket_enabled
@@ -243,6 +243,59 @@ class RealtimeTargetingTests(unittest.TestCase):
             topic="upload:alpha",
         )
         self.assertEqual(ws1.sent, [])
+
+    def test_emit_socket_accepts_reusable_target_mapping(self):
+        bridge = SpragSocketBridge(SimpleNamespace())
+        ws1 = FakeWebSocket("SPRAG_SID=session-a")
+        ws2 = FakeWebSocket("SPRAG_SID=session-b")
+        conn1 = bridge.connect(ws1)
+        conn2 = bridge.connect(ws2)
+
+        for connection, ws in ((conn1, ws1), (conn2, ws2)):
+            bridge.handle_message(connection, json.dumps({"type": "hello", "route": "/realtime"}))
+            ws.sent.clear()
+
+        delivered = bridge.emit(
+            "lab:event",
+            {"scope": "target"},
+            target=socket_target(route="/realtime", session_id="session-a"),
+        )
+        self.assertTrue(delivered)
+        self.assertEqual([message["payload"]["scope"] for message in ws1.sent], ["target"])
+        self.assertEqual(ws2.sent, [])
+
+    def test_controller_emit_socket_refetch_uses_blessed_envelope(self):
+        bridge = SpragSocketBridge(SimpleNamespace())
+        bridge.provide_registry()
+        ws1 = FakeWebSocket("SPRAG_SID=session-a")
+        ws2 = FakeWebSocket("SPRAG_SID=session-b")
+        conn1 = bridge.connect(ws1)
+        conn2 = bridge.connect(ws2)
+        controller = RealtimeController()
+        try:
+            for connection, ws in ((conn1, ws1), (conn2, ws2)):
+                bridge.handle_message(connection, json.dumps({"type": "hello", "route": "/realtime"}))
+                ws.sent.clear()
+
+            delivered = controller.emit_socket_refetch(
+                "session",
+                {"origin": "test"},
+                target=socket_target(route="/realtime", session_id="session-a"),
+            )
+            self.assertTrue(delivered)
+            self.assertEqual(
+                ws1.sent,
+                [
+                    {
+                        "event": "sprag:refetch",
+                        "payload": {"action": "session", "payload": {"origin": "test"}},
+                        "type": "event",
+                    }
+                ],
+            )
+            self.assertEqual(ws2.sent, [])
+        finally:
+            bridge.clear_registry()
 
     def test_socket_ingress_request_exposes_session_id(self):
         bridge = SpragSocketBridge(SimpleNamespace())

@@ -408,6 +408,10 @@ class Module:
         """Emit a websocket event through SPRAG's shared runtime socket."""
         _browser_only("Module.emit_socket")
 
+    def refetch_on_socket(self, event="sprag:refetch", action=None, on_result=None, on_error=None):
+        """Subscribe to a socket event and refetch authoritative action state."""
+        _browser_only("Module.refetch_on_socket")
+
     def join_topic(self, topic):
         """Join a named socket topic on the shared runtime socket."""
         _browser_only("Module.join_topic")

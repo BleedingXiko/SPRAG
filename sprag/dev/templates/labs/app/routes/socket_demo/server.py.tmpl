@@ -1,4 +1,4 @@
-from sprag import Controller, Schema, action
+from sprag import Controller, Schema, action, socket_target
 
 
 class SocketDemoController(Controller):
@@ -27,16 +27,27 @@ class SocketDemoController(Controller):
             route=self.route,
         )
 
+    @action(schema=Schema("snapshot", {}))
+    def snapshot(self):
+        return {
+            "message": "Controller returned authoritative state through an action refetch.",
+            "session_id": self.request.session_id,
+        }
+
     @action(schema=Schema("broadcast", {}))
     def broadcast(self):
-        delivered = self.emit_socket(
-            "lab:socket.server",
-            {
-                "message": "Controller pushed a route-scoped websocket broadcast.",
-            },
-            route=self.route,
+        delivered = self.emit_socket_refetch(
+            "snapshot",
+            target=socket_target(
+                route=self.route,
+                session_id=self.request.session_id,
+            ),
         )
         return {
-            "message": "Broadcast sent over shared websocket transport." if delivered else "No live websocket client connected yet.",
+            "message": (
+                "Session-targeted socket refetch signal sent."
+                if delivered
+                else "No live websocket client connected yet."
+            ),
             "delivered": delivered,
         }

@@ -23,7 +23,7 @@ class SocketDemoModule(Module):
             self.on_server_broadcast,
         )
         self.on_socket("lab:socket.pong", self.on_pong)
-        self.on_socket("lab:socket.server", self.on_server_message)
+        self.refetch_on_socket("sprag:refetch", None, self.on_refetch_result, self.on_refetch_error)
         self.listen("sprag:socket:open", self.on_runtime_open)
         self.listen("sprag:socket:ready", self.on_runtime_ready)
         self.listen("sprag:socket:close", self.on_runtime_close)
@@ -68,9 +68,13 @@ class SocketDemoModule(Module):
         self.set_state({"connected": True, "status": payload["message"]})
         self.record_message("pong", payload["message"])
 
-    def on_server_message(self, payload):
-        self.set_state({"connected": True, "status": payload["message"]})
-        self.record_message("broadcast", payload["message"])
+    def on_refetch_result(self, result, payload=None):
+        message = result.value["message"]
+        self.set_state({"connected": True, "status": message})
+        self.record_message("refetch", message)
+
+    def on_refetch_error(self, error, payload=None):
+        self.set_state({"status": self.action_error_message(error, "Socket refetch failed.")})
 
     def record_message(self, kind, text):
         self.set_state(

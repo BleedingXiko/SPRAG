@@ -15,6 +15,7 @@ from .runtime.shell import Shell, shell
 from .runtime.server import (
     Redirect,
     redirect,
+    socket_target,
     action,
     requires_auth,
     # Core (already exposed)
@@ -95,6 +96,7 @@ __all__ = [
     "load_markdown_tree",
     "page",
     "redirect",
+    "socket_target",
     "requires_auth",
     "env",
     "public_env",

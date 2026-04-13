@@ -287,12 +287,23 @@ class SpragSocketBridge:
             self._ingress.dispatch_default_error_message(exc, connection=connection)
             self._send_error(connection, f"{exc.__class__.__name__}: {exc}")
 
-    def emit(self, event_name, payload=None, *, route=None, client_id=None, session_id=None, topic=None):
+    def emit(
+        self,
+        event_name,
+        payload=None,
+        *,
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ):
         """Emit a server event to connected SPRAG websocket clients."""
         if not isinstance(event_name, str) or not event_name.strip():
             raise TypeError("socket_transport.emit(event_name, ...) requires a non-empty string.")
 
         target = self._resolve_target(
+            target=target,
             route=route,
             client_id=client_id,
             session_id=session_id,
@@ -321,7 +332,15 @@ class SpragSocketBridge:
                 logger.debug("[SPRAG] failed closing websocket %s", connection.id, exc_info=True)
         self._ingress.clear()
 
-    def _resolve_target(self, *, route=None, client_id=None, session_id=None, topic=None) -> SocketTarget:
+    def _resolve_target(
+        self,
+        *,
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ) -> SocketTarget:
         def _clean(value):
             if value is None:
                 return None
@@ -329,6 +348,14 @@ class SpragSocketBridge:
                 raise TypeError("socket target filters must be strings when provided.")
             value = value.strip()
             return value or None
+
+        if target is not None:
+            if not isinstance(target, dict):
+                raise TypeError("socket target must be a dict returned by socket_target(...).")
+            route = target.get("route") if route is None else route
+            client_id = target.get("client_id") if client_id is None else client_id
+            session_id = target.get("session_id") if session_id is None else session_id
+            topic = target.get("topic") if topic is None else topic
 
         return SocketTarget(
             route=_clean(route),

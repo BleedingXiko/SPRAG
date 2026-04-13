@@ -36,6 +36,14 @@ class TopicHelpersModule(Module):
         self.leave_topic("room:alpha")
 
 
+class RefetchHelpersModule(Module):
+    def on_start(self):
+        self.refetch_on_socket("sprag:refetch", "status", self.on_status)
+
+    def on_status(self, result, payload=None):
+        self.set_state({"status": result.value["message"]})
+
+
 class BrowserNamespaceModule(Module):
     def on_start(self):
         Chart = browser.Chart
@@ -136,6 +144,11 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("leaveTopic(topic)", compiled)
         self.assertIn('this.joinTopic("room:alpha")', compiled)
         self.assertIn('this.leaveTopic("room:alpha")', compiled)
+
+    def test_compile_module_supports_refetch_helpers(self):
+        compiled = compile_module_class(RefetchHelpersModule)
+        self.assertIn("refetchOnSocket(event = 'sprag:refetch'", compiled)
+        self.assertIn('this.refetchOnSocket("sprag:refetch", "status", this.onStatus.bind(this));', compiled)
 
     def test_compile_module_lowers_browser_namespace(self):
         compiled = compile_module_class(BrowserNamespaceModule)

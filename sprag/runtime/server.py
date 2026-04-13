@@ -198,6 +198,16 @@ def _server_only(name):
     )
 
 
+def socket_target(*, route=None, client_id=None, session_id=None, topic=None):
+    """Return a reusable socket-target mapping for targeted emits/refetches."""
+    return {
+        "route": route,
+        "client_id": client_id,
+        "session_id": session_id,
+        "topic": topic,
+    }
+
+
 class Service(SPECTERService):
     """SPRAG Service — Specter ``Service`` plus the cross-runtime bridge.
 
@@ -295,7 +305,17 @@ class Service(SPECTERService):
     def off_socket(self, *args, **kwargs):
         _server_only("Service.off_socket")
 
-    def emit_socket(self, event, data=None, *, route=None, client_id=None, session_id=None, topic=None):
+    def emit_socket(
+        self,
+        event,
+        data=None,
+        *,
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ):
         """Emit a websocket event to connected browser clients.
 
         Controllers default to their declared ``route`` when no explicit
@@ -311,11 +331,40 @@ class Service(SPECTERService):
             transport.emit(
                 event,
                 data,
+                target=target,
                 route=route,
                 client_id=client_id,
                 session_id=session_id,
                 topic=topic,
             )
+        )
+
+    def emit_socket_refetch(
+        self,
+        action,
+        payload=None,
+        *,
+        event="sprag:refetch",
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ):
+        """Emit the socket signal that tells the browser to refetch an action."""
+        if not isinstance(action, str) or not action.strip():
+            raise TypeError("emit_socket_refetch(action, ...) requires a non-empty action name.")
+        return self.emit_socket(
+            event,
+            {
+                "action": action.strip(),
+                "payload": dict(payload or {}),
+            },
+            target=target,
+            route=route,
+            client_id=client_id,
+            session_id=session_id,
+            topic=topic,
         )
 
     def call_action(self, *args, **kwargs):
@@ -364,7 +413,17 @@ class QueueService(SPECTERQueueService):
         )
         self.job_history_limit = max(1, int(job_history_limit or 24))
 
-    def emit_socket(self, event, data=None, *, route=None, client_id=None, session_id=None, topic=None):
+    def emit_socket(
+        self,
+        event,
+        data=None,
+        *,
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ):
         """Emit a websocket event to connected browser clients."""
         transport = registry.resolve("socket_transport")
         if transport is None:
@@ -373,11 +432,40 @@ class QueueService(SPECTERQueueService):
             transport.emit(
                 event,
                 data,
+                target=target,
                 route=route,
                 client_id=client_id,
                 session_id=session_id,
                 topic=topic,
             )
+        )
+
+    def emit_socket_refetch(
+        self,
+        action,
+        payload=None,
+        *,
+        event="sprag:refetch",
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ):
+        """Emit the socket signal that tells the browser to refetch an action."""
+        if not isinstance(action, str) or not action.strip():
+            raise TypeError("emit_socket_refetch(action, ...) requires a non-empty action name.")
+        return self.emit_socket(
+            event,
+            {
+                "action": action.strip(),
+                "payload": dict(payload or {}),
+            },
+            target=target,
+            route=route,
+            client_id=client_id,
+            session_id=session_id,
+            topic=topic,
         )
 
     def enqueue_job(
@@ -847,7 +935,17 @@ class Controller(SPECTERController):
         self._sprag_app = app
         return self
 
-    def emit_socket(self, event, data=None, *, route=None, client_id=None, session_id=None, topic=None):
+    def emit_socket(
+        self,
+        event,
+        data=None,
+        *,
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ):
         """Emit a websocket event to connected browser clients."""
         transport = registry.resolve("socket_transport")
         if transport is None:
@@ -858,11 +956,42 @@ class Controller(SPECTERController):
             transport.emit(
                 event,
                 data,
+                target=target,
                 route=route,
                 client_id=client_id,
                 session_id=session_id,
                 topic=topic,
             )
+        )
+
+    def emit_socket_refetch(
+        self,
+        action,
+        payload=None,
+        *,
+        event="sprag:refetch",
+        target=None,
+        route=None,
+        client_id=None,
+        session_id=None,
+        topic=None,
+    ):
+        """Emit the socket signal that tells the browser to refetch an action."""
+        if route is None:
+            route = getattr(self, "route", None)
+        if not isinstance(action, str) or not action.strip():
+            raise TypeError("emit_socket_refetch(action, ...) requires a non-empty action name.")
+        return self.emit_socket(
+            event,
+            {
+                "action": action.strip(),
+                "payload": dict(payload or {}),
+            },
+            target=target,
+            route=route,
+            client_id=client_id,
+            session_id=session_id,
+            topic=topic,
         )
 
     @classmethod

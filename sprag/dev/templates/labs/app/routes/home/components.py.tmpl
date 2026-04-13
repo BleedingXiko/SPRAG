@@ -178,9 +178,9 @@ class Landing(Component):
                 ui.a(
                     ui.h3("Socket Demo →"),
                     ui.p(
-                        "Shared websocket runtime: Module.on_socket(...) "
-                        "and emit_socket(...) on the browser, build_events(handler) "
-                        "and emit_socket(...) on the controller."
+                        "Shared websocket runtime: Module.on_socket(...), "
+                        "Module.refetch_on_socket(...), build_events(handler), "
+                        "and Controller.emit_socket_refetch(...)."
                     ),
                     ui.span("hybrid · SocketIngress", class_="tag"),
                     href="/socket-demo",
