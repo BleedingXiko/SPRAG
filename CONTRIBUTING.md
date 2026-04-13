@@ -30,7 +30,6 @@ Use these checks before opening a PR:
 
 ```bash
 .venv/bin/python -m sprag --version
-.venv/bin/python -X pycache_prefix=/tmp/sprag-pyc -m compileall sprag
 .venv/bin/python -m sprag.dev.cli new sprag_contrib_check --output-dir .sandbox
 cd .sandbox/sprag_contrib_check
 ../../.venv/bin/python -m sprag build
@@ -46,4 +45,3 @@ If you touch packaging, also verify the build metadata and distribution contents
 - mention the validation you ran
 - call out any intentional follow-up work you left for later
 
-If you are unsure where a change belongs, start from `HANDOFF.md` for repo/process work and `PLAN.md` for broader framework direction.

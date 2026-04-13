@@ -33,9 +33,9 @@ class UploadedFile:
         return destination
 
 
-@dataclass(frozen=True)
+@dataclass
 class Request:
-    """Immutable snapshot of an incoming HTTP request."""
+    """Request snapshot plus per-request runtime session/auth state."""
 
     path: str
     params: dict = field(default_factory=dict)
@@ -44,6 +44,9 @@ class Request:
     method: str = "GET"
     body: bytes = b""
     session_id: str | None = None
+    cookies: dict = field(default_factory=dict)
+    session: object | None = None
+    user: object = None
     content_type: str | None = None
     form: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)

@@ -1,0 +1,83 @@
+import json
+
+from sprag import Component, ui
+
+
+def pretty_auth(snapshot):
+    return json.dumps(snapshot or {}, indent=2, sort_keys=True)
+
+
+class LoginCard(Component):
+    def render(self, props=None):
+        auth_snapshot = self.state.get("__sprag_auth__") or {}
+        client_auth = self.state.get("client_auth")
+        return ui.div(
+            ui.h2(self.state.get("title", "Reference Login")),
+            ui.p(
+                "Provider-agnostic core auth, with a Labs-only username/password "
+                "adapter proving the full server-session vertical slice."
+            ),
+            ui.p(self.state.get("hint", ""), class_="status-line"),
+            ui.p(self.state.get("error", ""), class_="status-line error-line"),
+            ui.form(
+                ui.input(
+                    type="hidden",
+                    name="next",
+                    value=self.state.get("next", "/auth-demo/protected"),
+                ),
+                ui.div(
+                    ui.span("Username", class_="field-label"),
+                    ui.input(
+                        type="text",
+                        name="username",
+                        value="ada",
+                        class_="field-input",
+                        autocomplete="username",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.span("Password", class_="field-label"),
+                    ui.input(
+                        type="password",
+                        name="password",
+                        value="analytical-engine",
+                        class_="field-input",
+                        autocomplete="current-password",
+                    ),
+                    class_="form-field",
+                ),
+                ui.div(
+                    ui.button(
+                        "Sign in",
+                        type="submit",
+                        class_="btn btn-inline",
+                    ),
+                    ui.a(
+                        "Jump straight to the protected route",
+                        href="/auth-demo/protected",
+                        class_="btn btn-ghost btn-inline",
+                    ),
+                    class_="form-actions",
+                ),
+                class_="sprag-form",
+                data_role="login-form",
+            ),
+            ui.div(
+                ui.h3("SSR `__sprag_auth__`"),
+                ui.div(
+                    pretty_auth(auth_snapshot),
+                    class_="form-snapshot",
+                    style="white-space: pre-wrap; font-family: monospace;",
+                ),
+            ),
+            ui.div(
+                ui.h3("window.__SPRAG_PAYLOAD__.auth"),
+                ui.div(
+                    pretty_auth(client_auth),
+                    class_="form-snapshot",
+                    style="white-space: pre-wrap; font-family: monospace;",
+                ),
+            ),
+            class_="demo-card form-demo-card",
+        )

@@ -1,0 +1,84 @@
+from hashlib import sha256
+
+
+def _hash_password(value):
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _demo_user(user_id, username, password, name, title):
+    return {
+        "id": user_id,
+        "username": username,
+        "password_hash": _hash_password(password),
+        "name": name,
+        "title": title,
+    }
+
+
+class LabsAuthService:
+    name = "auth"
+
+    def __init__(self):
+        self._users_by_username = {
+            "ada": _demo_user(
+                "user_ada",
+                "ada",
+                "analytical-engine",
+                "Ada Lovelace",
+                "Computing Pioneer",
+            ),
+            "grace": _demo_user(
+                "user_grace",
+                "grace",
+                "compiler",
+                "Grace Hopper",
+                "Compiler Admiral",
+            ),
+        }
+        self._users_by_id = {
+            user["id"]: dict(user) for user in self._users_by_username.values()
+        }
+
+    def authenticate(self, username, password):
+        candidate = self._users_by_username.get(str(username or "").strip().lower())
+        if candidate is None:
+            return None
+        if candidate["password_hash"] != _hash_password(str(password or "")):
+            return None
+        return dict(candidate)
+
+    def viewer_for(self, user):
+        if not user:
+            return None
+        return {
+            "id": user["id"],
+            "username": user["username"],
+            "name": user["name"],
+            "title": user["title"],
+        }
+
+    def load_user(self, session, request):
+        user_id = session.get("auth_user_id")
+        if not user_id:
+            return None
+        user = self._users_by_id.get(str(user_id))
+        return dict(user) if user is not None else None
+
+    def public_snapshot(self, user, session, request):
+        viewer = session.get("viewer")
+        if not isinstance(viewer, dict):
+            viewer = self.viewer_for(user)
+        return {"viewer": viewer}
+
+    def login_session(self, user, session, request, extra_session=None):
+        session.patch(
+            {
+                "auth_user_id": user["id"],
+                "auth_username": user["username"],
+            }
+        )
+        if extra_session:
+            session.patch(dict(extra_session))
+
+
+auth_service = LabsAuthService()

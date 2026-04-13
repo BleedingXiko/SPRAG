@@ -1,0 +1,46 @@
+from sprag import Controller, Field, Schema, action
+
+
+DEFAULT_NEXT = "/auth-demo/protected"
+
+
+def safe_next(value):
+    candidate = str(value or "").strip()
+    if candidate.startswith("/") and not candidate.startswith("//"):
+        return candidate
+    return DEFAULT_NEXT
+
+
+class LoginController(Controller):
+    route = "/login"
+
+    def load(self):
+        return {
+            "title": "Reference Login",
+            "next": safe_next(self.request.query.get("next")),
+            "error": "",
+            "hint": "Demo credentials: ada / analytical-engine or grace / compiler.",
+        }
+
+    @action(
+        name="login",
+        schema=Schema(
+            "login",
+            {
+                "username": Field(str, required=True),
+                "password": Field(str, required=True),
+                "next": Field(str, required=False, default=DEFAULT_NEXT),
+            },
+        ),
+    )
+    def submit_login(self, username, password, next=DEFAULT_NEXT):
+        auth = self.service("auth")
+        user = auth.authenticate(username, password)
+        if user is None:
+            return {
+                "authenticated": False,
+                "error": "Invalid credentials. Try ada / analytical-engine.",
+                "next": safe_next(next),
+            }
+        self.login(user, viewer=auth.viewer_for(user))
+        return self.redirect(safe_next(next), status=303)

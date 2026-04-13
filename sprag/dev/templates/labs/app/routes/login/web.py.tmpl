@@ -1,0 +1,13 @@
+from sprag import Screen, hydrate
+
+from .components import LoginCard
+from .modules import LoginModule
+
+
+class LoginScreen(Screen):
+    modules = [LoginModule]
+
+    def render(self, data):
+        login = self.module(LoginModule)
+        login.set_state(data)
+        return hydrate(LoginCard, module=login)

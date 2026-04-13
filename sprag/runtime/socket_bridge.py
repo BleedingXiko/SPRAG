@@ -19,7 +19,7 @@ from specter import Controller as SpecterController
 from specter import SocketIngress, registry
 
 from .request import Request
-from .session import resolve_session_id
+from .session import commit_request_session, hydrate_request, resolve_session_id
 from .server import controller_context
 
 logger = logging.getLogger(__name__)
@@ -108,15 +108,20 @@ class SpragSocketIngress(SocketIngress):
             headers["X-SPRAG-Socket-Id"] = connection.id
             headers["X-SPRAG-Session-Id"] = connection.session_id
 
-        request = Request(
+        request = hydrate_request(Request(
             path=route,
             headers=headers,
             method="SOCKET",
             body=json.dumps(message, sort_keys=True).encode("utf-8"),
             session_id=getattr(connection, "session_id", None),
-        )
-        with controller_context(request=request, app=self._sprag_app):
-            return super().dispatch(event_name.strip(), message.get("payload"))
+        ), app=self._sprag_app)
+        try:
+            with controller_context(request=request, app=self._sprag_app):
+                return super().dispatch(event_name.strip(), message.get("payload"))
+        finally:
+            commit_request_session(request, app=self._sprag_app, allow_cookie_write=False)
+            if connection is not None:
+                connection.session_id = request.session_id
 
     def dispatch_default_error_message(self, exc: Exception, *, connection=None):
         route = getattr(connection, "route", None) or "/"
@@ -124,12 +129,12 @@ class SpragSocketIngress(SocketIngress):
         if connection is not None:
             headers["X-SPRAG-Socket-Id"] = connection.id
             headers["X-SPRAG-Session-Id"] = connection.session_id
-        request = Request(
+        request = hydrate_request(Request(
             path=route,
             headers=headers,
             method="SOCKET",
             session_id=getattr(connection, "session_id", None),
-        )
+        ), app=self._sprag_app)
         with controller_context(request=request, app=self._sprag_app):
             return super().dispatch_default_error(exc)
 

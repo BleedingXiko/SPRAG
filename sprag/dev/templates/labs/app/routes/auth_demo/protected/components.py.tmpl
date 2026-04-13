@@ -1,0 +1,59 @@
+import json
+
+from sprag import Component, ui
+
+
+def pretty_auth(snapshot):
+    return json.dumps(snapshot or {}, indent=2, sort_keys=True)
+
+
+class ProtectedAuthCard(Component):
+    def render(self, props=None):
+        auth_snapshot = self.state.get("__sprag_auth__") or {}
+        client_auth = self.state.get("client_auth")
+        return ui.div(
+            ui.h2(self.state.get("title", "Protected Route")),
+            ui.p(self.state.get("message", "")),
+            ui.div(
+                ui.span("Viewer"),
+                ui.strong(self.state.get("viewer_name", "unknown")),
+                class_="metric",
+            ),
+            ui.div(
+                ui.span("Status"),
+                ui.strong(self.state.get("status", "ready")),
+                class_="metric",
+            ),
+            ui.div(
+                ui.button(
+                    "Refetch `request.user`",
+                    type="button",
+                    class_="btn btn-inline",
+                    data_role="whoami",
+                ),
+                ui.button(
+                    "Logout",
+                    type="button",
+                    class_="btn btn-ghost btn-inline",
+                    data_role="logout",
+                ),
+                class_="form-actions",
+            ),
+            ui.div(
+                ui.h3("SSR `__sprag_auth__`"),
+                ui.div(
+                    pretty_auth(auth_snapshot),
+                    class_="form-snapshot",
+                    style="white-space: pre-wrap; font-family: monospace;",
+                ),
+            ),
+            ui.div(
+                ui.h3("window.__SPRAG_PAYLOAD__.auth"),
+                ui.div(
+                    pretty_auth(client_auth),
+                    class_="form-snapshot",
+                    style="white-space: pre-wrap; font-family: monospace;",
+                ),
+            ),
+            class_="demo-card form-demo-card",
+        )

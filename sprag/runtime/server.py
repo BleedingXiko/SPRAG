@@ -9,6 +9,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from specter import Controller as SPECTERController
 from specter import Field, Outcome, Schema
@@ -39,6 +40,7 @@ from specter import ManagedProcess, Watcher, WatcherError, start_process
 from specter import ServiceManager, boot
 
 from .routing import match_page_route
+from .session import hydrate_request, resolve_auth_service
 
 
 _UNSET = object()
@@ -110,6 +112,32 @@ def action(fn=None, *, schema=None, name=None):
 
     if fn is not None:
         return decorator(fn)
+    return decorator
+
+
+@dataclass(frozen=True)
+class _AuthRequirement:
+    redirect_to: str = "/login"
+    next_param: str = "next"
+
+
+def requires_auth(target=None, *, redirect_to="/login", next_param="next"):
+    """Guard a controller class, ``load()``, or ``@action`` with auth."""
+
+    requirement = _AuthRequirement(
+        redirect_to=str(redirect_to or "/login"),
+        next_param=str(next_param or "next"),
+    )
+
+    def decorator(subject):
+        if inspect.isclass(subject):
+            subject._sprag_auth_requirement = requirement
+            return subject
+        subject._sprag_auth_requirement = requirement
+        return subject
+
+    if target is not None:
+        return decorator(target)
     return decorator
 
 
@@ -790,6 +818,30 @@ class Controller(SPECTERController):
         """Return a first-class redirect response from ``load()`` or an action."""
         return redirect(location, status=status, replace=replace)
 
+    def login(self, user, *, viewer=None, extra_session=None):
+        """Rotate the session id and persist auth state through the auth provider."""
+        request = hydrate_request(self.request, app=self.app)
+        auth = resolve_auth_service(self.app)
+        request.session.rotate()
+        session_payload = dict(extra_session or {})
+        if viewer is not None and "viewer" not in session_payload:
+            session_payload["viewer"] = viewer
+        auth.login_session(
+            user,
+            request.session,
+            request,
+            extra_session=session_payload or None,
+        )
+        request.user = user
+        return user
+
+    def logout(self):
+        """Invalidate the current session and drop the resolved request user."""
+        request = hydrate_request(self.request, app=self.app)
+        request.session.invalidate()
+        request.user = None
+        return None
+
 
 class ActionDispatchError(RuntimeError):
     """Structured action-dispatch failure for SPRAG bridge responses."""
@@ -806,6 +858,7 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
     if not action_name:
         raise ActionDispatchError("Missing SPRAG action name.", status_code=400)
 
+    request = hydrate_request(request, app=app)
     controller = _resolve_surface_controller(pages, mounts or [], route_path, app=app)
     controller_class = controller.__class__
     actions = controller_class.sprag_actions()
@@ -816,7 +869,9 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
             status_code=404,
         )
 
-    bound_action = getattr(controller, action_name)
+    bound_action = getattr(controller, action.__name__)
+    with controller_context(request=request, app=app):
+        authorize_controller_method(controller, action.__name__)
 
     meta = getattr(action, "_sprag_action_meta", None) or {}
     schema = meta.get("schema")
@@ -866,6 +921,52 @@ def _resolve_surface_controller(pages, mounts, route_path, *, app=None):
                 return app.controller_for_mount(mount)
             return mount.boot()
     raise ActionDispatchError(f"Unknown route {route_path!r}.", status_code=404)
+
+
+def authorize_controller_method(controller, method_name):
+    """Raise a redirect or 401 when a guarded method lacks an authenticated user."""
+    requirement = _controller_auth_requirement(controller, method_name)
+    if requirement is None:
+        return
+    request = hydrate_request(controller.request, app=controller.app)
+    if getattr(request, "user", None) is not None:
+        return
+    if getattr(request, "method", "GET") in {"GET", "BUILD"} and method_name == "load":
+        raise redirect(_auth_redirect_location(requirement, request))
+    raise ActionDispatchError("Authentication required.", status_code=401)
+
+
+def _controller_auth_requirement(controller, method_name):
+    controller_class = controller.__class__
+    method = getattr(controller_class, method_name, None)
+    requirement = getattr(method, "_sprag_auth_requirement", None)
+    if requirement is not None:
+        return requirement
+    class_requirement = getattr(controller_class, "_sprag_auth_requirement", None)
+    if class_requirement is None:
+        return None
+    if method_name == "load" or method_name in {
+        value.__name__ for value in controller_class.sprag_actions().values()
+    }:
+        return class_requirement
+    return None
+
+
+def _auth_redirect_location(requirement, request):
+    target = _request_location(request)
+    parts = urlsplit(requirement.redirect_to or "/login")
+    query = list(parse_qsl(parts.query, keep_blank_values=True))
+    query.append((requirement.next_param or "next", target))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/login", urlencode(query), parts.fragment))
+
+
+def _request_location(request):
+    path = getattr(request, "path", None) or "/"
+    query = getattr(request, "query", None) or {}
+    if not query:
+        return path
+    encoded = urlencode(query, doseq=True)
+    return f"{path}?{encoded}"
 
 
 def _resolve_route_page(pages, route_path):

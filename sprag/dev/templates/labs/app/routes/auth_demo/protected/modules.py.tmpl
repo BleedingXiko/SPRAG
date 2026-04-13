@@ -1,0 +1,47 @@
+from sprag import Module, browser
+
+
+class ProtectedAuthModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "title": "Protected Route",
+                "message": "",
+                "viewer_name": "",
+                "__sprag_auth__": {},
+                "client_auth": None,
+                "status": "ready",
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='logout']", self.on_logout)
+        self.delegate(self.element, "click", "[data-role='whoami']", self.on_whoami)
+        payload = browser.window.__SPRAG_PAYLOAD__ or {}
+        self.set_state({"client_auth": payload.auth or None})
+
+    def on_logout(self, event):
+        event.prevent_default()
+        self.set_state({"status": "Signing out..."})
+        self.call_action("logout", {}).catch(self.on_error)
+
+    def on_whoami(self, event):
+        event.prevent_default()
+        self.call_action("whoami", {"label": "client refresh"}).then(self.on_whoami_result).catch(
+            self.on_error
+        )
+
+    def on_whoami_result(self, result):
+        data = result.value or {}
+        self.set_state(
+            {
+                "status": data.get("label", "refreshed"),
+                "viewer_name": data.get("viewer_name", self.state.get("viewer_name")),
+            }
+        )
+
+    def on_error(self, error):
+        response = error.response
+        self.set_state({"status": response["error"] if response else error.message})

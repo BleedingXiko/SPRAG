@@ -18,8 +18,9 @@ from ..assets import render_css_links, render_preload_hints, render_script_tags,
 from ..env import public_env
 from ..request import Request
 from ..routing import normalize_route_path
+from ..session import hydrate_request, inject_auth_data
 from ..socket_bridge import surface_socket_enabled
-from ..server import Redirect, controller_context
+from ..server import Redirect, authorize_controller_method, controller_context
 from ..shell import apply_shell, resolve_effective_surface_modules
 from ..stores import declared_stores, store_fingerprint
 
@@ -200,16 +201,18 @@ def load_controller_data(
     page, *, request: Request | None = None, app=None
 ) -> tuple[dict, str | None, Redirect | None]:
     """Load route data through the lifecycle-owned page controller."""
+    request = hydrate_request(request, app=app)
     if app is not None and hasattr(app, "controller_for_page"):
         controller = app.controller_for_page(page)
     else:
         controller = page.controller()
     try:
         with controller_context(request=request, app=app):
+            authorize_controller_method(controller, "load")
             data = controller.load()
         if isinstance(data, Redirect):
             return {}, None, data
-        return (data if isinstance(data, dict) else {"value": data}), None, None
+        return inject_auth_data(data, request, app=app), None, None
     except Redirect as exc:
         return {}, None, exc
     except Exception as exc:
@@ -221,17 +224,19 @@ def load_mount_data(
 ) -> tuple[dict, str | None, Redirect | None]:
     """Load boot data through the lifecycle-owned mount controller."""
     if mount.boot is None:
-        return {}, None, None
+        return inject_auth_data({}, request, app=app), None, None
+    request = hydrate_request(request, app=app)
     if app is not None and hasattr(app, "controller_for_mount"):
         controller = app.controller_for_mount(mount)
     else:
         controller = mount.boot()
     try:
         with controller_context(request=request, app=app):
+            authorize_controller_method(controller, "load")
             data = controller.load()
         if isinstance(data, Redirect):
             return {}, None, data
-        return (data if isinstance(data, dict) else {"value": data}), None, None
+        return inject_auth_data(data, request, app=app), None, None
     except Redirect as exc:
         return {}, None, exc
     except Exception as exc:
@@ -292,6 +297,7 @@ def build_document_html(
     payload = {
         "page": route_info,
         "routeData": _json_safe(route_data),
+        "auth": _json_safe((route_data or {}).get("__sprag_auth__") if isinstance(route_data, dict) else None),
         "hydration": serializable_hydration(hydration),
         "stores": store_snap,
         "env": public_env(),
@@ -357,6 +363,7 @@ def build_mount_html(
         "page": mount_info,
         "boot": _json_safe(boot_data),
         "routeData": _json_safe(boot_data),
+        "auth": _json_safe((boot_data or {}).get("__sprag_auth__") if isinstance(boot_data, dict) else None),
         "hydration": [],
         "stores": store_snap,
         "env": public_env(),

@@ -1,0 +1,56 @@
+from sprag import Module, browser
+
+
+class LoginModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "title": "Reference Login",
+                "next": "/auth-demo/protected",
+                "error": "",
+                "hint": "",
+                "__sprag_auth__": {},
+                "client_auth": None,
+                "submitting": False,
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "submit", "[data-role='login-form']", self.on_submit)
+        payload = browser.window.__SPRAG_PAYLOAD__ or {}
+        self.set_state({"client_auth": payload.auth or None})
+
+    def on_submit(self, event):
+        event.prevent_default()
+        snapshot = self.form_data(event)
+        self.set_state(
+            {
+                "error": "",
+                "submitting": True,
+            }
+        )
+        self.call_action("login", snapshot).then(self.on_login_result).catch(self.on_login_error)
+
+    def on_login_result(self, result):
+        data = result.value or {}
+        if data.get("authenticated") is False:
+            self.set_state(
+                {
+                    "error": data.get("error", "Login failed."),
+                    "submitting": False,
+                    "next": data.get("next", self.state.get("next")),
+                }
+            )
+            return
+        self.set_state({"submitting": False})
+
+    def on_login_error(self, error):
+        response = error.response
+        self.set_state(
+            {
+                "error": response["error"] if response else error.message,
+                "submitting": False,
+            }
+        )

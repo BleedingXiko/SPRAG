@@ -1,0 +1,32 @@
+from sprag import Controller, Field, Schema, action, requires_auth
+
+
+@requires_auth()
+class ProtectedAuthController(Controller):
+    route = "/auth-demo/protected"
+
+    def load(self):
+        viewer = (self.request.user or {}).get("name", "unknown viewer")
+        return {
+            "title": "Protected Route",
+            "message": (
+                "Anonymous requests redirect on SSR. Authenticated requests land "
+                "here with request.user resolved on the server."
+            ),
+            "viewer_name": viewer,
+        }
+
+    @action(name="logout", schema=Schema("logout", {}))
+    def end_session(self):
+        self.logout()
+        return self.redirect("/login", status=303)
+
+    @action(
+        name="whoami",
+        schema=Schema("whoami", {"label": Field(str, required=False, default="refreshed")}),
+    )
+    def whoami(self, label="refreshed"):
+        return {
+            "label": label,
+            "viewer_name": (self.request.user or {}).get("name", "unknown viewer"),
+        }

@@ -42,7 +42,7 @@ _gzip_cache_lock = Lock()
 from ..request import Request, UploadedFile
 from ..routing import match_page_route, normalize_route_path
 from ..rendering import render_mount, render_page
-from ..session import resolve_session_id, session_cookie_header
+from ..session import commit_request_session, hydrate_request
 from ..socket_bridge import controller_uses_socket_bridge
 from ..server import ActionDispatchError, bus, dispatch_controller_action
 
@@ -98,16 +98,13 @@ class SpragWSGIApp:
         parsed_qs = environ.get("QUERY_STRING", "")
         query = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed_qs).items()}
         headers = self._extract_headers(environ)
-        session_id, session_cookie = self._resolve_session(environ)
-
-        request = Request(
+        request = hydrate_request(Request(
             path=normalize_route_path(parsed_path),
             params=matched_page.params,
             query=query,
             headers=headers,
             method="GET",
-            session_id=session_id,
-        )
+        ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
 
         try:
             result = render_page(page, request=request, app=self._sprag_app)
@@ -124,7 +121,7 @@ class SpragWSGIApp:
                 500,
                 "text/html; charset=utf-8",
                 body,
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         if result.render_error:
@@ -136,7 +133,7 @@ class SpragWSGIApp:
                 start_response,
                 result.redirect.location,
                 status=result.redirect.status,
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         body = result.html.encode("utf-8")
@@ -146,7 +143,7 @@ class SpragWSGIApp:
             200,
             "text/html; charset=utf-8",
             body,
-            extra_headers=session_cookie,
+            extra_headers=self._session_headers(request),
         )
 
     # -- Mount rendering ----------------------------------------------------
@@ -156,15 +153,12 @@ class SpragWSGIApp:
         parsed_qs = environ.get("QUERY_STRING", "")
         query = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed_qs).items()}
         headers = self._extract_headers(environ)
-        session_id, session_cookie = self._resolve_session(environ)
-
-        request = Request(
+        request = hydrate_request(Request(
             path=parsed_path,
             query=query,
             headers=headers,
             method="GET",
-            session_id=session_id,
-        )
+        ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
 
         try:
             result = render_mount(mount, request=request, app=self._sprag_app)
@@ -181,7 +175,7 @@ class SpragWSGIApp:
                 500,
                 "text/html; charset=utf-8",
                 body,
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         if result.data_error:
@@ -191,7 +185,7 @@ class SpragWSGIApp:
                 start_response,
                 result.redirect.location,
                 status=result.redirect.status,
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         body = result.html.encode("utf-8")
@@ -201,20 +195,25 @@ class SpragWSGIApp:
             200,
             "text/html; charset=utf-8",
             body,
-            extra_headers=session_cookie,
+            extra_headers=self._session_headers(request),
         )
 
     # -- Action dispatch -----------------------------------------------------
 
     def _handle_action(self, environ, start_response):
-        session_id, session_cookie = self._resolve_session(environ)
+        headers = self._extract_headers(environ)
+        request = hydrate_request(Request(
+            path="/",
+            method="POST",
+            headers=headers,
+        ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
         try:
             content_length = int(environ.get("CONTENT_LENGTH", "0"))
         except ValueError:
             return self._json_response(
                 start_response, 400,
                 {"ok": False, "error": "Invalid Content-Length header."},
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         raw_body = environ["wsgi.input"].read(content_length) if content_length else b""
@@ -224,20 +223,14 @@ class SpragWSGIApp:
             return self._json_response(
                 start_response, 400,
                 {"ok": False, "error": "Invalid JSON request body."},
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         route_path = request_body.get("route")
         action_name = request_body.get("action")
         payload = request_body.get("payload")
-        headers = self._extract_headers(environ)
-        request = Request(
-            path=route_path or "/",
-            method="POST",
-            headers=headers,
-            body=raw_body,
-            session_id=session_id,
-        )
+        request.path = route_path or "/"
+        request.body = raw_body
 
         try:
             result = dispatch_controller_action(
@@ -258,7 +251,7 @@ class SpragWSGIApp:
                     "action": action_name,
                     "error": str(exc),
                 },
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         return self._json_response(
@@ -272,11 +265,16 @@ class SpragWSGIApp:
                 "status": result.status,
                 "redirect": result.redirect.as_payload() if result.redirect is not None else None,
             },
-            extra_headers=session_cookie,
+            extra_headers=self._session_headers(request),
         )
 
     def _handle_upload(self, environ, start_response):
-        session_id, session_cookie = self._resolve_session(environ)
+        headers = self._extract_headers(environ)
+        request = hydrate_request(Request(
+            path="/",
+            method="POST",
+            headers=headers,
+        ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
         content_type = environ.get("CONTENT_TYPE", "")
         if "multipart/form-data" not in content_type.lower():
             return self._json_response(
@@ -286,7 +284,7 @@ class SpragWSGIApp:
                     "ok": False,
                     "error": "SPRAG uploads require multipart/form-data.",
                 },
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         try:
@@ -299,19 +297,13 @@ class SpragWSGIApp:
                     "ok": False,
                     "error": str(exc),
                 },
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
-        headers = self._extract_headers(environ)
-        request = Request(
-            path=route_path or "/",
-            method="POST",
-            headers=headers,
-            session_id=session_id,
-            content_type=content_type,
-            form=form,
-            files=files,
-        )
+        request.path = route_path or "/"
+        request.content_type = content_type
+        request.form = form
+        request.files = files
 
         try:
             result = dispatch_controller_action(
@@ -333,7 +325,7 @@ class SpragWSGIApp:
                     "action": action_name,
                     "error": str(exc),
                 },
-                extra_headers=session_cookie,
+                extra_headers=self._session_headers(request),
             )
 
         return self._json_response(
@@ -348,7 +340,7 @@ class SpragWSGIApp:
                 "status": result.status,
                 "redirect": result.redirect.as_payload() if result.redirect is not None else None,
             },
-            extra_headers=session_cookie,
+            extra_headers=self._session_headers(request),
         )
 
     def _parse_upload_request(self, environ):
@@ -580,10 +572,9 @@ class SpragWSGIApp:
             extra_headers=extra_headers,
         )
 
-    def _resolve_session(self, environ):
-        session_id, created = resolve_session_id(environ.get("HTTP_COOKIE"))
-        cookie_header = session_cookie_header(session_id) if created else None
-        return session_id, cookie_header
+    def _session_headers(self, request):
+        headers = commit_request_session(request, app=self._sprag_app)
+        return headers or None
 
 
 _STATUS_PHRASES = {
@@ -594,6 +585,7 @@ _STATUS_PHRASES = {
     307: "Temporary Redirect",
     308: "Permanent Redirect",
     400: "Bad Request",
+    401: "Unauthorized",
     403: "Forbidden",
     404: "Not Found",
     405: "Method Not Allowed",

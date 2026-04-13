@@ -13,6 +13,17 @@ class Landing(Component):
             ),
             ui.section(
                 ui.a(
+                    ui.h3("Auth Demo →"),
+                    ui.p(
+                        "Cookie-backed server sessions, request.user/session, "
+                        "SSR auth redirects, login rotation, and logout "
+                        "invalidation in one protected route."
+                    ),
+                    ui.span("hybrid · auth · sessions", class_="tag"),
+                    href="/auth-demo/protected",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Counter →"),
                     ui.p(
                         "Component + Module + @action. The cross-runtime "

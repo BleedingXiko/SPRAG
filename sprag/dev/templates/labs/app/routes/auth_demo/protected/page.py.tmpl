@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import ProtectedAuthController
+from .web import ProtectedAuthScreen
+
+
+protected_auth = page(
+    path="/auth-demo/protected",
+    controller=ProtectedAuthController,
+    screen=ProtectedAuthScreen,
+    mode="hybrid",
+    metadata={"title": "Protected Auth Demo — SPRAG Labs"},
+)

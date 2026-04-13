@@ -10,11 +10,13 @@ from .runtime.env import env, public_env
 from .runtime.mount import Mount, mount
 from .runtime.page import Page, page
 from .runtime.request import Request, UploadedFile
+from .runtime.session import AnonymousAuthService, InMemorySessionStore
 from .runtime.shell import Shell, shell
 from .runtime.server import (
     Redirect,
     redirect,
     action,
+    requires_auth,
     # Core (already exposed)
     Controller,
     Field,
@@ -84,12 +86,15 @@ __all__ = [
     "Redirect",
     "Shell",
     "UploadedFile",
+    "AnonymousAuthService",
+    "InMemorySessionStore",
     "action",
     "mount",
     "load_markdown_document",
     "load_markdown_tree",
     "page",
     "redirect",
+    "requires_auth",
     "env",
     "public_env",
     # Web authoring

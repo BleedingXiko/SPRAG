@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import LoginController
+from .web import LoginScreen
+
+
+login = page(
+    path="/login",
+    controller=LoginController,
+    screen=LoginScreen,
+    mode="hybrid",
+    metadata={"title": "Login — SPRAG Labs"},
+)
