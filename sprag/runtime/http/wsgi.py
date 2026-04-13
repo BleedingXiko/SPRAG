@@ -8,7 +8,6 @@ import json
 import mimetypes
 import os
 import re
-import sys
 import time
 import traceback
 from collections import OrderedDict
@@ -39,6 +38,7 @@ _GZIP_CACHE_MAX = 128
 _gzip_cache: OrderedDict = OrderedDict()
 _gzip_cache_lock = Lock()
 
+from ..observability import ensure_request_id, log_request_event
 from ..request import Request, UploadedFile
 from ..routing import match_page_route, normalize_route_path
 from ..rendering import render_mount, render_page
@@ -47,6 +47,48 @@ from ..socket_bridge import controller_uses_socket_bridge
 from ..server import ActionDispatchError, bus, dispatch_controller_action
 
 SERVER_MODES = ("auto", "wsgi", "websocket")
+
+
+def _status_log_level(status_code):
+    if status_code >= 500:
+        return "error"
+    if status_code >= 400:
+        return "warning"
+    return "info"
+
+
+def _duration_ms(started_at):
+    return max(0, int(round((time.time() - started_at) * 1000)))
+
+
+def _payload_shape(payload):
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return {
+            "kind": "object",
+            "keys": sorted(str(key) for key in payload.keys()),
+            "key_count": len(payload),
+        }
+    if isinstance(payload, list):
+        return {
+            "kind": "array",
+            "size": len(payload),
+        }
+    return {"kind": type(payload).__name__}
+
+
+def _files_shape(files):
+    if not isinstance(files, dict):
+        return None
+    summary = {}
+    for name, value in files.items():
+        items = value if isinstance(value, list) else [value]
+        summary[str(name)] = {
+            "count": len(items),
+            "filenames": [getattr(item, "filename", None) for item in items],
+        }
+    return summary
 
 
 class SpragWSGIApp:
@@ -94,6 +136,7 @@ class SpragWSGIApp:
 
     def _handle_page(self, environ, start_response, matched_page):
         page = matched_page.page
+        started_at = time.time()
         parsed_path = environ.get("PATH_INFO", "/")
         parsed_qs = environ.get("QUERY_STRING", "")
         query = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed_qs).items()}
@@ -105,12 +148,23 @@ class SpragWSGIApp:
             headers=headers,
             method="GET",
         ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
+        ensure_request_id(request)
 
         try:
             result = render_page(page, request=request, app=self._sprag_app)
         except Exception:
             tb = traceback.format_exc()
-            print(f"[SPRAG] render crash on {page.path}:\n{tb}", file=sys.stderr)
+            log_request_event(
+                "request.page",
+                request=request,
+                level="error",
+                surface=page.path,
+                mode=page.mode,
+                status=500,
+                duration_ms=_duration_ms(started_at),
+                outcome="crash",
+                error=tb,
+            )
             body = (
                 f"<!DOCTYPE html><html><body>"
                 f"<h1>SPRAG Render Error</h1><pre>{tb}</pre>"
@@ -124,11 +178,17 @@ class SpragWSGIApp:
                 extra_headers=self._session_headers(request),
             )
 
-        if result.render_error:
-            print(f"[SPRAG] render error on {page.path}: {result.render_error}", file=sys.stderr)
-        if result.data_error:
-            print(f"[SPRAG] data error on {page.path}: {result.data_error}", file=sys.stderr)
         if result.redirect is not None:
+            log_request_event(
+                "request.page",
+                request=request,
+                surface=page.path,
+                mode=page.mode,
+                status=result.redirect.status,
+                duration_ms=_duration_ms(started_at),
+                outcome="redirect",
+                redirect_location=result.redirect.location,
+            )
             return self._respond_redirect(
                 start_response,
                 result.redirect.location,
@@ -137,6 +197,20 @@ class SpragWSGIApp:
             )
 
         body = result.html.encode("utf-8")
+        status = result.status if not (result.render_error or result.data_error) else max(result.status, 500)
+        log_request_event(
+            "request.page",
+            request=request,
+            level=_status_log_level(status),
+            surface=page.path,
+            mode=page.mode,
+            status=status,
+            duration_ms=_duration_ms(started_at),
+            outcome="ok",
+            html_bytes=len(body),
+            render_error=result.render_error,
+            data_error=result.data_error,
+        )
         return self._respond_gzip(
             environ,
             start_response,
@@ -149,6 +223,7 @@ class SpragWSGIApp:
     # -- Mount rendering ----------------------------------------------------
 
     def _handle_mount(self, environ, start_response, mount):
+        started_at = time.time()
         parsed_path = environ.get("PATH_INFO", "/")
         parsed_qs = environ.get("QUERY_STRING", "")
         query = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed_qs).items()}
@@ -159,12 +234,22 @@ class SpragWSGIApp:
             headers=headers,
             method="GET",
         ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
+        ensure_request_id(request)
 
         try:
             result = render_mount(mount, request=request, app=self._sprag_app)
         except Exception:
             tb = traceback.format_exc()
-            print(f"[SPRAG] mount crash on {mount.path}:\n{tb}", file=sys.stderr)
+            log_request_event(
+                "request.mount",
+                request=request,
+                level="error",
+                surface=mount.path,
+                status=500,
+                duration_ms=_duration_ms(started_at),
+                outcome="crash",
+                error=tb,
+            )
             body = (
                 f"<!DOCTYPE html><html><body>"
                 f"<h1>SPRAG Mount Error</h1><pre>{tb}</pre>"
@@ -178,9 +263,16 @@ class SpragWSGIApp:
                 extra_headers=self._session_headers(request),
             )
 
-        if result.data_error:
-            print(f"[SPRAG] mount data error on {mount.path}: {result.data_error}", file=sys.stderr)
         if result.redirect is not None:
+            log_request_event(
+                "request.mount",
+                request=request,
+                surface=mount.path,
+                status=result.redirect.status,
+                duration_ms=_duration_ms(started_at),
+                outcome="redirect",
+                redirect_location=result.redirect.location,
+            )
             return self._respond_redirect(
                 start_response,
                 result.redirect.location,
@@ -189,6 +281,18 @@ class SpragWSGIApp:
             )
 
         body = result.html.encode("utf-8")
+        status = result.status if not result.data_error else max(result.status, 500)
+        log_request_event(
+            "request.mount",
+            request=request,
+            level=_status_log_level(status),
+            surface=mount.path,
+            status=status,
+            duration_ms=_duration_ms(started_at),
+            outcome="ok",
+            html_bytes=len(body),
+            data_error=result.data_error,
+        )
         return self._respond_gzip(
             environ,
             start_response,
@@ -201,15 +305,25 @@ class SpragWSGIApp:
     # -- Action dispatch -----------------------------------------------------
 
     def _handle_action(self, environ, start_response):
+        started_at = time.time()
         headers = self._extract_headers(environ)
         request = hydrate_request(Request(
             path="/",
             method="POST",
             headers=headers,
         ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
+        ensure_request_id(request)
         try:
             content_length = int(environ.get("CONTENT_LENGTH", "0"))
         except ValueError:
+            log_request_event(
+                "request.action",
+                request=request,
+                level="warning",
+                status=400,
+                duration_ms=_duration_ms(started_at),
+                outcome="invalid_content_length",
+            )
             return self._json_response(
                 start_response, 400,
                 {"ok": False, "error": "Invalid Content-Length header."},
@@ -220,6 +334,14 @@ class SpragWSGIApp:
         try:
             request_body = json.loads(raw_body.decode("utf-8") or "{}")
         except json.JSONDecodeError:
+            log_request_event(
+                "request.action",
+                request=request,
+                level="warning",
+                status=400,
+                duration_ms=_duration_ms(started_at),
+                outcome="invalid_json",
+            )
             return self._json_response(
                 start_response, 400,
                 {"ok": False, "error": "Invalid JSON request body."},
@@ -243,6 +365,18 @@ class SpragWSGIApp:
                 mounts=self._sprag_app.mounts(),
             )
         except ActionDispatchError as exc:
+            log_request_event(
+                "request.action",
+                request=request,
+                level=_status_log_level(exc.status_code),
+                status=exc.status_code,
+                duration_ms=_duration_ms(started_at),
+                outcome="error",
+                route=route_path,
+                action=action_name,
+                payload=_payload_shape(payload),
+                error=str(exc),
+            )
             return self._json_response(
                 start_response, exc.status_code,
                 {
@@ -254,6 +388,19 @@ class SpragWSGIApp:
                 extra_headers=self._session_headers(request),
             )
 
+        log_request_event(
+            "request.action",
+            request=request,
+            level=_status_log_level(result.status if not result.ok else 200),
+            status=200,
+            action_status=result.status,
+            duration_ms=_duration_ms(started_at),
+            outcome="ok" if result.ok else "error",
+            route=route_path,
+            action=action_name,
+            payload=_payload_shape(payload),
+            redirect=result.redirect.as_payload() if result.redirect is not None else None,
+        )
         return self._json_response(
             start_response, 200,
             {
@@ -269,14 +416,25 @@ class SpragWSGIApp:
         )
 
     def _handle_upload(self, environ, start_response):
+        started_at = time.time()
         headers = self._extract_headers(environ)
         request = hydrate_request(Request(
             path="/",
             method="POST",
             headers=headers,
         ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
+        ensure_request_id(request)
         content_type = environ.get("CONTENT_TYPE", "")
         if "multipart/form-data" not in content_type.lower():
+            log_request_event(
+                "request.upload",
+                request=request,
+                level="warning",
+                status=415,
+                duration_ms=_duration_ms(started_at),
+                outcome="invalid_content_type",
+                content_type=content_type,
+            )
             return self._json_response(
                 start_response,
                 415,
@@ -290,6 +448,15 @@ class SpragWSGIApp:
         try:
             route_path, action_name, payload, form, files = self._parse_upload_request(environ)
         except ValueError as exc:
+            log_request_event(
+                "request.upload",
+                request=request,
+                level="warning",
+                status=400,
+                duration_ms=_duration_ms(started_at),
+                outcome="invalid_multipart",
+                error=str(exc),
+            )
             return self._json_response(
                 start_response,
                 400,
@@ -316,6 +483,19 @@ class SpragWSGIApp:
                 mounts=self._sprag_app.mounts(),
             )
         except ActionDispatchError as exc:
+            log_request_event(
+                "request.upload",
+                request=request,
+                level=_status_log_level(exc.status_code),
+                status=exc.status_code,
+                duration_ms=_duration_ms(started_at),
+                outcome="error",
+                route=route_path,
+                action=action_name,
+                payload=_payload_shape(payload),
+                files=_files_shape(files),
+                error=str(exc),
+            )
             return self._json_response(
                 start_response,
                 exc.status_code,
@@ -328,6 +508,19 @@ class SpragWSGIApp:
                 extra_headers=self._session_headers(request),
             )
 
+        log_request_event(
+            "request.upload",
+            request=request,
+            status=200,
+            action_status=result.status,
+            duration_ms=_duration_ms(started_at),
+            outcome="ok" if result.ok else "error",
+            route=route_path,
+            action=action_name,
+            payload=_payload_shape(payload),
+            files=_files_shape(files),
+            redirect=result.redirect.as_payload() if result.redirect is not None else None,
+        )
         return self._json_response(
             start_response,
             200,

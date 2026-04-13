@@ -1,8 +1,10 @@
 import unittest
+import json
+import inspect
 
 from sprag import Component, Module, browser, imports, ui
-from sprag.dev.codegen.components import compile_component_class
-from sprag.dev.codegen.modules import compile_module_class
+from sprag.dev.codegen.components import compile_component_artifact, compile_component_class
+from sprag.dev.codegen.modules import compile_module_artifact, compile_module_class
 from sprag.dev.codegen.mappings import JSCodegenError
 
 
@@ -126,6 +128,7 @@ class CodegenDiagnosticsTests(unittest.TestCase):
     def test_compile_module_supports_bare_return(self):
         compiled = compile_module_class(BareReturnModule)
         self.assertIn("return undefined;", compiled)
+        self.assertIn("//# sourceMappingURL=BareReturnModule.js.map", compiled)
 
     def test_compile_module_supports_topic_helpers(self):
         compiled = compile_module_class(TopicHelpersModule)
@@ -163,6 +166,52 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("setMetadata(metadata = {}, options = {})", compiled)
         self.assertIn("window.__SPRAG_SET_METADATA__", compiled)
         self.assertIn('this.setMetadata({ "og:title": "Updated OG title" });', compiled)
+
+    def test_compile_module_artifact_emits_source_map_metadata(self):
+        artifact = compile_module_artifact(SupportedModule)
+        payload = json.loads(artifact.source_map)
+        self.assertEqual(payload["file"], "SupportedModule.js")
+        self.assertTrue(payload["sources"])
+        self.assertIn("on_start", payload["names"])
+        self.assertEqual(payload["x_sprag"]["class"], "SupportedModule")
+        self.assertEqual(payload["x_sprag"]["kind"], "module")
+        self.assertEqual(payload["x_sprag"]["methods"][0]["name"], "on_start")
+        self.assertGreater(payload["x_sprag"]["methods"][0]["generated_start_line"], 0)
+
+    def test_compile_component_artifact_emits_source_map_metadata(self):
+        artifact = compile_component_artifact(SupportedComponent)
+        payload = json.loads(artifact.source_map)
+        self.assertEqual(payload["file"], "SupportedComponent.js")
+        self.assertIn("render", payload["names"])
+        self.assertEqual(payload["x_sprag"]["class"], "SupportedComponent")
+        self.assertEqual(payload["x_sprag"]["kind"], "component")
+        self.assertEqual(payload["x_sprag"]["methods"][0]["name"], "render")
+
+    def test_module_source_map_tracks_statement_lines(self):
+        artifact = compile_module_artifact(SupportedModule)
+        payload = json.loads(artifact.source_map)
+        generated_lines = artifact.code.splitlines()
+        mappings = _decode_mappings(payload["mappings"])
+        source_start_line = inspect.getsourcelines(SupportedModule.on_start)[1]
+
+        total_line = generated_lines.index("        let total = 0;")
+        set_state_line = next(
+            i for i, line in enumerate(generated_lines) if 'this.setState({ "total": total });' in line
+        )
+        self.assertEqual(mappings[total_line]["source_line"], source_start_line + 1)
+        self.assertEqual(mappings[set_state_line]["source_line"], source_start_line + 5)
+
+    def test_component_source_map_tracks_render_statement_lines(self):
+        artifact = compile_component_artifact(SupportedComponent)
+        payload = json.loads(artifact.source_map)
+        generated_lines = artifact.code.splitlines()
+        mappings = _decode_mappings(payload["mappings"])
+        source_start_line = inspect.getsourcelines(SupportedComponent.render)[1]
+
+        label_line = next(i for i, line in enumerate(generated_lines) if "const label =" in line)
+        return_line = next(i for i, line in enumerate(generated_lines) if "return createElement(" in line)
+        self.assertEqual(mappings[label_line]["source_line"], source_start_line + 1)
+        self.assertEqual(mappings[return_line]["source_line"], source_start_line + 2)
 
     def test_component_dynamic_mounts_resync_after_rerender(self):
         compiled = compile_component_class(DynamicMountsComponent)
@@ -206,6 +255,60 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("UnsupportedAnnotatedComponent.render", message)
         self.assertIn("count: int = 1", message)
         self.assertIn("Hint: Use a plain assignment inside browser methods", message)
+
+_BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+
+def _decode_mappings(encoded):
+    previous_source = 0
+    previous_source_line = 0
+    previous_source_column = 0
+    previous_name = 0
+    decoded = []
+    for line in encoded.split(";"):
+        if not line:
+            decoded.append(None)
+            continue
+        fields = _decode_vlq_segments(line)
+        generated_column = fields[0]
+        previous_source += fields[1]
+        previous_source_line += fields[2]
+        previous_source_column += fields[3]
+        entry = {
+            "generated_column": generated_column,
+            "source": previous_source,
+            "source_line": previous_source_line + 1,
+            "source_column": previous_source_column,
+        }
+        if len(fields) > 4:
+            previous_name += fields[4]
+            entry["name_index"] = previous_name
+        decoded.append(entry)
+    return decoded
+
+
+def _decode_vlq_segments(segment):
+    values = []
+    value = 0
+    shift = 0
+    for char in segment:
+        digit = _BASE64.index(char)
+        continuation = digit & 32
+        digit &= 31
+        value += digit << shift
+        if continuation:
+            shift += 5
+            continue
+        values.append(_from_vlq_signed(value))
+        value = 0
+        shift = 0
+    return values
+
+
+def _from_vlq_signed(value):
+    is_negative = value & 1
+    value >>= 1
+    return -value if is_negative else value
 
 
 if __name__ == "__main__":

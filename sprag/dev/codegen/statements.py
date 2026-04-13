@@ -12,6 +12,7 @@ from itertools import count
 
 from .expressions import _compile_comp_target, _compile_expr
 from .mappings import JSCodegenError, _compile_binop
+from .source_maps import mappings_for_text
 
 
 _AST_MATCH = getattr(ast, "Match", None)
@@ -27,12 +28,42 @@ _MATCH_TEMP_COUNTER = count()
 
 
 def _compile_statements(statements, *, method_names=None, env=None, indent=8):
+    compiled, _ = _compile_statements_with_mappings(
+        statements,
+        method_names=method_names,
+        env=env,
+        indent=indent,
+    )
+    return compiled
+
+
+def _compile_statements_with_mappings(
+    statements,
+    *,
+    method_names=None,
+    env=None,
+    indent=8,
+    source_line_offset=0,
+    source_name=None,
+):
     if env is None:
         env = {}
     pad = " " * indent
     lines = []
+    line_mappings = []
+
+    def _append(chunk, *, source_line=None):
+        if not chunk:
+            return
+        lines.append(chunk)
+        line_mappings.extend(
+            mappings_for_text(chunk, source_line=source_line, name=source_name)
+        )
+
     for stmt in statements:
-        lines.extend(_declare_namedexpr_bindings(stmt, env, pad))
+        stmt_line = source_line_offset + getattr(stmt, "lineno", 1)
+        for binding in _declare_namedexpr_bindings(stmt, env, pad):
+            _append(binding, source_line=stmt_line)
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             target = stmt.targets[0].id
             compiled_value = _compile_expr(stmt.value, env, method_names=method_names)
@@ -43,10 +74,10 @@ def _compile_statements(statements, *, method_names=None, env=None, indent=8):
             # already declared in this scope emits a bare assignment, so
             # the code compiles to idiomatic JS.
             if target in env:
-                lines.append(f"{pad}{target} = {compiled_value};")
+                _append(f"{pad}{target} = {compiled_value};", source_line=stmt_line)
             else:
                 env[target] = target
-                lines.append(f"{pad}let {target} = {compiled_value};")
+                _append(f"{pad}let {target} = {compiled_value};", source_line=stmt_line)
             continue
         if (
             isinstance(stmt, ast.Assign)
@@ -59,11 +90,11 @@ def _compile_statements(statements, *, method_names=None, env=None, indent=8):
             # If all names are already declared in this scope, emit a bare
             # destructuring assignment; otherwise declare them fresh.
             if all(name in env for name in names):
-                lines.append(f"{pad}{pattern} = {compiled_value};")
+                _append(f"{pad}{pattern} = {compiled_value};", source_line=stmt_line)
             else:
                 for name in names:
                     env[name] = name
-                lines.append(f"{pad}let {pattern} = {compiled_value};")
+                _append(f"{pad}let {pattern} = {compiled_value};", source_line=stmt_line)
             continue
         if (
             isinstance(stmt, ast.Assign)
@@ -72,83 +103,175 @@ def _compile_statements(statements, *, method_names=None, env=None, indent=8):
         ):
             target = _compile_expr(stmt.targets[0], env, method_names=method_names)
             compiled_value = _compile_expr(stmt.value, env, method_names=method_names)
-            lines.append(f"{pad}{target} = {compiled_value};")
+            _append(f"{pad}{target} = {compiled_value};", source_line=stmt_line)
             continue
         if isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name):
             target = _compile_expr(stmt.target, env, method_names=method_names)
             if isinstance(stmt.op, ast.BitOr):
                 value = _compile_expr(stmt.value, env, method_names=method_names)
-                lines.append(f"{pad}{target} = {{ ...{target}, ...{value} }};")
+                _append(f"{pad}{target} = {{ ...{target}, ...{value} }};", source_line=stmt_line)
                 continue
             op = _compile_binop(stmt.op)
             value = _compile_expr(stmt.value, env, method_names=method_names)
-            lines.append(f"{pad}{target} {op}= {value};")
+            _append(f"{pad}{target} {op}= {value};", source_line=stmt_line)
             continue
         if isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Attribute):
             target = _compile_expr(stmt.target, env, method_names=method_names)
             if isinstance(stmt.op, ast.BitOr):
                 value = _compile_expr(stmt.value, env, method_names=method_names)
-                lines.append(f"{pad}{target} = {{ ...{target}, ...{value} }};")
+                _append(f"{pad}{target} = {{ ...{target}, ...{value} }};", source_line=stmt_line)
                 continue
             op = _compile_binop(stmt.op)
             value = _compile_expr(stmt.value, env, method_names=method_names)
-            lines.append(f"{pad}{target} {op}= {value};")
+            _append(f"{pad}{target} {op}= {value};", source_line=stmt_line)
             continue
         if isinstance(stmt, ast.Expr):
-            lines.append(f"{pad}{_compile_expr(stmt.value, env, method_names=method_names)};")
+            _append(
+                f"{pad}{_compile_expr(stmt.value, env, method_names=method_names)};",
+                source_line=stmt_line,
+            )
             continue
         if isinstance(stmt, ast.Return):
             if stmt.value is None:
-                lines.append(f"{pad}return undefined;")
+                _append(f"{pad}return undefined;", source_line=stmt_line)
             else:
-                lines.append(
-                    f"{pad}return {_compile_expr(stmt.value, env, method_names=method_names)};"
+                _append(
+                    f"{pad}return {_compile_expr(stmt.value, env, method_names=method_names)};",
+                    source_line=stmt_line,
                 )
             continue
         if isinstance(stmt, ast.If):
-            lines.append(_compile_if(stmt, env, method_names=method_names, indent=indent))
+            compiled, mappings = _compile_if(
+                stmt,
+                env,
+                method_names=method_names,
+                indent=indent,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
+            )
+            lines.append(compiled)
+            line_mappings.extend(mappings)
             continue
         if isinstance(stmt, ast.For):
-            lines.append(_compile_for(stmt, env, method_names=method_names, indent=indent))
+            compiled, mappings = _compile_for(
+                stmt,
+                env,
+                method_names=method_names,
+                indent=indent,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
+            )
+            lines.append(compiled)
+            line_mappings.extend(mappings)
             continue
         if isinstance(stmt, ast.While):
-            lines.append(_compile_while(stmt, env, method_names=method_names, indent=indent))
+            compiled, mappings = _compile_while(
+                stmt,
+                env,
+                method_names=method_names,
+                indent=indent,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
+            )
+            lines.append(compiled)
+            line_mappings.extend(mappings)
             continue
         if isinstance(stmt, ast.Break):
-            lines.append(f"{pad}break;")
+            _append(f"{pad}break;", source_line=stmt_line)
             continue
         if isinstance(stmt, ast.Continue):
-            lines.append(f"{pad}continue;")
+            _append(f"{pad}continue;", source_line=stmt_line)
             continue
         if isinstance(stmt, ast.Try):
-            lines.append(_compile_try(stmt, env, method_names=method_names, indent=indent))
+            compiled, mappings = _compile_try(
+                stmt,
+                env,
+                method_names=method_names,
+                indent=indent,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
+            )
+            lines.append(compiled)
+            line_mappings.extend(mappings)
             continue
         if _AST_MATCH is not None and isinstance(stmt, _AST_MATCH):
-            lines.append(_compile_match(stmt, env, method_names=method_names, indent=indent))
+            compiled, mappings = _compile_match(
+                stmt,
+                env,
+                method_names=method_names,
+                indent=indent,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
+            )
+            lines.append(compiled)
+            line_mappings.extend(mappings)
             continue
         if isinstance(stmt, ast.Pass):
             # ``pass`` emits nothing (same intent as Python: an explicit no-op).
             continue
         raise JSCodegenError(f"Unsupported module statement: {ast.dump(stmt)}")
-    return "\n".join(lines) or f"{pad}return undefined;"
+    if not lines:
+        fallback = f"{pad}return undefined;"
+        return fallback, mappings_for_text(fallback, source_line=None, name=source_name)
+    return "\n".join(lines), line_mappings
 
 
-def _compile_if(node, env, *, method_names=None, indent=8):
+def _compile_if(node, env, *, method_names=None, indent=8, source_line_offset=0, source_name=None):
     pad = " " * indent
+    node_line = source_line_offset + getattr(node, "lineno", 1)
     test = _compile_expr(node.test, env, method_names=method_names)
-    body = _compile_statements(node.body, method_names=method_names, env=dict(env), indent=indent + 4)
+    body, body_mappings = _compile_statements_with_mappings(
+        node.body,
+        method_names=method_names,
+        env=dict(env),
+        indent=indent + 4,
+        source_line_offset=source_line_offset,
+        source_name=source_name,
+    )
     result = f"{pad}if ({test}) {{\n{body}\n{pad}}}"
+    mappings = mappings_for_text(f"{pad}if ({test}) {{", source_line=node_line, name=source_name)
+    mappings.extend(body_mappings)
+    mappings.extend(mappings_for_text(f"{pad}}}", source_line=node_line, name=source_name))
     if node.orelse:
         if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
-            result += " else " + _compile_if(node.orelse[0], env, method_names=method_names, indent=indent).lstrip()
+            else_result, else_mappings = _compile_if(
+                node.orelse[0],
+                env,
+                method_names=method_names,
+                indent=indent,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
+            )
+            result += " else " + else_result.lstrip()
+            mappings[-1] = mappings_for_text(
+                f"{pad}}} else {else_result.lstrip().splitlines()[0]}",
+                source_line=node_line,
+                name=source_name,
+            )[0]
+            mappings.extend(else_mappings[1:])
         else:
-            else_body = _compile_statements(node.orelse, method_names=method_names, env=dict(env), indent=indent + 4)
+            else_body, else_mappings = _compile_statements_with_mappings(
+                node.orelse,
+                method_names=method_names,
+                env=dict(env),
+                indent=indent + 4,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
+            )
             result += f" else {{\n{else_body}\n{pad}}}"
-    return result
+            mappings[-1] = mappings_for_text(
+                f"{pad}}} else {{",
+                source_line=node_line,
+                name=source_name,
+            )[0]
+            mappings.extend(else_mappings)
+            mappings.extend(mappings_for_text(f"{pad}}}", source_line=node_line, name=source_name))
+    return result, mappings
 
 
-def _compile_for(node, env, *, method_names=None, indent=8):
+def _compile_for(node, env, *, method_names=None, indent=8, source_line_offset=0, source_name=None):
     pad = " " * indent
+    node_line = source_line_offset + getattr(node, "lineno", 1)
     target_js, target_names = _compile_comp_target(node.target)
     inner_env = dict(env)
     for name in target_names:
@@ -182,44 +305,106 @@ def _compile_for(node, env, *, method_names=None, indent=8):
         iter_expr = _compile_expr(node.iter, env, method_names=method_names)
         header = f"for (const {target_js} of {iter_expr})"
 
-    body = _compile_statements(node.body, method_names=method_names, env=inner_env, indent=indent + 4)
-    return f"{pad}{header} {{\n{body}\n{pad}}}"
+    body, body_mappings = _compile_statements_with_mappings(
+        node.body,
+        method_names=method_names,
+        env=inner_env,
+        indent=indent + 4,
+        source_line_offset=source_line_offset,
+        source_name=source_name,
+    )
+    result = f"{pad}{header} {{\n{body}\n{pad}}}"
+    mappings = mappings_for_text(f"{pad}{header} {{", source_line=node_line, name=source_name)
+    mappings.extend(body_mappings)
+    mappings.extend(mappings_for_text(f"{pad}}}", source_line=node_line, name=source_name))
+    return result, mappings
 
 
-def _compile_while(node, env, *, method_names=None, indent=8):
+def _compile_while(node, env, *, method_names=None, indent=8, source_line_offset=0, source_name=None):
     pad = " " * indent
+    node_line = source_line_offset + getattr(node, "lineno", 1)
     test = _compile_expr(node.test, env, method_names=method_names)
-    body = _compile_statements(
-        node.body, method_names=method_names, env=dict(env), indent=indent + 4
+    body, body_mappings = _compile_statements_with_mappings(
+        node.body,
+        method_names=method_names,
+        env=dict(env),
+        indent=indent + 4,
+        source_line_offset=source_line_offset,
+        source_name=source_name,
     )
     if node.orelse:
         # Python's ``while ... else`` has no clean JS equivalent. Reject
         # loudly rather than silently dropping the else branch.
         raise JSCodegenError("while/else is not supported.")
-    return f"{pad}while ({test}) {{\n{body}\n{pad}}}"
+    result = f"{pad}while ({test}) {{\n{body}\n{pad}}}"
+    mappings = mappings_for_text(f"{pad}while ({test}) {{", source_line=node_line, name=source_name)
+    mappings.extend(body_mappings)
+    mappings.extend(mappings_for_text(f"{pad}}}", source_line=node_line, name=source_name))
+    return result, mappings
 
 
-def _compile_try(node, env, *, method_names=None, indent=8):
+def _compile_try(node, env, *, method_names=None, indent=8, source_line_offset=0, source_name=None):
     pad = " " * indent
-    try_body = _compile_statements(node.body, method_names=method_names, env=dict(env), indent=indent + 4)
+    node_line = source_line_offset + getattr(node, "lineno", 1)
+    try_body, try_mappings = _compile_statements_with_mappings(
+        node.body,
+        method_names=method_names,
+        env=dict(env),
+        indent=indent + 4,
+        source_line_offset=source_line_offset,
+        source_name=source_name,
+    )
     result = f"{pad}try {{\n{try_body}\n{pad}}}"
+    mappings = mappings_for_text(f"{pad}try {{", source_line=node_line, name=source_name)
+    mappings.extend(try_mappings)
+    mappings.extend(mappings_for_text(f"{pad}}}", source_line=node_line, name=source_name))
 
     for handler in node.handlers:
         exc_name = handler.name or "e"
+        handler_line = source_line_offset + getattr(handler, "lineno", getattr(node, "lineno", 1))
         inner_env = dict(env)
         inner_env[exc_name] = exc_name
-        handler_body = _compile_statements(handler.body, method_names=method_names, env=inner_env, indent=indent + 4)
+        handler_body, handler_mappings = _compile_statements_with_mappings(
+            handler.body,
+            method_names=method_names,
+            env=inner_env,
+            indent=indent + 4,
+            source_line_offset=source_line_offset,
+            source_name=source_name,
+        )
         result += f" catch ({exc_name}) {{\n{handler_body}\n{pad}}}"
+        mappings[-1] = mappings_for_text(
+            f"{pad}}} catch ({exc_name}) {{",
+            source_line=handler_line,
+            name=source_name,
+        )[0]
+        mappings.extend(handler_mappings)
+        mappings.extend(mappings_for_text(f"{pad}}}", source_line=handler_line, name=source_name))
 
     if node.finalbody:
-        finally_body = _compile_statements(node.finalbody, method_names=method_names, env=dict(env), indent=indent + 4)
+        finally_body, finally_mappings = _compile_statements_with_mappings(
+            node.finalbody,
+            method_names=method_names,
+            env=dict(env),
+            indent=indent + 4,
+            source_line_offset=source_line_offset,
+            source_name=source_name,
+        )
         result += f" finally {{\n{finally_body}\n{pad}}}"
+        mappings[-1] = mappings_for_text(
+            f"{pad}}} finally {{",
+            source_line=node_line,
+            name=source_name,
+        )[0]
+        mappings.extend(finally_mappings)
+        mappings.extend(mappings_for_text(f"{pad}}}", source_line=node_line, name=source_name))
 
-    return result
+    return result, mappings
 
 
-def _compile_match(node, env, *, method_names=None, indent=8):
+def _compile_match(node, env, *, method_names=None, indent=8, source_line_offset=0, source_name=None):
     pad = " " * indent
+    node_line = source_line_offset + getattr(node, "lineno", 1)
     match_id = next(_MATCH_TEMP_COUNTER)
     subject_name = f"__spragMatch{match_id}"
     matched_name = f"__spragMatched{match_id}"
@@ -229,8 +414,13 @@ def _compile_match(node, env, *, method_names=None, indent=8):
         f"{pad}const {subject_name} = {subject_expr};",
         f"{pad}let {matched_name} = false;",
     ]
+    mappings = [
+        *mappings_for_text(lines[0], source_line=node_line, name=source_name),
+        *mappings_for_text(lines[1], source_line=node_line, name=source_name),
+    ]
 
     for case in node.cases:
+        case_line = source_line_offset + getattr(case.pattern, "lineno", getattr(node, "lineno", 1))
         case_env = dict(env)
         test_js, bindings = _compile_match_pattern(
             case.pattern,
@@ -240,34 +430,49 @@ def _compile_match(node, env, *, method_names=None, indent=8):
         )
         lines.append(f"{pad}if (!{matched_name}) {{")
         lines.append(f"{pad}    if ({test_js}) {{")
+        mappings.extend(mappings_for_text(lines[-2], source_line=case_line, name=source_name))
+        mappings.extend(mappings_for_text(lines[-1], source_line=case_line, name=source_name))
         for name, expr in bindings:
             case_env[name] = name
             lines.append(f"{pad}        let {name} = {expr};")
+            mappings.extend(mappings_for_text(lines[-1], source_line=case_line, name=source_name))
         if case.guard is not None:
             guard_js = _compile_expr(case.guard, case_env, method_names=method_names)
             lines.append(f"{pad}        if ({guard_js}) {{")
             lines.append(f"{pad}            {matched_name} = true;")
-            case_body = _compile_statements(
+            mappings.extend(mappings_for_text(lines[-2], source_line=case_line, name=source_name))
+            mappings.extend(mappings_for_text(lines[-1], source_line=case_line, name=source_name))
+            case_body, case_mappings = _compile_statements_with_mappings(
                 case.body,
                 method_names=method_names,
                 env=dict(case_env),
                 indent=indent + 12,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
             )
             lines.append(case_body)
+            mappings.extend(case_mappings)
             lines.append(f"{pad}        }}")
+            mappings.extend(mappings_for_text(lines[-1], source_line=case_line, name=source_name))
         else:
             lines.append(f"{pad}        {matched_name} = true;")
-            case_body = _compile_statements(
+            mappings.extend(mappings_for_text(lines[-1], source_line=case_line, name=source_name))
+            case_body, case_mappings = _compile_statements_with_mappings(
                 case.body,
                 method_names=method_names,
                 env=dict(case_env),
                 indent=indent + 8,
+                source_line_offset=source_line_offset,
+                source_name=source_name,
             )
             lines.append(case_body)
+            mappings.extend(case_mappings)
         lines.append(f"{pad}    }}")
         lines.append(f"{pad}}}")
+        mappings.extend(mappings_for_text(lines[-2], source_line=case_line, name=source_name))
+        mappings.extend(mappings_for_text(lines[-1], source_line=case_line, name=source_name))
 
-    return "\n".join(lines)
+    return "\n".join(lines), mappings
 
 
 def _compile_match_pattern(pattern, subject_js, env, *, method_names=None):

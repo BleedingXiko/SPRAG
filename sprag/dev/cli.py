@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -280,6 +281,7 @@ def cmd_build(args):
 
 
 def cmd_dev(args):
+    _configure_runtime_logging()
     app_target, app = _load_cli_app(args)
     setattr(app, "_sprag_dev_reload", True)
     output_dir = Path(args.output)
@@ -335,6 +337,13 @@ def cmd_dev(args):
         print("\n[SPRAG] stopping dev server")
     finally:
         stop_event.set()
+
+
+def _configure_runtime_logging():
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("sprag.runtime").setLevel(logging.INFO)
 
 
 def _dev_surface_banner_line(base_url: str, path: str, *, label: str, width: int) -> str:
@@ -862,6 +871,24 @@ def _print_surface_metadata(*, kind, entry, output_dir: Path, open_files: bool):
     else:
         print("  - (none)")
 
+    source_locations = _surface_source_locations(files)
+    if source_locations:
+        print()
+        print("source locations:")
+        for item in source_locations:
+            print(
+                f"  - {item['class']} ({item['kind']}): {item['source_file']}"
+            )
+            for method in item["methods"]:
+                generated = method.get("generated_start_line")
+                if generated is None:
+                    print(f"    {method['name']} -> line {method['source_line']}")
+                else:
+                    print(
+                        f"    {method['name']} -> source line {method['source_line']} "
+                        f"(generated line {generated})"
+                    )
+
     if open_files or not files:
         return
 
@@ -888,17 +915,46 @@ def _surface_generated_files(*, kind, entry, output_dir: Path):
             module_name = item.get("module")
             if component_name:
                 _push(output_dir / "generated" / "components" / f"{component_name}.js")
+                _push(output_dir / "generated" / "components" / f"{component_name}.js.map")
             if module_name:
                 _push(output_dir / "generated" / "modules" / f"{module_name}.js")
+                _push(output_dir / "generated" / "modules" / f"{module_name}.js.map")
     else:
         component_name = entry.get("component")
         module_name = entry.get("module")
         if component_name:
             _push(output_dir / "generated" / "components" / f"{component_name}.js")
+            _push(output_dir / "generated" / "components" / f"{component_name}.js.map")
         if module_name:
             _push(output_dir / "generated" / "modules" / f"{module_name}.js")
+            _push(output_dir / "generated" / "modules" / f"{module_name}.js.map")
 
     return files
+
+
+def _surface_source_locations(files):
+    items = []
+    for path in files:
+        if path.suffix != ".map":
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        sprag = payload.get("x_sprag") or {}
+        methods = sprag.get("methods") or []
+        sources = payload.get("sources") or []
+        if not sprag or not methods or not sources:
+            continue
+        items.append(
+            {
+                "class": sprag.get("class") or path.stem,
+                "kind": sprag.get("kind") or "browser",
+                "source_file": sources[0],
+                "methods": methods,
+            }
+        )
+    return items
 
 def _version_string():
     parts = [f"sprag {__version__}"]

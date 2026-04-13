@@ -251,7 +251,11 @@ def _minify_js_fallback(js: str) -> str:
         if not stripped:
             continue
         # Remove single-line comments but not URLs (://)
-        if stripped.startswith("//") and not stripped.startswith("//!"):
+        if (
+            stripped.startswith("//")
+            and not stripped.startswith("//!")
+            and not stripped.startswith("//# sourceMappingURL=")
+        ):
             continue
         lines.append(stripped)
     return "\n".join(lines) + "\n"
@@ -477,6 +481,7 @@ class SpragPack:
             if not p.name.endswith(".min.js")
             and not p.name.endswith(".min.mjs")
             and "vendor" not in p.relative_to(public_dir).parts
+            and not (p.parent / f"{p.name}.map").exists()
         ]
 
         if not css_files and not js_files:

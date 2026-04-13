@@ -222,6 +222,32 @@ class AssetContractTests(unittest.TestCase):
             self.assertIn('"export": "nanoid"', imports_document)
             self.assertIn('"src": "https://cdn.example.test/nanoid.mjs"', imports_document)
 
+    def test_build_web_preview_emits_source_maps_for_generated_browser_classes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            build_web_preview(
+                [],
+                root / "dist",
+                app=DummyApp(root),
+                mounts=[
+                    (
+                        "app.mounts.lab",
+                        mount(
+                            "/lab",
+                            component=AssetRootComponent,
+                        ),
+                    )
+                ],
+            )
+
+            component_map = root / "dist" / "generated" / "components" / "AssetRootComponent.js.map"
+            self.assertTrue(component_map.exists())
+
+            component_payload = json.loads(component_map.read_text(encoding="utf-8"))
+            self.assertEqual(component_payload["x_sprag"]["class"], "AssetRootComponent")
+            self.assertEqual(component_payload["x_sprag"]["methods"][0]["name"], "render")
+
     def test_browser_entry_waits_for_surface_module_imports_and_renders_boot_errors(self):
         browser_entry = build_browser_entry(
             {

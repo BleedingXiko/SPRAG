@@ -12,10 +12,10 @@ import json
 from pathlib import Path
 
 from ...runtime.stores import StoreBridge
-from .components import compile_component_class
+from .components import compile_component_artifact
 from .dependencies import used_browser_class_refs
 from .mappings import JSCodegenError
-from .modules import compile_module_class
+from .modules import compile_module_artifact
 
 
 def emit_ragot_runtime(output_dir: Path, project_root: Path) -> None:
@@ -83,22 +83,22 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
     _collect_browser_dependencies(component_classes, module_classes)
 
     for name, component_class in component_classes.items():
-        (components_dir / f"{name}.js").write_text(
-            compile_component_class(
-                component_class,
-                declared_import_aliases=declared_import_aliases,
-            ),
-            encoding="utf-8",
+        artifact = compile_component_artifact(
+            component_class,
+            declared_import_aliases=declared_import_aliases,
         )
+        (components_dir / f"{name}.js").write_text(artifact.code, encoding="utf-8")
+        if artifact.source_map:
+            (components_dir / f"{name}.js.map").write_text(artifact.source_map, encoding="utf-8")
 
     for name, module_class in module_classes.items():
-        (modules_dir / f"{name}.js").write_text(
-            compile_module_class(
-                module_class,
-                declared_import_aliases=declared_import_aliases,
-            ),
-            encoding="utf-8",
+        artifact = compile_module_artifact(
+            module_class,
+            declared_import_aliases=declared_import_aliases,
         )
+        (modules_dir / f"{name}.js").write_text(artifact.code, encoding="utf-8")
+        if artifact.source_map:
+            (modules_dir / f"{name}.js.map").write_text(artifact.source_map, encoding="utf-8")
 
     (generated_dir / "index.js").write_text(
         _registry_source(sorted(component_classes), sorted(module_classes)),

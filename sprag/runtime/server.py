@@ -39,6 +39,7 @@ from specter import ManagedProcess, Watcher, WatcherError, start_process
 # -- Orchestration -----------------------------------------------------------
 from specter import ServiceManager, boot
 
+from .observability import log_runtime_event
 from .routing import match_page_route
 from .session import (
     hydrate_request,
@@ -429,10 +430,33 @@ class QueueService(SPECTERQueueService):
             rejected["status"] = "rejected"
             rejected["message"] = f"Queue is full. Could not queue {label}."
             rejected["updated_at"] = time.time()
+            log_runtime_event(
+                "queue.job.enqueued",
+                level="warning",
+                queue=self.name,
+                job_id=job_id,
+                label=label,
+                accepted=False,
+                route=route,
+                session_id=session_id,
+                client_id=client_id,
+                topic=topic,
+            )
             return self.job_action_result(job=rejected, accepted=False)
 
         self._merge_job_state(job_id, lambda _existing: job)
         self.emit_job_signal(job_id)
+        log_runtime_event(
+            "queue.job.enqueued",
+            queue=self.name,
+            job_id=job_id,
+            label=label,
+            accepted=True,
+            route=route,
+            session_id=session_id,
+            client_id=client_id,
+            topic=topic,
+        )
         return self.job_action_result(job_id=job_id, accepted=True)
 
     def job_action_result(self, *, job_id=None, job=None, accepted=True, message=None):
@@ -537,6 +561,13 @@ class QueueService(SPECTERQueueService):
 
         self._merge_job_state(job_id, update)
         self.emit_job_signal(job_id)
+        log_runtime_event(
+            "queue.job.cancel_requested",
+            queue=self.name,
+            job_id=job_id,
+            label=snapshot.get("label"),
+            status="cancelling",
+        )
         return self.job_action_result(job_id=job_id, accepted=True)
 
     def cancel_requested(self, job_id=None):
@@ -572,7 +603,16 @@ class QueueService(SPECTERQueueService):
         self._merge_job_state(resolved_job_id, update)
         self._set_active_job(resolved_job_id, active=False)
         self.emit_job_signal(resolved_job_id)
-        return self.get_job(resolved_job_id)
+        snapshot = self.get_job(resolved_job_id)
+        log_runtime_event(
+            "queue.job.completed",
+            queue=self.name,
+            job_id=resolved_job_id,
+            label=snapshot.get("label") if snapshot else None,
+            duration_ms=self._job_duration_ms(snapshot),
+            result=result,
+        )
+        return snapshot
 
     def fail_job(self, *, error, message=None, job_id=None):
         """Mark a tracked job failed."""
@@ -587,7 +627,17 @@ class QueueService(SPECTERQueueService):
         self._merge_job_state(resolved_job_id, update)
         self._set_active_job(resolved_job_id, active=False)
         self.emit_job_signal(resolved_job_id)
-        return self.get_job(resolved_job_id)
+        snapshot = self.get_job(resolved_job_id)
+        log_runtime_event(
+            "queue.job.failed",
+            level="error",
+            queue=self.name,
+            job_id=resolved_job_id,
+            label=snapshot.get("label") if snapshot else None,
+            duration_ms=self._job_duration_ms(snapshot),
+            error=error,
+        )
+        return snapshot
 
     def cancel_job(self, *, message=None, job_id=None):
         """Mark a tracked job cancelled."""
@@ -602,7 +652,15 @@ class QueueService(SPECTERQueueService):
         self._merge_job_state(resolved_job_id, update)
         self._set_active_job(resolved_job_id, active=False)
         self.emit_job_signal(resolved_job_id)
-        return self.get_job(resolved_job_id)
+        snapshot = self.get_job(resolved_job_id)
+        log_runtime_event(
+            "queue.job.cancelled",
+            queue=self.name,
+            job_id=resolved_job_id,
+            label=snapshot.get("label") if snapshot else None,
+            duration_ms=self._job_duration_ms(snapshot),
+        )
+        return snapshot
 
     def emit_job_signal(self, job_id, *, event=None, payload=None):
         """Emit a targeted socket invalidation for a tracked job when possible."""
@@ -637,6 +695,12 @@ class QueueService(SPECTERQueueService):
                 else:
                     self.handle_item(item)
             except Exception as exc:
+                log_runtime_event(
+                    "queue.worker.error",
+                    level="error",
+                    queue=self.name,
+                    error=exc,
+                )
                 logger.error(
                     f"[SPRAG] Queue worker error in '{self.name}': {exc}",
                     exc_info=True,
@@ -670,6 +734,13 @@ class QueueService(SPECTERQueueService):
 
             self._merge_job_state(job_id, mark_running)
             self.emit_job_signal(job_id)
+            snapshot = self.get_job(job_id)
+            log_runtime_event(
+                "queue.job.started",
+                queue=self.name,
+                job_id=job_id,
+                label=snapshot.get("label") if snapshot else None,
+            )
             result = self.handle_item(payload)
             if self.cancel_requested(job_id=job_id):
                 self.cancel_job(job_id=job_id)
@@ -721,6 +792,15 @@ class QueueService(SPECTERQueueService):
                 "or an explicit job_id."
             )
         return resolved
+
+    def _job_duration_ms(self, snapshot):
+        if not isinstance(snapshot, dict):
+            return None
+        created_at = snapshot.get("created_at")
+        updated_at = snapshot.get("updated_at")
+        if created_at is None or updated_at is None:
+            return None
+        return max(0, int(round((float(updated_at) - float(created_at)) * 1000)))
 
 
 class Controller(SPECTERController):

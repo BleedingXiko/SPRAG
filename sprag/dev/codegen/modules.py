@@ -25,6 +25,7 @@ import ast
 import inspect
 import json
 import textwrap
+from pathlib import Path
 
 from ...runtime.env import env as sprag_env
 from ...runtime.env import public_env as sprag_public_env
@@ -33,7 +34,8 @@ from .expressions import _compile_expr  # noqa: F401  (re-export for tests)
 from .dependencies import used_browser_class_refs, used_js_import_aliases
 from .imports import _detect_ragot_imports
 from .mappings import JSCodegenError, _map_name
-from .statements import _compile_statements
+from .source_maps import GeneratedArtifact, GeneratedLineMapping, build_source_map, count_lines, mappings_for_text
+from .statements import _compile_statements, _compile_statements_with_mappings
 from .stores_scan import collect_store_refs_for_class
 
 
@@ -139,11 +141,15 @@ def collect_env_helper_refs_for_class(browser_class) -> dict[str, str]:
 
 
 def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
+    return compile_module_artifact(
+        module_class,
+        declared_import_aliases=declared_import_aliases,
+    ).code
+
+
+def compile_module_artifact(module_class, *, declared_import_aliases=None) -> GeneratedArtifact:
     from ...runtime.browser import RefDescriptor  # local import to avoid circular dep
 
-    # Stores referenced in the source file (``from app.stores import counter``).
-    # Stashed on the per-call env so _compile_expr can route store-method
-    # calls to the right Ragot equivalent and emit JS imports for them.
     store_refs = collect_store_refs_for_class(module_class)
     server_only_symbols = _server_only_imports_for_class(module_class)
     if server_only_symbols:
@@ -172,10 +178,9 @@ def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
             env["__sprag_env_helpers__"] = env_helper_refs
         return env
 
-    # ---------- Pass 1: metadata collection ----------
     refs: list[tuple[str, str]] = []
     ref_names: set[str] = set()
-    infinite_scrolls: list[tuple[str, dict]] = []  # (js_method_name, config)
+    infinite_scrolls: list[tuple[str, dict]] = []
     has_user_on_start = False
 
     for name, value in module_class.__dict__.items():
@@ -191,25 +196,22 @@ def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
         if is_cfg is not None:
             infinite_scrolls.append((_map_name(name), is_cfg))
 
-    # ---------- Pass 2: compile methods ----------
     method_names = {
         _map_name(name)
         for name, value in module_class.__dict__.items()
         if callable(value) and not name.startswith("__")
     }
-    constructor_extras = _compile_constructor_extras(
+    constructor_extras, constructor_mappings = _compile_constructor_extras(
         module_class,
         method_names=method_names,
         env=_seed_env(),
     )
 
-    method_chunks = []
+    method_chunks: list[tuple[str, list[GeneratedLineMapping | None], int | None, str]] = []
     for name, value in module_class.__dict__.items():
         if isinstance(value, RefDescriptor):
             continue
-        if not callable(value) or name.startswith("__"):
-            continue
-        if name == "__init__":
+        if not callable(value) or name.startswith("__") or name == "__init__":
             continue
 
         source, source_file, source_start_line = _method_source_info(value)
@@ -227,8 +229,12 @@ def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
         is_async = isinstance(function_def, ast.AsyncFunctionDef)
 
         try:
-            body = _compile_statements(
-                function_def.body, method_names=method_names, env=_seed_env()
+            body, body_mappings = _compile_statements_with_mappings(
+                function_def.body,
+                method_names=method_names,
+                env=_seed_env(),
+                source_line_offset=source_start_line - 1,
+                source_name=name,
             )
         except JSCodegenError as exc:
             raise exc.with_context(
@@ -239,45 +245,80 @@ def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
                 source_line=exc.source_line if exc.source_line is not None else source.splitlines()[0],
             ) from exc
 
-        # Inject framework setup prologue into user-supplied on_start
         if name == "on_start":
             setup_lines = _emit_module_setup(
                 refs, infinite_scrolls, ref_names=ref_names, indent=8
             )
             if setup_lines:
                 body = "\n".join(setup_lines) + "\n" + body
+                body_mappings = (
+                    mappings_for_text(
+                        "\n".join(setup_lines),
+                        source_line=source_start_line,
+                        name=name,
+                    )
+                    + body_mappings
+                )
 
-        # Wrap body with debounce / throttle if the decorator was applied.
-        # The decorator stores the value already converted to milliseconds.
         debounce_ms = getattr(value, "_sprag_debounce_ms", None)
         throttle_ms = getattr(value, "_sprag_throttle_ms", None)
         if debounce_ms is not None:
-            body = _wrap_debounce(body, js_name, debounce_ms, indent=8)
+            body, body_mappings = _wrap_debounce_with_mappings(
+                body,
+                body_mappings,
+                js_name,
+                debounce_ms,
+                indent=8,
+                source_line=source_start_line,
+                source_name=name,
+            )
         elif throttle_ms is not None:
-            body = _wrap_throttle(body, js_name, throttle_ms, indent=8)
+            body, body_mappings = _wrap_throttle_with_mappings(
+                body,
+                body_mappings,
+                js_name,
+                throttle_ms,
+                indent=8,
+                source_line=source_start_line,
+                source_name=name,
+            )
 
         async_prefix = "async " if is_async else ""
         params = ", ".join(arg.arg for arg in function_def.args.args[1:])
-        method_chunks.append(
-            f"    {async_prefix}{js_name}({params}) {{\n{body}\n    }}"
-        )
+        method_chunks.append((
+            f"    {async_prefix}{js_name}({params}) {{\n{body}\n    }}",
+            mappings_for_text(
+                f"    {async_prefix}{js_name}({params}) {{",
+                source_line=source_start_line,
+                name=name,
+            )
+            + body_mappings
+            + mappings_for_text("    }", source_line=source_start_line, name=name),
+            source_start_line,
+            name,
+        ))
 
-    # ---------- Synthesize onStart if needed ----------
     if not has_user_on_start and (refs or infinite_scrolls):
         setup_lines = _emit_module_setup(
             refs, infinite_scrolls, ref_names=ref_names, indent=8
         )
         body = "\n".join(setup_lines)
-        method_chunks.append(f"    onStart() {{\n{body}\n    }}")
+        method_chunks.append((
+            f"    onStart() {{\n{body}\n    }}",
+            mappings_for_text("    onStart() {", source_line=None, name=None)
+            + mappings_for_text(body, source_line=None, name=None)
+            + mappings_for_text("    }", source_line=None, name=None),
+            None,
+            "on_start",
+        ))
 
-    methods_block = "\n\n".join(method_chunks) if method_chunks else "    onStart() {}\n"
+    method_code = [chunk for chunk, _, _, _ in method_chunks]
+    methods_block = "\n\n".join(method_code) if method_code else "    onStart() {}\n"
     extra_imports = _detect_ragot_imports(methods_block)
     base_imports = "Module"
     if extra_imports:
         base_imports += ", " + ", ".join(sorted(extra_imports))
 
-    # Detect which declared stores actually appear in the compiled JS so
-    # the generated file imports only what it uses.
     used_stores = _detect_used_stores(methods_block, store_refs)
     store_import_line = ""
     if used_stores:
@@ -291,119 +332,185 @@ def compile_module_class(module_class, *, declared_import_aliases=None) -> str:
     )
     env_helper_prelude = _emit_env_helper_prelude(methods_block)
 
-    return f"""import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';
-{store_import_line}
-{class_import_lines}
-{env_helper_prelude}export class {module_class.__name__} extends Module {{
-    constructor(initialState = {{}}) {{
-        super(initialState);
-        this.component = null;
-        this.actions = null;
-        this.route = null;
-        this.socket = null;
-{constructor_extras}
-    }}
+    source_file = inspect.getsourcefile(module_class) or inspect.getfile(module_class)
+    source_content = Path(source_file).read_text(encoding="utf-8")
+    generated_filename = f"{module_class.__name__}.js"
+    line_mappings: list[GeneratedLineMapping | None] = []
+    method_spans: list[dict[str, object]] = []
+    rendered_parts: list[str] = []
 
-    _spragSocket() {{
-        return this.socket || window.__SPRAG_SOCKET__ || null;
-    }}
+    def _append(
+        text: str,
+        *,
+        source_line: int | None = None,
+        name: str | None = None,
+        explicit_mappings: list[GeneratedLineMapping | None] | None = None,
+    ):
+        rendered_parts.append(text)
+        if explicit_mappings is not None:
+            line_mappings.extend(explicit_mappings)
+            return
+        mapping = GeneratedLineMapping(source_line=source_line, name=name) if source_line is not None else None
+        line_mappings.extend([mapping] * count_lines(text))
 
-    onSocket(event, handler) {{
-        const socket = this._spragSocket();
-        if (!socket) {{
-            console.warn('[SPRAG] Module.on_socket(...) called before the shared socket bridge was ready.');
-            return this;
-        }}
-        return super.onSocket(socket, event, handler);
-    }}
+    _append(f"import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';\n")
+    _append(store_import_line)
+    _append("\n")
+    _append(class_import_lines)
+    _append(env_helper_prelude)
+    _append(f"export class {module_class.__name__} extends Module {{\n")
+    _append("    constructor(initialState = {}) {\n")
+    _append("        super(initialState);\n")
+    _append("        this.component = null;\n")
+    _append("        this.actions = null;\n")
+    _append("        this.route = null;\n")
+    _append("        this.socket = null;\n")
+    init = module_class.__dict__.get("__init__")
+    if constructor_extras:
+        init_start_line = None
+        if init is not None:
+            _, _, init_start_line = _method_source_info(init)
+        if init_start_line is not None:
+            start_line = len(line_mappings) + 1
+            _append(
+                constructor_extras + ("\n" if not constructor_extras.endswith("\n") else ""),
+                explicit_mappings=constructor_mappings + mappings_for_text("\n", source_line=init_start_line, name="__init__"),
+            )
+            method_spans.append(
+                {
+                    "name": "__init__",
+                    "source_line": init_start_line,
+                    "generated_start_line": start_line,
+                    "generated_end_line": start_line + count_lines(constructor_extras) - 1,
+                }
+            )
+        else:
+            _append(constructor_extras + ("\n" if not constructor_extras.endswith("\n") else ""))
+    _append("    }\n\n")
+    _append(
+        "    _spragSocket() {\n"
+        "        return this.socket || window.__SPRAG_SOCKET__ || null;\n"
+        "    }\n\n"
+        "    onSocket(event, handler) {\n"
+        "        const socket = this._spragSocket();\n"
+        "        if (!socket) {\n"
+        "            console.warn('[SPRAG] Module.on_socket(...) called before the shared socket bridge was ready.');\n"
+        "            return this;\n"
+        "        }\n"
+        "        return super.onSocket(socket, event, handler);\n"
+        "    }\n\n"
+        "    offSocket(event, handler) {\n"
+        "        const socket = this._spragSocket();\n"
+        "        if (!socket) {\n"
+        "            return this;\n"
+        "        }\n"
+        "        return super.offSocket(socket, event, handler);\n"
+        "    }\n\n"
+        "    emitSocket(event, payload = null) {\n"
+        "        const socket = this._spragSocket();\n"
+        "        if (!socket || typeof socket.emit !== 'function') {\n"
+        "            console.warn('[SPRAG] Module.emit_socket(...) called before the shared socket bridge was ready.');\n"
+        "            return false;\n"
+        "        }\n"
+        "        return socket.emit(event, payload);\n"
+        "    }\n\n"
+        "    joinTopic(topic) {\n"
+        "        const socket = this._spragSocket();\n"
+        "        if (!socket || typeof socket.joinTopic !== 'function') {\n"
+        "            console.warn('[SPRAG] Module.join_topic(...) called before the shared socket bridge was ready.');\n"
+        "            return false;\n"
+        "        }\n"
+        "        return socket.joinTopic(topic);\n"
+        "    }\n\n"
+        "    leaveTopic(topic) {\n"
+        "        const socket = this._spragSocket();\n"
+        "        if (!socket || typeof socket.leaveTopic !== 'function') {\n"
+        "            return false;\n"
+        "        }\n"
+        "        return socket.leaveTopic(topic);\n"
+        "    }\n\n"
+        "    callAction(name, payload = {}) {\n"
+        "        if (!this.actions || typeof this.actions.call !== 'function') {\n"
+        "            return Promise.reject(new Error('[SPRAG] Action client unavailable.'));\n"
+        "        }\n"
+        "        return this.actions.call(name, payload);\n"
+        "    }\n\n"
+        "    actionErrorMessage(error, fallback = '') {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_ACTION_ERROR_MESSAGE__ : null;\n"
+        "        if (typeof helper === 'function') {\n"
+        "            return helper(error, fallback);\n"
+        "        }\n"
+        "        if (error && typeof error.message === 'string' && error.message.trim()) {\n"
+        "            return error.message.trim();\n"
+        "        }\n"
+        "        return fallback || '[SPRAG] Action failed.';\n"
+        "    }\n\n"
+        "    formData(source) {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_FORM_DATA__ : null;\n"
+        "        if (typeof helper !== 'function') {\n"
+        "            throw new Error('[SPRAG] Form helper unavailable.');\n"
+        "        }\n"
+        "        return helper(source);\n"
+        "    }\n\n"
+        "    uploadForm(name, source, onProgress = null) {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_UPLOADS__ : null;\n"
+        "        if (!helper || typeof helper.submit !== 'function') {\n"
+        "            return Promise.reject(new Error('[SPRAG] Upload client unavailable.'));\n"
+        "        }\n"
+        "        return helper.submit(name, source, onProgress);\n"
+        "    }\n\n"
+        "    navigate(target, options = {}) {\n"
+        "        const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;\n"
+        "        if (typeof navigator !== 'function') {\n"
+        "            throw new Error('[SPRAG] Browser navigator unavailable.');\n"
+        "        }\n"
+        "        return navigator(target, options);\n"
+        "    }\n\n"
+        "    setMetadata(metadata = {}, options = {}) {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_SET_METADATA__ : null;\n"
+        "        if (typeof helper !== 'function') {\n"
+        "            throw new Error('[SPRAG] Metadata helper unavailable.');\n"
+        "        }\n"
+        "        return helper(metadata, options);\n"
+        "    }\n\n"
+    )
+    if method_chunks:
+        for chunk, chunk_mappings, source_line, name in method_chunks:
+            start_line = len(line_mappings) + 1
+            text = chunk + "\n\n"
+            _append(
+                text,
+                explicit_mappings=chunk_mappings + mappings_for_text("\n\n", source_line=source_line, name=name if source_line is not None else None),
+            )
+            if source_line is not None:
+                method_spans.append(
+                    {
+                        "name": name,
+                        "source_line": source_line,
+                        "generated_start_line": start_line,
+                        "generated_end_line": start_line + count_lines(text) - 1,
+                    }
+                )
+    else:
+        _append("    onStart() {}\n")
+    _append("}\n")
 
-    offSocket(event, handler) {{
-        const socket = this._spragSocket();
-        if (!socket) {{
-            return this;
-        }}
-        return super.offSocket(socket, event, handler);
-    }}
-
-    emitSocket(event, payload = null) {{
-        const socket = this._spragSocket();
-        if (!socket || typeof socket.emit !== 'function') {{
-            console.warn('[SPRAG] Module.emit_socket(...) called before the shared socket bridge was ready.');
-            return false;
-        }}
-        return socket.emit(event, payload);
-    }}
-
-    joinTopic(topic) {{
-        const socket = this._spragSocket();
-        if (!socket || typeof socket.joinTopic !== 'function') {{
-            console.warn('[SPRAG] Module.join_topic(...) called before the shared socket bridge was ready.');
-            return false;
-        }}
-        return socket.joinTopic(topic);
-    }}
-
-    leaveTopic(topic) {{
-        const socket = this._spragSocket();
-        if (!socket || typeof socket.leaveTopic !== 'function') {{
-            return false;
-        }}
-        return socket.leaveTopic(topic);
-    }}
-
-    callAction(name, payload = {{}}) {{
-        if (!this.actions || typeof this.actions.call !== 'function') {{
-            return Promise.reject(new Error('[SPRAG] Action client unavailable.'));
-        }}
-        return this.actions.call(name, payload);
-    }}
-
-    actionErrorMessage(error, fallback = '') {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_ACTION_ERROR_MESSAGE__ : null;
-        if (typeof helper === 'function') {{
-            return helper(error, fallback);
-        }}
-        if (error && typeof error.message === 'string' && error.message.trim()) {{
-            return error.message.trim();
-        }}
-        return fallback || '[SPRAG] Action failed.';
-    }}
-
-    formData(source) {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_FORM_DATA__ : null;
-        if (typeof helper !== 'function') {{
-            throw new Error('[SPRAG] Form helper unavailable.');
-        }}
-        return helper(source);
-    }}
-
-    uploadForm(name, source, onProgress = null) {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_UPLOADS__ : null;
-        if (!helper || typeof helper.submit !== 'function') {{
-            return Promise.reject(new Error('[SPRAG] Upload client unavailable.'));
-        }}
-        return helper.submit(name, source, onProgress);
-    }}
-
-    navigate(target, options = {{}}) {{
-        const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;
-        if (typeof navigator !== 'function') {{
-            throw new Error('[SPRAG] Browser navigator unavailable.');
-        }}
-        return navigator(target, options);
-    }}
-
-    setMetadata(metadata = {{}}, options = {{}}) {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_SET_METADATA__ : null;
-        if (typeof helper !== 'function') {{
-            throw new Error('[SPRAG] Metadata helper unavailable.');
-        }}
-        return helper(metadata, options);
-    }}
-
-{methods_block}
-}}
-"""
+    code = "".join(rendered_parts)
+    source_map = build_source_map(
+        generated_file=generated_filename,
+        source_file=source_file,
+        source_content=source_content,
+        line_mappings=line_mappings,
+        extra={
+            "x_sprag": {
+                "class": module_class.__name__,
+                "kind": "module",
+                "methods": method_spans,
+            }
+        },
+    )
+    code += f"//# sourceMappingURL={generated_filename}.map\n"
+    return GeneratedArtifact(code=code, source_map=source_map)
 
 
 def _emit_env_helper_prelude(compiled_js: str) -> str:
@@ -473,7 +580,7 @@ def _server_only_imports_for_class(module_class) -> list[str]:
     return sorted(imported)
 
 
-def _compile_constructor_extras(module_class, *, method_names, env) -> str:
+def _compile_constructor_extras(module_class, *, method_names, env) -> tuple[str, list[GeneratedLineMapping | None]]:
     """Compile safe ``__init__`` field initializers into the JS constructor.
 
     SPRAG owns the Module constructor shape in generated JS because Ragot
@@ -485,7 +592,7 @@ def _compile_constructor_extras(module_class, *, method_names, env) -> str:
     """
     init = module_class.__dict__.get("__init__")
     if init is None:
-        return ""
+        return "", []
     source, source_file, source_start_line = _method_source_info(init)
     function_def = ast.parse(source).body[0]
     statements = []
@@ -515,14 +622,16 @@ def _compile_constructor_extras(module_class, *, method_names, env) -> str:
             source_line=source.splitlines()[getattr(stmt, "lineno", 1) - 1] if source.splitlines() else None,
         )
     if not statements:
-        return ""
+        return "", []
     constructor_env = dict(env)
     constructor_env.setdefault("state", "initialState")
-    return _compile_statements(
+    return _compile_statements_with_mappings(
         statements,
         method_names=method_names,
         env=constructor_env,
         indent=8,
+        source_line_offset=source_start_line - 1,
+        source_name="__init__",
     )
 
 
@@ -603,6 +712,35 @@ def _wrap_debounce(body, js_name, ms, *, indent=8):
     )
 
 
+def _wrap_debounce_with_mappings(
+    body,
+    body_mappings,
+    js_name,
+    ms,
+    *,
+    indent=8,
+    source_line,
+    source_name,
+):
+    wrapped = _wrap_debounce(body, js_name, ms, indent=indent)
+    pad = " " * indent
+    key = json.dumps(js_name)
+    prefix = [
+        f"{pad}if (this._sprDebounce === undefined) this._sprDebounce = {{}};",
+        f"{pad}if (this._sprDebounce[{key}] !== undefined) this.clearTimeout(this._sprDebounce[{key}]);",
+        f"{pad}this._sprDebounce[{key}] = this.timeout(() => {{",
+        f"{pad}    this._sprDebounce[{key}] = undefined;",
+    ]
+    suffix = [f"{pad}}}, {ms});"]
+    mappings = []
+    for line in prefix:
+        mappings.extend(mappings_for_text(line, source_line=source_line, name=source_name))
+    mappings.extend(body_mappings)
+    for line in suffix:
+        mappings.extend(mappings_for_text(line, source_line=source_line, name=source_name))
+    return wrapped, mappings
+
+
 def _wrap_throttle(body, js_name, ms, *, indent=8):
     """Wrap a compiled method body with a leading-edge throttle.
 
@@ -620,6 +758,32 @@ def _wrap_throttle(body, js_name, ms, *, indent=8):
         f"{pad}this._sprThrottle[{key}] = __now;\n"
         f"{body}"
     )
+
+
+def _wrap_throttle_with_mappings(
+    body,
+    body_mappings,
+    js_name,
+    ms,
+    *,
+    indent=8,
+    source_line,
+    source_name,
+):
+    wrapped = _wrap_throttle(body, js_name, ms, indent=indent)
+    pad = " " * indent
+    key = json.dumps(js_name)
+    prefix = [
+        f"{pad}if (this._sprThrottle === undefined) this._sprThrottle = {{}};",
+        f"{pad}const __now = Date.now();",
+        f"{pad}if (this._sprThrottle[{key}] !== undefined && __now - this._sprThrottle[{key}] < {ms}) return;",
+        f"{pad}this._sprThrottle[{key}] = __now;",
+    ]
+    mappings = []
+    for line in prefix:
+        mappings.extend(mappings_for_text(line, source_line=source_line, name=source_name))
+    mappings.extend(body_mappings)
+    return wrapped, mappings
 
 
 def _reindent(body, *, extra):

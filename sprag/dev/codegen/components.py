@@ -25,6 +25,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+from pathlib import Path
 
 from .diagnostics import lint_browser_method
 from .expressions import _compile_expr
@@ -39,11 +40,25 @@ from .modules import (
     _method_source_info,
     collect_env_helper_refs_for_class,
 )
-from .statements import _compile_statements
+from .source_maps import (
+    GeneratedArtifact,
+    GeneratedLineMapping,
+    build_source_map,
+    count_lines,
+    mappings_for_text,
+)
+from .statements import _compile_statements_with_mappings
 from .stores_scan import collect_store_refs_for_class
 
 
 def compile_component_class(component_class, *, declared_import_aliases=None) -> str:
+    return compile_component_artifact(
+        component_class,
+        declared_import_aliases=declared_import_aliases,
+    ).code
+
+
+def compile_component_artifact(component_class, *, declared_import_aliases=None) -> GeneratedArtifact:
     render_source, render_file, render_start_line = _method_source_info(component_class.render)
     render_ast = ast.parse(render_source)
     function_def = render_ast.body[0]
@@ -93,9 +108,11 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
         return env
 
     body_lines = []
+    render_line_mappings: list[GeneratedLineMapping | None] = []
     return_expr = "createElement('div', {}, 'Unsupported component render')"
 
     for stmt in function_def.body:
+        stmt_line = render_start_line + getattr(stmt, "lineno", 1) - 1
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             target = stmt.targets[0].id
             if target == "props":
@@ -103,10 +120,19 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
                 continue
             compiled_value = _compile_expr(stmt.value, render_env)
             render_env[target] = target
-            body_lines.append(f"        const {target} = {compiled_value};")
+            line = f"        const {target} = {compiled_value};"
+            body_lines.append(line)
+            render_line_mappings.extend(mappings_for_text(line, source_line=stmt_line, name="render"))
             continue
         if isinstance(stmt, ast.Return):
             return_expr = _compile_expr(stmt.value, render_env)
+            render_line_mappings.extend(
+                mappings_for_text(
+                    f"        return {return_expr};",
+                    source_line=stmt_line,
+                    name="render",
+                )
+            )
             continue
         raise JSCodegenError(
             f"Unsupported component statement in {component_class.__name__}.render: {ast.dump(stmt)}",
@@ -158,7 +184,7 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
         if callable(v) and not n.startswith("__")
     }
 
-    extra_methods = []
+    extra_methods: list[tuple[str, list[GeneratedLineMapping | None], int | None, str]] = []
 
     def _lifecycle_body(py_name, prologue_lines, epilogue_lines=None):
         """Compile a lifecycle hook body with prologue/epilogue injected.
@@ -181,8 +207,12 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
                 disallow_component_subscribe=True,
             )
             try:
-                body = _compile_statements(
-                    fn_ast.body, method_names=method_names, env=_seed_env()
+                body, body_mappings = _compile_statements_with_mappings(
+                    fn_ast.body,
+                    method_names=method_names,
+                    env=_seed_env(),
+                    source_line_offset=source_start_line - 1,
+                    source_name=py_name,
                 )
             except JSCodegenError as exc:
                 raise exc.with_context(
@@ -194,17 +224,36 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
                 ) from exc
         else:
             body = None
+            body_mappings = []
 
         parts = []
+        mappings = []
         if prologue_lines:
-            parts.append("\n".join(prologue_lines))
+            prologue = "\n".join(prologue_lines)
+            parts.append(prologue)
+            mappings.extend(
+                mappings_for_text(
+                    prologue,
+                    source_line=source_start_line if py_name in user_lifecycle else None,
+                    name=py_name if py_name in user_lifecycle else None,
+                )
+            )
         if body is not None:
             parts.append(body)
+            mappings.extend(body_mappings)
         if epilogue_lines:
-            parts.append("\n".join(epilogue_lines))
+            epilogue = "\n".join(epilogue_lines)
+            parts.append(epilogue)
+            mappings.extend(
+                mappings_for_text(
+                    epilogue,
+                    source_line=source_start_line if py_name in user_lifecycle else None,
+                    name=py_name if py_name in user_lifecycle else None,
+                )
+            )
         if not parts:
             return None
-        return "\n".join(parts)
+        return "\n".join(parts), mappings, (source_start_line if py_name in user_lifecycle else None)
 
     # Compile arbitrary helper methods (event handlers, @virtual_scroll
     # chunk()/total()/measure() methods, etc.) so they all survive on the
@@ -228,8 +277,12 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
         js_name = _map_name(name)
         is_async = isinstance(fn_ast, ast.AsyncFunctionDef)
         try:
-            body = _compile_statements(
-                fn_ast.body, method_names=method_names, env=_seed_env()
+            body, body_mappings = _compile_statements_with_mappings(
+                fn_ast.body,
+                method_names=method_names,
+                env=_seed_env(),
+                source_line_offset=source_start_line - 1,
+                source_name=name,
             )
         except JSCodegenError as exc:
             raise exc.with_context(
@@ -241,7 +294,18 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
             ) from exc
         params = ", ".join(arg.arg for arg in fn_ast.args.args[1:])
         async_prefix = "async " if is_async else ""
-        extra_methods.append(f"    {async_prefix}{js_name}({params}) {{\n{body}\n    }}")
+        extra_methods.append((
+            f"    {async_prefix}{js_name}({params}) {{\n{body}\n    }}",
+            mappings_for_text(
+                f"    {async_prefix}{js_name}({params}) {{",
+                source_line=source_start_line,
+                name=name,
+            )
+            + body_mappings
+            + mappings_for_text("    }", source_line=source_start_line, name=name),
+            source_start_line,
+            name,
+        ))
 
     # ---------- Synthesise onStart ----------
     on_start_prologue: list[str] = []
@@ -258,21 +322,56 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
     if mount_setup_lines:
         extra_methods.extend(
             [
-                "    __spragSyncMounts() {\n"
+                ("    __spragSyncMounts() {\n"
                 "        if (!this.element || !this._isMounted) {\n"
                 "            return;\n"
                 "        }\n"
                 + "\n".join(mount_setup_lines)
                 + "\n"
                 "    }",
-                "    setStateSync(next) {\n"
+                mappings_for_text("    __spragSyncMounts() {", source_line=None, name=None)
+                + mappings_for_text(
+                    "        if (!this.element || !this._isMounted) {\n"
+                    "            return;\n"
+                    "        }\n"
+                    + "\n".join(mount_setup_lines),
+                    source_line=None,
+                    name=None,
+                )
+                + mappings_for_text("    }", source_line=None, name=None),
+                None,
+                "__spragSyncMounts",
+                ),
+                ("    setStateSync(next) {\n"
                 "        super.setStateSync(next);\n"
                 "        this.__spragSyncMounts();\n"
                 "    }",
-                "    _performUpdate() {\n"
+                mappings_for_text(
+                    "    setStateSync(next) {\n"
+                    "        super.setStateSync(next);\n"
+                    "        this.__spragSyncMounts();\n"
+                    "    }",
+                    source_line=None,
+                    name=None,
+                ),
+                None,
+                "setStateSync",
+                ),
+                ("    _performUpdate() {\n"
                 "        super._performUpdate();\n"
                 "        this.__spragSyncMounts();\n"
                 "    }",
+                mappings_for_text(
+                    "    _performUpdate() {\n"
+                    "        super._performUpdate();\n"
+                    "        this.__spragSyncMounts();\n"
+                    "    }",
+                    source_line=None,
+                    name=None,
+                ),
+                None,
+                "_performUpdate",
+                ),
             ]
         )
         on_start_prologue.append("        this.__spragSyncMounts();")
@@ -307,21 +406,46 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
 
     on_start_body = _lifecycle_body("on_start", on_start_prologue)
     if on_start_body is not None:
-        extra_methods.append(f"    onStart() {{\n{on_start_body}\n    }}")
+        on_start_text, on_start_mappings, start_line = on_start_body
+        extra_methods.append((
+            f"    onStart() {{\n{on_start_text}\n    }}",
+            mappings_for_text("    onStart() {", source_line=start_line, name="on_start" if start_line is not None else None)
+            + on_start_mappings
+            + mappings_for_text("    }", source_line=start_line, name="on_start" if start_line is not None else None),
+            start_line,
+            "on_start",
+        ))
 
     on_stop_body = _lifecycle_body("on_stop", [])
     if on_stop_body is not None:
-        extra_methods.append(f"    onStop() {{\n{on_stop_body}\n    }}")
+        on_stop_text, on_stop_mappings, stop_line = on_stop_body
+        extra_methods.append((
+            f"    onStop() {{\n{on_stop_text}\n    }}",
+            mappings_for_text("    onStop() {", source_line=stop_line, name="on_stop" if stop_line is not None else None)
+            + on_stop_mappings
+            + mappings_for_text("    }", source_line=stop_line, name="on_stop" if stop_line is not None else None),
+            stop_line,
+            "on_stop",
+        ))
 
     unmount_body = _lifecycle_body("unmount", unmount_prologue, unmount_epilogue)
     if unmount_body is not None:
-        extra_methods.append(f"    unmount() {{\n{unmount_body}\n    }}")
+        unmount_text, unmount_mappings, unmount_line = unmount_body
+        extra_methods.append((
+            f"    unmount() {{\n{unmount_text}\n    }}",
+            mappings_for_text("    unmount() {", source_line=unmount_line, name="unmount" if unmount_line is not None else None)
+            + unmount_mappings
+            + mappings_for_text("    }", source_line=unmount_line, name="unmount" if unmount_line is not None else None),
+            unmount_line,
+            "unmount",
+        ))
 
-    methods_block = "\n\n".join(extra_methods)
+    method_code = [chunk for chunk, _, _, _ in extra_methods]
+    methods_block = "\n\n".join(method_code)
     if methods_block:
         methods_block = "\n\n" + methods_block + "\n"
 
-    all_code = "\n".join(body_lines) + "\n" + return_expr + "\n" + "\n".join(extra_methods)
+    all_code = "\n".join(body_lines) + "\n" + return_expr + "\n" + "\n".join(method_code)
     extra_imports = _detect_ragot_imports(all_code) | mount_imports
     base_imports = "Component, createElement"
     if extra_imports:
@@ -340,66 +464,137 @@ def compile_component_class(component_class, *, declared_import_aliases=None) ->
     )
     env_helper_prelude = _emit_env_helper_prelude(all_code)
 
-    return f"""import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';
-{store_import_line}
-{class_import_lines}
-{env_helper_prelude}export class {component_class.__name__} extends Component {{
-    constructor(initialState = {{}}, options = {{}}) {{
-        super(initialState);
-        this.props = options.props || {{}};
-        this.module = options.module || null;
-        this.refs = {{}};
-    }}
+    source_file = inspect.getsourcefile(component_class) or inspect.getfile(component_class)
+    source_content = Path(source_file).read_text(encoding="utf-8")
+    generated_filename = f"{component_class.__name__}.js"
+    line_mappings: list[GeneratedLineMapping | None] = []
+    method_spans: list[dict[str, object]] = []
+    rendered_parts: list[str] = []
 
-    formData(source) {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_FORM_DATA__ : null;
-        if (typeof helper !== 'function') {{
-            throw new Error('[SPRAG] Form helper unavailable.');
-        }}
-        return helper(source);
-    }}
+    def _append(
+        text: str,
+        *,
+        source_line: int | None = None,
+        name: str | None = None,
+        explicit_mappings: list[GeneratedLineMapping | None] | None = None,
+    ):
+        rendered_parts.append(text)
+        if explicit_mappings is not None:
+            line_mappings.extend(explicit_mappings)
+            return
+        mapping = GeneratedLineMapping(source_line=source_line, name=name) if source_line is not None else None
+        line_mappings.extend([mapping] * count_lines(text))
 
-    uploadForm(name, source, onProgress = null) {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_UPLOADS__ : null;
-        if (!helper || typeof helper.submit !== 'function') {{
-            return Promise.reject(new Error('[SPRAG] Upload client unavailable.'));
-        }}
-        return helper.submit(name, source, onProgress);
-    }}
+    _append(f"import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';\n")
+    _append(store_import_line)
+    _append("\n")
+    _append(class_import_lines)
+    _append(env_helper_prelude)
+    _append(f"export class {component_class.__name__} extends Component {{\n")
+    _append(
+        "    constructor(initialState = {}, options = {}) {\n"
+        "        super(initialState);\n"
+        "        this.props = options.props || {};\n"
+        "        this.module = options.module || null;\n"
+        "        this.refs = {};\n"
+        "    }\n\n"
+        "    formData(source) {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_FORM_DATA__ : null;\n"
+        "        if (typeof helper !== 'function') {\n"
+        "            throw new Error('[SPRAG] Form helper unavailable.');\n"
+        "        }\n"
+        "        return helper(source);\n"
+        "    }\n\n"
+        "    uploadForm(name, source, onProgress = null) {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_UPLOADS__ : null;\n"
+        "        if (!helper || typeof helper.submit !== 'function') {\n"
+        "            return Promise.reject(new Error('[SPRAG] Upload client unavailable.'));\n"
+        "        }\n"
+        "        return helper.submit(name, source, onProgress);\n"
+        "    }\n\n"
+        "    actionErrorMessage(error, fallback = '') {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_ACTION_ERROR_MESSAGE__ : null;\n"
+        "        if (typeof helper === 'function') {\n"
+        "            return helper(error, fallback);\n"
+        "        }\n"
+        "        if (error && typeof error.message === 'string' && error.message.trim()) {\n"
+        "            return error.message.trim();\n"
+        "        }\n"
+        "        return fallback || '[SPRAG] Action failed.';\n"
+        "    }\n\n"
+        "    navigate(target, options = {}) {\n"
+        "        const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;\n"
+        "        if (typeof navigator !== 'function') {\n"
+        "            throw new Error('[SPRAG] Browser navigator unavailable.');\n"
+        "        }\n"
+        "        return navigator(target, options);\n"
+        "    }\n\n"
+        "    setMetadata(metadata = {}, options = {}) {\n"
+        "        const helper = typeof window !== 'undefined' ? window.__SPRAG_SET_METADATA__ : null;\n"
+        "        if (typeof helper !== 'function') {\n"
+        "            throw new Error('[SPRAG] Metadata helper unavailable.');\n"
+        "        }\n"
+        "        return helper(metadata, options);\n"
+        "    }\n\n"
+    )
+    render_start_generated = len(line_mappings) + 1
+    render_body = "\n".join(body_lines)
+    render_method = (
+        "    render(propsOverride = null) {\n"
+        "        const props = propsOverride || this.props || {};\n"
+        + (render_body + "\n" if render_body else "")
+        + f"        return {return_expr};\n"
+        "    }"
+    )
+    render_method_mappings = (
+        mappings_for_text("    render(propsOverride = null) {", source_line=render_start_line, name="render")
+        + mappings_for_text("        const props = propsOverride || this.props || {};", source_line=render_start_line, name="render")
+        + render_line_mappings
+        + mappings_for_text("    }", source_line=render_start_line, name="render")
+    )
+    _append(render_method, explicit_mappings=render_method_mappings)
+    method_spans.append(
+        {
+            "name": "render",
+            "source_line": render_start_line,
+            "generated_start_line": render_start_generated,
+            "generated_end_line": render_start_generated + count_lines(render_method) - 1,
+        }
+    )
+    if methods_block:
+        _append("\n")
+        for chunk, chunk_mappings, source_line, name in extra_methods:
+            _append("\n")
+            start_line = len(line_mappings) + 1
+            _append(chunk, explicit_mappings=chunk_mappings)
+            if source_line is not None:
+                method_spans.append(
+                    {
+                        "name": name,
+                        "source_line": source_line,
+                        "generated_start_line": start_line,
+                        "generated_end_line": start_line + count_lines(chunk) - 1,
+                    }
+                )
+        _append("\n")
+    _append("}\n")
 
-    actionErrorMessage(error, fallback = '') {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_ACTION_ERROR_MESSAGE__ : null;
-        if (typeof helper === 'function') {{
-            return helper(error, fallback);
-        }}
-        if (error && typeof error.message === 'string' && error.message.trim()) {{
-            return error.message.trim();
-        }}
-        return fallback || '[SPRAG] Action failed.';
-    }}
-
-    navigate(target, options = {{}}) {{
-        const navigator = typeof window !== 'undefined' ? window.__SPRAG_NAVIGATE__ : null;
-        if (typeof navigator !== 'function') {{
-            throw new Error('[SPRAG] Browser navigator unavailable.');
-        }}
-        return navigator(target, options);
-    }}
-
-    setMetadata(metadata = {{}}, options = {{}}) {{
-        const helper = typeof window !== 'undefined' ? window.__SPRAG_SET_METADATA__ : null;
-        if (typeof helper !== 'function') {{
-            throw new Error('[SPRAG] Metadata helper unavailable.');
-        }}
-        return helper(metadata, options);
-    }}
-
-    render(propsOverride = null) {{
-        const props = propsOverride || this.props || {{}};
-{chr(10).join(body_lines)}
-        return {return_expr};
-    }}{methods_block}}}
-"""
+    code = "".join(rendered_parts)
+    source_map = build_source_map(
+        generated_file=generated_filename,
+        source_file=source_file,
+        source_content=source_content,
+        line_mappings=line_mappings,
+        extra={
+            "x_sprag": {
+                "class": component_class.__name__,
+                "kind": "component",
+                "methods": method_spans,
+            }
+        },
+    )
+    code += f"//# sourceMappingURL={generated_filename}.map\n"
+    return GeneratedArtifact(code=code, source_map=source_map)
 
 
 # ---------------------------------------------------------------------------

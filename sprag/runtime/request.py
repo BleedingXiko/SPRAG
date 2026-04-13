@@ -43,6 +43,7 @@ class Request:
     headers: dict = field(default_factory=dict)
     method: str = "GET"
     body: bytes = b""
+    request_id: str | None = None
     session_id: str | None = None
     cookies: dict = field(default_factory=dict)
     session: object | None = None
