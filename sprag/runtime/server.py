@@ -40,7 +40,12 @@ from specter import ManagedProcess, Watcher, WatcherError, start_process
 from specter import ServiceManager, boot
 
 from .routing import match_page_route
-from .session import hydrate_request, resolve_auth_service
+from .session import (
+    hydrate_request,
+    resolve_auth_service,
+    resolve_session_policy,
+    stamp_login_session,
+)
 
 
 _UNSET = object()
@@ -117,14 +122,44 @@ def action(fn=None, *, schema=None, name=None):
 
 @dataclass(frozen=True)
 class _AuthRequirement:
+    roles: tuple[str, ...] | None = None
+    permissions: tuple[str, ...] | None = None
+    require_active_profile: bool = False
     redirect_to: str = "/login"
     next_param: str = "next"
 
 
-def requires_auth(target=None, *, redirect_to="/login", next_param="next"):
+def _normalize_auth_values(values, *, label):
+    if values is None:
+        return None
+    if isinstance(values, str):
+        normalized = (values.strip(),)
+    else:
+        try:
+            normalized = tuple(str(value).strip() for value in values)
+        except TypeError as exc:
+            raise TypeError(
+                f"requires_auth(..., {label}=...) expects a string or iterable of strings."
+            ) from exc
+    cleaned = tuple(value for value in normalized if value)
+    return cleaned or None
+
+
+def requires_auth(
+    target=None,
+    *,
+    roles=None,
+    permissions=None,
+    require_active_profile=False,
+    redirect_to="/login",
+    next_param="next",
+):
     """Guard a controller class, ``load()``, or ``@action`` with auth."""
 
     requirement = _AuthRequirement(
+        roles=_normalize_auth_values(roles, label="roles"),
+        permissions=_normalize_auth_values(permissions, label="permissions"),
+        require_active_profile=bool(require_active_profile),
         redirect_to=str(redirect_to or "/login"),
         next_param=str(next_param or "next"),
     )
@@ -818,11 +853,24 @@ class Controller(SPECTERController):
         """Return a first-class redirect response from ``load()`` or an action."""
         return redirect(location, status=status, replace=replace)
 
-    def login(self, user, *, viewer=None, extra_session=None):
+    def login(
+        self,
+        user,
+        *,
+        viewer=None,
+        active_profile=None,
+        extra_session=None,
+        remember=False,
+    ):
         """Rotate the session id and persist auth state through the auth provider."""
         request = hydrate_request(self.request, app=self.app)
         auth = resolve_auth_service(self.app)
         request.session.rotate()
+        stamp_login_session(
+            request.session,
+            policy=resolve_session_policy(self.app),
+            remember=remember,
+        )
         session_payload = dict(extra_session or {})
         if viewer is not None and "viewer" not in session_payload:
             session_payload["viewer"] = viewer
@@ -833,13 +881,62 @@ class Controller(SPECTERController):
             extra_session=session_payload or None,
         )
         request.user = user
+        if active_profile is not None:
+            auth.set_active_profile(
+                active_profile,
+                user,
+                request.session,
+                request,
+                extra_session=dict(extra_session or {}) or None,
+            )
+        request.active_profile = auth.load_active_profile(user, request.session, request)
         return user
+
+    def set_active_profile(self, profile, *, extra_session=None):
+        """Update the provider-owned active profile without rotating the session id."""
+        request = hydrate_request(self.request, app=self.app)
+        auth = resolve_auth_service(self.app)
+        auth.set_active_profile(
+            profile,
+            request.user,
+            request.session,
+            request,
+            extra_session=dict(extra_session or {}) or None,
+        )
+        request.active_profile = auth.load_active_profile(
+            request.user,
+            request.session,
+            request,
+        )
+        return request.active_profile
+
+    def require_auth(
+        self,
+        *,
+        roles=None,
+        permissions=None,
+        require_active_profile=False,
+        redirect_to="/login",
+        next_param="next",
+    ):
+        """Imperatively enforce the same auth requirements as ``@requires_auth``."""
+        request = hydrate_request(self.request, app=self.app)
+        requirement = _AuthRequirement(
+            roles=_normalize_auth_values(roles, label="roles"),
+            permissions=_normalize_auth_values(permissions, label="permissions"),
+            require_active_profile=bool(require_active_profile),
+            redirect_to=str(redirect_to or "/login"),
+            next_param=str(next_param or "next"),
+        )
+        _enforce_auth_requirement(requirement, request, app=self.app, method_name=None)
+        return request.user
 
     def logout(self):
         """Invalidate the current session and drop the resolved request user."""
         request = hydrate_request(self.request, app=self.app)
         request.session.invalidate()
         request.user = None
+        request.active_profile = None
         return None
 
 
@@ -923,17 +1020,72 @@ def _resolve_surface_controller(pages, mounts, route_path, *, app=None):
     raise ActionDispatchError(f"Unknown route {route_path!r}.", status_code=404)
 
 
+def _evaluate_auth_requirement(requirement, request, *, app=None):
+    if requirement is None:
+        return None
+
+    user = getattr(request, "user", None)
+    if user is None:
+        return {
+            "status_code": 401,
+            "message": "Authentication required.",
+            "redirect_location": _auth_redirect_location(requirement, request),
+        }
+
+    active_profile = getattr(request, "active_profile", None)
+    if requirement.require_active_profile and active_profile is None:
+        return {
+            "status_code": 403,
+            "message": "Active profile required.",
+            "redirect_location": None,
+        }
+
+    if requirement.roles or requirement.permissions:
+        auth = resolve_auth_service(app)
+        allowed = bool(
+            auth.authorize(
+                user,
+                active_profile,
+                request.session,
+                request,
+                roles=requirement.roles,
+                permissions=requirement.permissions,
+            )
+        )
+        if not allowed:
+            return {
+                "status_code": 403,
+                "message": "Forbidden.",
+                "redirect_location": None,
+            }
+    return None
+
+
+def _enforce_auth_requirement(requirement, request, *, app=None, method_name=None):
+    failure = _evaluate_auth_requirement(requirement, request, app=app)
+    if failure is None:
+        return
+    if (
+        failure["status_code"] == 401
+        and getattr(request, "method", "GET") in {"GET", "BUILD"}
+        and method_name in {None, "load"}
+    ):
+        raise redirect(failure["redirect_location"])
+    raise ActionDispatchError(failure["message"], status_code=failure["status_code"])
+
+
 def authorize_controller_method(controller, method_name):
-    """Raise a redirect or 401 when a guarded method lacks an authenticated user."""
+    """Enforce a controller method's resolved auth requirement."""
     requirement = _controller_auth_requirement(controller, method_name)
     if requirement is None:
         return
     request = hydrate_request(controller.request, app=controller.app)
-    if getattr(request, "user", None) is not None:
-        return
-    if getattr(request, "method", "GET") in {"GET", "BUILD"} and method_name == "load":
-        raise redirect(_auth_redirect_location(requirement, request))
-    raise ActionDispatchError("Authentication required.", status_code=401)
+    _enforce_auth_requirement(
+        requirement,
+        request,
+        app=controller.app,
+        method_name=method_name,
+    )
 
 
 def _controller_auth_requirement(controller, method_name):

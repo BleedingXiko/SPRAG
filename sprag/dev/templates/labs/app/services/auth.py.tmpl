@@ -27,16 +27,27 @@ class LabsAuthService:
                 "Ada Lovelace",
                 "Computing Pioneer",
             ),
-            "grace": _demo_user(
-                "user_grace",
-                "grace",
-                "compiler",
-                "Grace Hopper",
-                "Compiler Admiral",
-            ),
         }
         self._users_by_id = {
             user["id"]: dict(user) for user in self._users_by_username.values()
+        }
+        self._profiles_by_user_id = {
+            "user_ada": [
+                {
+                    "id": "profile_owner",
+                    "slug": "owner",
+                    "label": "Owner Workspace",
+                    "roles": ("owner", "editor"),
+                    "permissions": ("reports:publish", "profile:switch"),
+                },
+                {
+                    "id": "profile_auditor",
+                    "slug": "auditor",
+                    "label": "Auditor Workspace",
+                    "roles": ("auditor",),
+                    "permissions": ("profile:switch",),
+                },
+            ]
         }
 
     def authenticate(self, username, password):
@@ -57,6 +68,36 @@ class LabsAuthService:
             "title": user["title"],
         }
 
+    def profiles_for(self, user):
+        if not user:
+            return []
+        return [
+            {
+                "id": profile["id"],
+                "slug": profile["slug"],
+                "label": profile["label"],
+            }
+            for profile in self._profiles_by_user_id.get(user["id"], [])
+        ]
+
+    def default_profile_for(self, user):
+        profiles = self._profiles_by_user_id.get((user or {}).get("id"), [])
+        return dict(profiles[0]) if profiles else None
+
+    def resolve_profile(self, user, profile):
+        if user is None or profile is None:
+            return None
+        if isinstance(profile, dict):
+            candidate = profile.get("id") or profile.get("slug")
+        else:
+            candidate = str(profile).strip()
+        if not candidate:
+            return None
+        for existing in self._profiles_by_user_id.get(user["id"], []):
+            if candidate in {existing["id"], existing["slug"]}:
+                return dict(existing)
+        return None
+
     def load_user(self, session, request):
         user_id = session.get("auth_user_id")
         if not user_id:
@@ -64,13 +105,15 @@ class LabsAuthService:
         user = self._users_by_id.get(str(user_id))
         return dict(user) if user is not None else None
 
-    def public_snapshot(self, user, session, request):
-        viewer = session.get("viewer")
-        if not isinstance(viewer, dict):
-            viewer = self.viewer_for(user)
-        return {"viewer": viewer}
+    def load_active_profile(self, user, session, request):
+        profile_id = session.get("active_profile_id")
+        if not profile_id:
+            return None
+        return self.resolve_profile(user, profile_id)
 
     def login_session(self, user, session, request, extra_session=None):
+        # External providers typically verify identity upstream, then stamp the
+        # local user id into the server session during request hydration.
         session.patch(
             {
                 "auth_user_id": user["id"],
@@ -79,6 +122,63 @@ class LabsAuthService:
         )
         if extra_session:
             session.patch(dict(extra_session))
+
+    def set_active_profile(self, profile, user, session, request, extra_session=None):
+        # Providers own how profiles map onto session state. The framework only
+        # calls this hook when controller code asks to switch the active profile.
+        resolved = self.resolve_profile(user, profile)
+        if resolved is None:
+            session.delete("active_profile_id")
+        else:
+            session.set("active_profile_id", resolved["id"])
+        if extra_session:
+            session.patch(dict(extra_session))
+
+    def authorize(
+        self,
+        user,
+        active_profile,
+        session,
+        request,
+        *,
+        roles=None,
+        permissions=None,
+    ) -> bool:
+        # This callback is where provider adapters translate app-specific roles
+        # or permissions into a simple allow/deny decision for the framework.
+        if user is None:
+            return False
+        if roles:
+            if active_profile is None:
+                return False
+            profile_roles = set(active_profile.get("roles") or ())
+            if not profile_roles.intersection(roles):
+                return False
+        if permissions:
+            if active_profile is None:
+                return False
+            profile_permissions = set(active_profile.get("permissions") or ())
+            if not all(permission in profile_permissions for permission in permissions):
+                return False
+        return True
+
+    def public_snapshot(self, user, session, request):
+        # Keep this as the only source of browser-visible auth data so private
+        # provider fields never leak into the rendered payload.
+        viewer = session.get("viewer")
+        if not isinstance(viewer, dict):
+            viewer = self.viewer_for(user)
+        active_profile = request.active_profile
+        if active_profile is not None:
+            active_profile = {
+                "id": active_profile["id"],
+                "slug": active_profile["slug"],
+                "label": active_profile["label"],
+            }
+        return {
+            "viewer": viewer,
+            "active_profile": active_profile,
+        }
 
 
 auth_service = LabsAuthService()

@@ -20,7 +20,7 @@ from specter import SocketIngress, registry
 
 from .request import Request
 from .session import commit_request_session, hydrate_request, resolve_session_id
-from .server import controller_context
+from .server import ActionDispatchError, controller_context
 
 logger = logging.getLogger(__name__)
 _SOCKET_RUNTIME_METHODS = {
@@ -274,6 +274,14 @@ class SpragSocketBridge:
 
         try:
             self._ingress.dispatch_message(message, connection=connection)
+        except ActionDispatchError as exc:
+            logger.debug("[SPRAG] socket dispatch failed: %s", exc, exc_info=True)
+            self._ingress.dispatch_default_error_message(exc, connection=connection)
+            self._send_error(
+                connection,
+                f"{exc.__class__.__name__}: {exc}",
+                status=exc.status_code,
+            )
         except Exception as exc:
             logger.debug("[SPRAG] socket dispatch failed: %s", exc, exc_info=True)
             self._ingress.dispatch_default_error_message(exc, connection=connection)
@@ -375,11 +383,11 @@ class SpragSocketBridge:
             self.disconnect(connection)
             return False
 
-    def _send_error(self, connection: SpragSocketConnection, message: str):
-        self._send(
-            connection,
-            {
-                "type": "error",
-                "error": message,
-            },
-        )
+    def _send_error(self, connection: SpragSocketConnection, message: str, *, status=None):
+        envelope = {
+            "type": "error",
+            "error": message,
+        }
+        if status is not None:
+            envelope["status"] = int(status)
+        self._send(connection, envelope)

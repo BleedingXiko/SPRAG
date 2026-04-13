@@ -40,10 +40,11 @@ class UploadDemoModule(Module):
         percent = progress.get("percent", 0)
         loaded = progress.get("loaded", 0)
         total = progress.get("total", 0)
-        if total > 0:
-            message = f"Uploading... {percent}% ({loaded}/{total} bytes)"
-        else:
-            message = f"Uploading... {percent}%"
+        message = (
+            f"Uploading... {percent}% ({loaded}/{total} bytes)"
+            if total > 0
+            else f"Uploading... {percent}%"
+        )
         self.set_progress_dom(percent, message)
 
     def on_upload_result(self, result):

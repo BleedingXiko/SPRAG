@@ -10,7 +10,7 @@ from specter import registry
 
 from .assets import normalize_module_imports
 from .discovery import discover_surfaces
-from .session import AnonymousAuthService, InMemorySessionStore
+from .session import AnonymousAuthService, InMemorySessionStore, SessionPolicy
 from .socket_bridge import SpragSocketBridge, controller_uses_socket_bridge
 
 
@@ -23,6 +23,7 @@ class App:
     shell: object = None
     modules: dict = field(default_factory=dict)
     server_mode: str = "auto"
+    session_policy: SessionPolicy = field(default_factory=SessionPolicy)
 
     def __post_init__(self):
         if self.server_mode not in {"auto", "wsgi", "websocket"}:
@@ -33,6 +34,11 @@ class App:
         self.providers = dict(self.providers or {})
         self.providers.setdefault("session_store", InMemorySessionStore())
         self.providers.setdefault("auth", AnonymousAuthService())
+        self.session_policy = (
+            self.session_policy
+            if isinstance(self.session_policy, SessionPolicy)
+            else SessionPolicy(**dict(self.session_policy or {}))
+        )
         self.modules = normalize_module_imports(self.modules)
         self._pages = None
         self._mounts = None

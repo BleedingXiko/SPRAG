@@ -1,16 +1,9 @@
-import json
-
 from sprag import Component, ui
-
-
-def pretty_auth(snapshot):
-    return json.dumps(snapshot or {}, indent=2, sort_keys=True)
 
 
 class ProtectedAuthCard(Component):
     def render(self, props=None):
-        auth_snapshot = self.state.get("__sprag_auth__") or {}
-        client_auth = self.state.get("client_auth")
+        profiles = self.state.get("available_profiles") or []
         return ui.div(
             ui.h2(self.state.get("title", "Protected Route")),
             ui.p(self.state.get("message", "")),
@@ -20,16 +13,27 @@ class ProtectedAuthCard(Component):
                 class_="metric",
             ),
             ui.div(
+                ui.span("Active Profile"),
+                ui.strong(self.state.get("active_profile_name", "No active profile")),
+                class_="metric",
+            ),
+            ui.div(
                 ui.span("Status"),
                 ui.strong(self.state.get("status", "ready")),
                 class_="metric",
             ),
             ui.div(
                 ui.button(
-                    "Refetch `request.user`",
+                    "Refetch Identity",
                     type="button",
                     class_="btn btn-inline",
                     data_role="whoami",
+                ),
+                ui.button(
+                    "Publish Restricted Report",
+                    type="button",
+                    class_="btn btn-inline",
+                    data_role="publish-report",
                 ),
                 ui.button(
                     "Logout",
@@ -40,9 +44,22 @@ class ProtectedAuthCard(Component):
                 class_="form-actions",
             ),
             ui.div(
+                [
+                    ui.button(
+                        f"Switch to {profile.get('label', profile.get('slug', 'profile'))}",
+                        type="button",
+                        class_="btn btn-inline",
+                        data_role="switch-profile",
+                        data_profile=profile.get("slug"),
+                    )
+                    for profile in profiles
+                ],
+                class_="form-actions",
+            ),
+            ui.div(
                 ui.h3("SSR `__sprag_auth__`"),
                 ui.div(
-                    pretty_auth(auth_snapshot),
+                    self.state.get("auth_snapshot_text", "{}"),
                     class_="form-snapshot",
                     style="white-space: pre-wrap; font-family: monospace;",
                 ),
@@ -50,7 +67,7 @@ class ProtectedAuthCard(Component):
             ui.div(
                 ui.h3("window.__SPRAG_PAYLOAD__.auth"),
                 ui.div(
-                    pretty_auth(client_auth),
+                    self.state.get("client_auth_text", "{}"),
                     class_="form-snapshot",
                     style="white-space: pre-wrap; font-family: monospace;",
                 ),

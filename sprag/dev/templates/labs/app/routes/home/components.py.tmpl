@@ -15,11 +15,11 @@ class Landing(Component):
                 ui.a(
                     ui.h3("Auth Demo →"),
                     ui.p(
-                        "Cookie-backed server sessions, request.user/session, "
-                        "SSR auth redirects, login rotation, and logout "
-                        "invalidation in one protected route."
+                        "Cookie-backed server sessions, request.user plus "
+                        "request.active_profile, provider-owned profile "
+                        "switching, and permission-aware guard failures."
                     ),
-                    ui.span("hybrid · auth · sessions", class_="tag"),
+                    ui.span("hybrid · auth · profiles", class_="tag"),
                     href="/auth-demo/protected",
                     class_="card",
                 ),

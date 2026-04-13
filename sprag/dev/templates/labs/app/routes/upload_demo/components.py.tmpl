@@ -8,6 +8,11 @@ class UploadDemoCard(Component):
         result = self.state.get("result") or {}
         primary = result.get("primary") or {}
         gallery = result.get("gallery") or []
+        gallery_names = [
+            item.get("filename", "")
+            for item in gallery
+            if item.get("filename")
+        ]
         return ui.div(
             ui.h2("Upload Demo"),
             ui.p(
@@ -148,15 +153,22 @@ class UploadDemoCard(Component):
                 ),
                 ui.p(
                     ""
-                    if len(gallery) == 0
-                    else "Supporting files: "
-                    + ", ".join([item.get("filename", "") for item in gallery]),
+                    if len(gallery_names) == 0
+                    else "Supporting files:",
+                    class_="field-hint",
+                ),
+                ui.ul(
+                    [ui.li(name) for name in gallery_names],
                     class_="field-hint",
                 ),
                 ui.p(
                     ""
                     if not result.get("raw_form_keys")
-                    else "Raw multipart fields: " + ", ".join(result.get("raw_form_keys", [])),
+                    else "Raw multipart fields:",
+                    class_="field-hint",
+                ),
+                ui.ul(
+                    [ui.li(name) for name in result.get("raw_form_keys", [])],
                     class_="field-hint",
                 ),
                 ui.p(

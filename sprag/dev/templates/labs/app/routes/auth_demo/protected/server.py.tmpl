@@ -6,14 +6,18 @@ class ProtectedAuthController(Controller):
     route = "/auth-demo/protected"
 
     def load(self):
-        viewer = (self.request.user or {}).get("name", "unknown viewer")
+        auth = self.service("auth")
         return {
             "title": "Protected Route",
             "message": (
-                "Anonymous requests redirect on SSR. Authenticated requests land "
-                "here with request.user resolved on the server."
+                "The framework hydrates request.user plus request.active_profile, "
+                "while the auth provider decides how profiles resolve and whether "
+                "a guard should pass."
             ),
-            "viewer_name": viewer,
+            "viewer_name": (self.request.user or {}).get("name", "unknown viewer"),
+            "active_profile_name": (self.request.active_profile or {}).get("label", "No active profile"),
+            "available_profiles": auth.profiles_for(self.request.user),
+            "status": "ready",
         }
 
     @action(name="logout", schema=Schema("logout", {}))
@@ -29,4 +33,26 @@ class ProtectedAuthController(Controller):
         return {
             "label": label,
             "viewer_name": (self.request.user or {}).get("name", "unknown viewer"),
+            "active_profile_name": (self.request.active_profile or {}).get(
+                "label",
+                "No active profile",
+            ),
+        }
+
+    @action(
+        name="switch-profile",
+        schema=Schema("switch_profile", {"profile": Field(str, required=True)}),
+    )
+    def switch_profile(self, profile):
+        active_profile = self.set_active_profile(profile)
+        return {
+            "status": f"Active profile switched to {(active_profile or {}).get('label', 'No active profile')}.",
+            "active_profile_name": (active_profile or {}).get("label", "No active profile"),
+        }
+
+    @requires_auth(permissions=("reports:publish", "profile:switch"))
+    @action(name="publish-report", schema=Schema("publish_report", {}))
+    def publish_report(self):
+        return {
+            "status": "Report published. Only the Owner profile can do this.",
         }

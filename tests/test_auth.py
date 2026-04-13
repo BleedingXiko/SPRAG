@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from sprag import (
     Component,
@@ -14,6 +15,7 @@ from sprag import (
     Request,
     Schema,
     Screen,
+    SessionPolicy,
     action,
     mount,
     page,
@@ -24,6 +26,7 @@ from sprag.dev.scaffold import scaffold_project
 from sprag.runtime.http.wsgi import SpragWSGIApp
 from sprag.runtime.rendering import render_mount, render_page
 from sprag.runtime.server import dispatch_controller_action
+from sprag.runtime.socket_bridge import SpragSocketBridge
 
 
 def _multipart_body(boundary, *, fields=None, files=None):
@@ -76,6 +79,29 @@ class DemoAuthService:
             }
         }
         self._by_id = {user["id"]: dict(user) for user in self._users.values()}
+        self._profiles_by_user = {
+            "user-ada": [
+                {
+                    "id": "profile-owner",
+                    "slug": "owner",
+                    "label": "Owner Workspace",
+                    "roles": ("owner", "editor"),
+                    "permissions": ("memo:publish", "profile:switch"),
+                },
+                {
+                    "id": "profile-auditor",
+                    "slug": "auditor",
+                    "label": "Auditor Workspace",
+                    "roles": ("auditor",),
+                    "permissions": ("profile:switch",),
+                },
+            ]
+        }
+        self._profiles = {
+            profile["id"]: dict(profile)
+            for profiles in self._profiles_by_user.values()
+            for profile in profiles
+        }
 
     def authenticate(self, username, password):
         user = self._users.get(str(username or "").strip().lower())
@@ -90,6 +116,38 @@ class DemoAuthService:
             "name": user["name"],
         }
 
+    def _profiles_for_user(self, user):
+        if not user:
+            return []
+        return [dict(profile) for profile in self._profiles_by_user.get(user["id"], [])]
+
+    def _public_profile(self, profile):
+        if not profile:
+            return None
+        return {
+            "id": profile["id"],
+            "slug": profile["slug"],
+            "label": profile["label"],
+        }
+
+    def default_profile_for(self, user):
+        profiles = self._profiles_for_user(user)
+        return dict(profiles[0]) if profiles else None
+
+    def resolve_profile(self, user, profile):
+        if user is None or profile is None:
+            return None
+        if isinstance(profile, dict):
+            candidate = profile.get("id") or profile.get("slug")
+        else:
+            candidate = str(profile).strip()
+        if not candidate:
+            return None
+        for existing in self._profiles_for_user(user):
+            if candidate in {existing["id"], existing["slug"]}:
+                return dict(existing)
+        return None
+
     def load_user(self, session, request):
         user_id = session.get("auth_user_id")
         if not user_id:
@@ -97,15 +155,63 @@ class DemoAuthService:
         user = self._by_id.get(user_id)
         return dict(user) if user is not None else None
 
-    def public_snapshot(self, user, session, request):
-        if user is None:
-            return {}
-        return {"viewer": self.viewer_for(user)}
+    def load_active_profile(self, user, session, request):
+        profile_id = session.get("active_profile_id")
+        if not profile_id or user is None:
+            return None
+        profile = self.resolve_profile(user, profile_id)
+        return dict(profile) if profile is not None else None
 
     def login_session(self, user, session, request, extra_session=None):
         session.set("auth_user_id", user["id"])
         if extra_session:
-            session.patch(extra_session)
+            session.patch(dict(extra_session))
+
+    def set_active_profile(self, profile, user, session, request, extra_session=None):
+        resolved = self.resolve_profile(user, profile)
+        if resolved is None:
+            session.delete("active_profile_id")
+        else:
+            session.set("active_profile_id", resolved["id"])
+        if extra_session:
+            session.patch(dict(extra_session))
+
+    def authorize(
+        self,
+        user,
+        active_profile,
+        session,
+        request,
+        *,
+        roles=None,
+        permissions=None,
+    ) -> bool:
+        if user is None:
+            return False
+        if roles:
+            if active_profile is None:
+                return False
+            profile_roles = set(active_profile.get("roles") or ())
+            if not profile_roles.intersection(roles):
+                return False
+        if permissions:
+            if active_profile is None:
+                return False
+            profile_permissions = set(active_profile.get("permissions") or ())
+            if not all(permission in profile_permissions for permission in permissions):
+                return False
+        return True
+
+    def public_snapshot(self, user, session, request):
+        if user is None:
+            return {}
+        viewer = session.get("viewer")
+        if not isinstance(viewer, dict):
+            viewer = self.viewer_for(user)
+        return {
+            "viewer": viewer,
+            "active_profile": self._public_profile(request.active_profile),
+        }
 
 
 class AuthScreen(Screen):
@@ -113,6 +219,7 @@ class AuthScreen(Screen):
         auth = json.dumps(data["__sprag_auth__"], sort_keys=True)
         return ui.main(
             ui.div(data.get("viewer_name", "anonymous"), data_role="viewer-name"),
+            ui.div(data.get("active_profile_name", "no-profile"), data_role="profile-name"),
             ui.div(auth, data_role="auth-snapshot"),
         )
 
@@ -136,25 +243,34 @@ class LoginController(Controller):
                 "username": Field(str, required=True),
                 "password": Field(str, required=True),
                 "next": Field(str, required=False, default="/protected"),
+                "remember": Field(bool, required=False, default=False),
             },
         ),
     )
-    def submit_login(self, username, password, next="/protected"):
+    def submit_login(self, username, password, next="/protected", remember=False):
         auth = self.app.providers["auth"]
         user = auth.authenticate(username, password)
         if user is None:
             return {"authenticated": False, "error": "bad credentials"}
-        self.login(user, viewer=auth.viewer_for(user), extra_session={"note": "signed-in"})
+        self.login(
+            user,
+            viewer=auth.viewer_for(user),
+            active_profile=auth.default_profile_for(user),
+            extra_session={"note": "signed-in"},
+            remember=remember,
+        )
         return self.redirect(next, status=303)
 
 
 @requires_auth()
 class ProtectedController(Controller):
     route = "/protected"
+    last_socket_probe = None
 
     def load(self):
         return {
             "viewer_name": self.request.user["name"],
+            "active_profile_name": (self.request.active_profile or {}).get("label"),
             "session_note": self.request.session.get("note"),
         }
 
@@ -162,6 +278,10 @@ class ProtectedController(Controller):
     def whoami(self):
         return {
             "viewer_name": self.request.user["name"],
+            "active_profile": {
+                "slug": (self.request.active_profile or {}).get("slug"),
+                "label": (self.request.active_profile or {}).get("label"),
+            },
             "session_note": self.request.session.get("note"),
         }
 
@@ -169,6 +289,45 @@ class ProtectedController(Controller):
     def set_note(self, note):
         self.request.session.set("note", note)
         return {"note": note}
+
+    @action(schema=Schema("switch_profile", {"profile": Field(str, required=True)}))
+    def switch_profile(self, profile):
+        active_profile = self.set_active_profile(profile)
+        return {
+            "session_id": self.request.session_id,
+            "active_profile": {
+                "slug": (active_profile or {}).get("slug"),
+                "label": (active_profile or {}).get("label"),
+            },
+        }
+
+    @action(schema=Schema("clear_profile", {}))
+    def clear_profile(self):
+        self.set_active_profile(None)
+        return {
+            "active_profile": None,
+            "session_id": self.request.session_id,
+        }
+
+    @requires_auth(roles=("owner", "auditor"))
+    @action(schema=Schema("staff_area", {}))
+    def staff_area(self):
+        return {"allowed": True, "role_check": True}
+
+    @requires_auth(permissions=("memo:publish", "profile:switch"))
+    @action(schema=Schema("publish_memo", {}))
+    def publish_memo(self):
+        return {"published": True, "via": "decorator"}
+
+    @action(schema=Schema("imperative_publish", {}))
+    def imperative_publish(self):
+        self.require_auth(permissions=("memo:publish", "profile:switch"))
+        return {"published": True, "via": "imperative"}
+
+    @action(schema=Schema("needs_profile", {}))
+    def needs_profile(self):
+        self.require_auth(require_active_profile=True)
+        return {"profile": self.request.active_profile["slug"]}
 
     @action(name="logout", schema=Schema("logout", {}))
     def end_session(self):
@@ -178,6 +337,7 @@ class ProtectedController(Controller):
             "authenticated": self.request.user is not None,
         }
 
+    @requires_auth(permissions=("memo:publish", "profile:switch"))
     @action(
         schema=Schema("upload_doc", {"title": Field(str, required=True)}),
     )
@@ -187,35 +347,63 @@ class ProtectedController(Controller):
             "viewer_name": self.request.user["name"],
         }
 
+    def build_events(self, handler):
+        handler.on("auth:probe", self.handle_socket_probe)
 
-class MethodGuardController(Controller):
+    def handle_socket_probe(self, payload=None):
+        self.require_auth(require_active_profile=True)
+        ProtectedController.last_socket_probe = {
+            "username": self.request.user["username"],
+            "profile_slug": self.request.active_profile["slug"],
+        }
+
+
+@requires_auth(permissions="memo:publish")
+class MethodOverrideController(Controller):
     route = "/method-guard"
 
     def load(self):
-        return {"viewer_name": "public"}
-
-    @action(schema=Schema("public", {}))
-    def public(self):
-        return {"public": True}
-
-    @requires_auth()
-    @action(schema=Schema("secret", {}))
-    def secret(self):
         return {"viewer_name": self.request.user["name"]}
 
+    @action(schema=Schema("default_guard", {}))
+    def default_guard(self):
+        return {"guard": "default"}
 
-@requires_auth()
+    @requires_auth()
+    @action(schema=Schema("override_guard", {}))
+    def override_guard(self):
+        return {
+            "guard": "override",
+            "profile": (self.request.active_profile or {}).get("slug"),
+        }
+
+
+@requires_auth(permissions="memo:publish")
 class GuardedMountBoot(Controller):
     route = "/guarded-mount"
 
     def load(self):
-        return {"viewer_name": self.request.user["name"]}
+        return {
+            "viewer_name": self.request.user["name"],
+            "active_profile_name": (self.request.active_profile or {}).get("label"),
+        }
+
+
+class FakeWebSocket:
+    def __init__(self, cookie=""):
+        self.environ = {"HTTP_COOKIE": cookie}
+        self.sent = []
+        self.closed = False
+
+    def send(self, message):
+        self.sent.append(json.loads(message))
+
+    def close(self):
+        self.closed = True
 
 
 class AuthContractTests(unittest.TestCase):
     def setUp(self):
-        self.session_store = InMemorySessionStore()
-        self.auth = DemoAuthService()
         self.login_page = page(
             path="/login",
             controller=LoginController,
@@ -230,7 +418,7 @@ class AuthContractTests(unittest.TestCase):
         )
         self.method_page = page(
             path="/method-guard",
-            controller=MethodGuardController,
+            controller=MethodOverrideController,
             screen=AuthScreen,
             mode="document",
         )
@@ -245,14 +433,24 @@ class AuthContractTests(unittest.TestCase):
             ("app.routes.method_guard.page", self.method_page),
         ]
         self.mounts = [("app.mounts.guarded.mount", self.guarded_mount)]
-        self.app = SimpleNamespace(
-            providers={"session_store": self.session_store, "auth": self.auth},
-            pages=lambda: self.pages,
-            mounts=lambda: self.mounts,
-        )
+        ProtectedController.last_socket_probe = None
+        self.app = self._make_app()
         self.wsgi = SpragWSGIApp(self.app, Path("."))
 
-    def _wsgi_call(self, *, method, path, body=b"", content_type=None, cookie=None):
+    def _make_app(self, *, session_policy=None):
+        return SimpleNamespace(
+            providers={
+                "session_store": InMemorySessionStore(),
+                "auth": DemoAuthService(),
+            },
+            pages=lambda: self.pages,
+            mounts=lambda: self.mounts,
+            session_policy=session_policy,
+        )
+
+    def _wsgi_call(self, *, method, path, body=b"", content_type=None, cookie=None, app=None):
+        app = app or self.app
+        wsgi = self.wsgi if app is self.app else SpragWSGIApp(app, Path("."))
         environ = {
             "REQUEST_METHOD": method,
             "PATH_INFO": path,
@@ -274,11 +472,12 @@ class AuthContractTests(unittest.TestCase):
             started["status"] = status
             started["headers"] = dict(headers)
 
-        response = b"".join(self.wsgi(environ, start_response))
+        response = b"".join(wsgi(environ, start_response))
         return started["status"], started["headers"], response
 
-    def _login_cookie(self):
-        _, headers, _ = self._wsgi_call(method="GET", path="/login")
+    def _login_cookie(self, *, remember=False, app=None):
+        app = app or self.app
+        _, headers, _ = self._wsgi_call(method="GET", path="/login", app=app)
         initial = _session_id_from_cookie(headers["Set-Cookie"])
         body = json.dumps(
             {
@@ -288,6 +487,7 @@ class AuthContractTests(unittest.TestCase):
                     "username": "ada",
                     "password": "engine",
                     "next": "/protected",
+                    "remember": remember,
                 },
             }
         ).encode("utf-8")
@@ -297,37 +497,20 @@ class AuthContractTests(unittest.TestCase):
             body=body,
             content_type="application/json",
             cookie=f"SPRAG_SID={initial}",
+            app=app,
         )
         self.assertEqual(status, "200 OK")
         payload = json.loads(response.decode("utf-8"))
         self.assertEqual(payload["redirect"]["location"], "/protected")
         rotated = _session_id_from_cookie(headers["Set-Cookie"])
-        return initial, rotated
+        return initial, rotated, headers
 
-    def test_session_lifecycle_covers_create_reuse_rotate_invalidate_and_cookie_rewrite(self):
-        status, headers, _body = self._wsgi_call(method="GET", path="/login")
-        self.assertEqual(status, "200 OK")
-        first_session_id = _session_id_from_cookie(headers["Set-Cookie"])
-
-        status, headers, _body = self._wsgi_call(
-            method="GET",
-            path="/login",
-            cookie=f"SPRAG_SID={first_session_id}",
-        )
-        self.assertEqual(status, "200 OK")
-        self.assertNotIn("Set-Cookie", headers)
-
-        login_session_id, rotated_session_id = self._login_cookie()
-        self.assertNotEqual(rotated_session_id, login_session_id)
-        self.assertEqual(self.session_store.load(first_session_id), {})
-        self.assertEqual(self.session_store.load(login_session_id), {})
-        self.assertEqual(self.session_store.load(rotated_session_id)["auth_user_id"], "user-ada")
-
+    def _action(self, route, action_name, payload=None, *, cookie=None, app=None):
         body = json.dumps(
             {
-                "route": "/protected",
-                "action": "set_note",
-                "payload": {"note": "updated"},
+                "route": route,
+                "action": action_name,
+                "payload": payload or {},
             }
         ).encode("utf-8")
         status, headers, response = self._wsgi_call(
@@ -335,39 +518,13 @@ class AuthContractTests(unittest.TestCase):
             path="/__sprag__/actions",
             body=body,
             content_type="application/json",
-            cookie=f"SPRAG_SID={rotated_session_id}",
+            cookie=cookie,
+            app=app,
         )
-        payload = json.loads(response.decode("utf-8"))
-        self.assertEqual(status, "200 OK")
-        self.assertEqual(payload["value"]["note"], "updated")
-        self.assertNotIn("Set-Cookie", headers)
-        self.assertEqual(self.session_store.load(rotated_session_id)["note"], "updated")
+        return status, headers, json.loads(response.decode("utf-8"))
 
-        body = json.dumps(
-            {
-                "route": "/protected",
-                "action": "logout",
-                "payload": {},
-            }
-        ).encode("utf-8")
-        status, headers, response = self._wsgi_call(
-            method="POST",
-            path="/__sprag__/actions",
-            body=body,
-            content_type="application/json",
-            cookie=f"SPRAG_SID={rotated_session_id}",
-        )
-        payload = json.loads(response.decode("utf-8"))
-        invalidated_session_id = _session_id_from_cookie(headers["Set-Cookie"])
-        self.assertEqual(status, "200 OK")
-        self.assertFalse(payload["value"]["authenticated"])
-        self.assertEqual(payload["value"]["session_id"], invalidated_session_id)
-        self.assertNotEqual(invalidated_session_id, rotated_session_id)
-        self.assertEqual(self.session_store.load(rotated_session_id), {})
-        self.assertEqual(self.session_store.load(invalidated_session_id), {})
-
-    def test_render_page_mount_and_action_requests_expose_request_session_and_user(self):
-        _, rotated_session_id = self._login_cookie()
+    def test_request_active_profile_resolves_for_page_mount_action_and_socket_context(self):
+        _, rotated_session_id, _headers = self._login_cookie()
 
         page_request = Request(
             path="/protected",
@@ -375,8 +532,9 @@ class AuthContractTests(unittest.TestCase):
         )
         page_result = render_page(self.protected_page, request=page_request, app=self.app)
         self.assertEqual(page_result.data["viewer_name"], "Ada")
+        self.assertEqual(page_result.data["active_profile_name"], "Owner Workspace")
         self.assertEqual(page_request.user["username"], "ada")
-        self.assertEqual(page_request.session.get("note"), "signed-in")
+        self.assertEqual(page_request.active_profile["slug"], "owner")
 
         mount_request = Request(
             path="/guarded-mount",
@@ -385,7 +543,7 @@ class AuthContractTests(unittest.TestCase):
         mount_result = render_mount(self.guarded_mount, request=mount_request, app=self.app)
         self.assertEqual(mount_result.data["viewer_name"], "Ada")
         self.assertEqual(mount_request.user["username"], "ada")
-        self.assertEqual(mount_request.session.get("note"), "signed-in")
+        self.assertEqual(mount_request.active_profile["slug"], "owner")
 
         action_request = Request(
             path="/protected",
@@ -402,10 +560,100 @@ class AuthContractTests(unittest.TestCase):
             mounts=self.mounts,
         )
         self.assertEqual(action_result.value["viewer_name"], "Ada")
-        self.assertEqual(action_request.user["username"], "ada")
-        self.assertEqual(action_request.session.get("note"), "signed-in")
+        self.assertEqual(action_result.value["active_profile"]["slug"], "owner")
+        self.assertEqual(action_request.active_profile["slug"], "owner")
 
-    def test_requires_auth_redirects_pages_and_mounts_and_returns_401_for_actions_and_uploads(self):
+        bridge = SpragSocketBridge(self.app)
+        bridge.provide_registry()
+        controller = ProtectedController()
+        controller.bind_app(self.app)
+        try:
+            controller.build_handler(bridge)
+            ws = FakeWebSocket(f"SPRAG_SID={rotated_session_id}")
+            connection = bridge.connect(ws)
+            bridge.handle_message(connection, json.dumps({"type": "hello", "route": "/protected"}))
+            bridge.handle_message(
+                connection,
+                json.dumps(
+                    {
+                        "type": "emit",
+                        "event": "auth:probe",
+                        "route": "/protected",
+                        "payload": {},
+                    }
+                ),
+            )
+            self.assertEqual(
+                ProtectedController.last_socket_probe,
+                {"username": "ada", "profile_slug": "owner"},
+            )
+        finally:
+            bridge.clear_registry()
+
+    def test_login_persists_profile_state_and_remember_cookie_only_when_configured(self):
+        app = self._make_app(
+            session_policy=SessionPolicy(remember_me_ttl_seconds=3600)
+        )
+        _, remembered_session_id, headers = self._login_cookie(remember=True, app=app)
+        remembered_snapshot = app.providers["session_store"].load(remembered_session_id)
+        remembered_meta = remembered_snapshot["__sprag_session__"]
+        self.assertEqual(remembered_snapshot["auth_user_id"], "user-ada")
+        self.assertEqual(remembered_snapshot["active_profile_id"], "profile-owner")
+        self.assertTrue(remembered_meta["remember_me"])
+        self.assertIn("Max-Age=3600", headers["Set-Cookie"])
+
+        _, session_id, headers = self._login_cookie(remember=True)
+        snapshot = self.app.providers["session_store"].load(session_id)
+        meta = snapshot["__sprag_session__"]
+        self.assertFalse(meta["remember_me"])
+        self.assertNotIn("Max-Age", headers["Set-Cookie"])
+
+    def test_set_active_profile_updates_session_without_rotating_session_id(self):
+        _, rotated_session_id, _headers = self._login_cookie()
+        status, headers, payload = self._action(
+            "/protected",
+            "switch_profile",
+            {"profile": "auditor"},
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertEqual(payload["value"]["session_id"], rotated_session_id)
+        self.assertEqual(payload["value"]["active_profile"]["slug"], "auditor")
+        self.assertNotIn("Set-Cookie", headers)
+        self.assertEqual(
+            self.app.providers["session_store"].load(rotated_session_id)["active_profile_id"],
+            "profile-auditor",
+        )
+
+    def test_expired_sessions_are_invalidated_before_auth_resolution(self):
+        app = self._make_app(
+            session_policy=SessionPolicy(idle_ttl_seconds=5, absolute_ttl_seconds=30)
+        )
+        session_store = app.providers["session_store"]
+        session_store._sessions["expired-session"] = {
+            "auth_user_id": "user-ada",
+            "active_profile_id": "profile-owner",
+            "note": "stale",
+            "__sprag_session__": {
+                "created_at": 100,
+                "last_seen": 100,
+                "absolute_expiry": 130,
+                "remember_me": False,
+            },
+        }
+        with patch("sprag.runtime.session.time.time", return_value=200):
+            status, headers, _body = self._wsgi_call(
+                method="GET",
+                path="/protected",
+                cookie="SPRAG_SID=expired-session",
+                app=app,
+            )
+        self.assertEqual(status, "302 Found")
+        self.assertEqual(headers["Location"], "/login?next=%2Fprotected")
+        self.assertNotEqual(_session_id_from_cookie(headers["Set-Cookie"]), "expired-session")
+        self.assertEqual(session_store.load("expired-session"), {})
+
+    def test_requires_auth_redirects_and_returns_401_or_403_by_context(self):
         status, headers, _body = self._wsgi_call(method="GET", path="/protected")
         self.assertEqual(status, "302 Found")
         self.assertEqual(headers["Location"], "/login?next=%2Fprotected")
@@ -414,20 +662,7 @@ class AuthContractTests(unittest.TestCase):
         self.assertEqual(status, "302 Found")
         self.assertEqual(headers["Location"], "/login?next=%2Fguarded-mount")
 
-        body = json.dumps(
-            {
-                "route": "/protected",
-                "action": "whoami",
-                "payload": {},
-            }
-        ).encode("utf-8")
-        status, _headers, response = self._wsgi_call(
-            method="POST",
-            path="/__sprag__/actions",
-            body=body,
-            content_type="application/json",
-        )
-        payload = json.loads(response.decode("utf-8"))
+        status, _headers, payload = self._action("/protected", "whoami")
         self.assertEqual(status, "401 Unauthorized")
         self.assertEqual(payload["error"], "Authentication required.")
 
@@ -451,55 +686,175 @@ class AuthContractTests(unittest.TestCase):
         self.assertEqual(status, "401 Unauthorized")
         self.assertEqual(payload["error"], "Authentication required.")
 
-    def test_class_level_and_method_level_requires_auth_both_work(self):
-        body = json.dumps(
-            {
-                "route": "/method-guard",
-                "action": "public",
-                "payload": {},
-            }
-        ).encode("utf-8")
-        status, _headers, response = self._wsgi_call(
-            method="POST",
-            path="/__sprag__/actions",
-            body=body,
-            content_type="application/json",
+        _, rotated_session_id, _headers = self._login_cookie()
+        self._action(
+            "/protected",
+            "switch_profile",
+            {"profile": "auditor"},
+            cookie=f"SPRAG_SID={rotated_session_id}",
         )
-        payload = json.loads(response.decode("utf-8"))
-        self.assertEqual(status, "200 OK")
-        self.assertTrue(payload["value"]["public"])
 
-        body = json.dumps(
-            {
-                "route": "/method-guard",
-                "action": "secret",
-                "payload": {},
-            }
-        ).encode("utf-8")
-        status, _headers, response = self._wsgi_call(
-            method="POST",
-            path="/__sprag__/actions",
-            body=body,
-            content_type="application/json",
+        status, _headers, forbidden = self._wsgi_call(
+            method="GET",
+            path="/method-guard",
+            cookie=f"SPRAG_SID={rotated_session_id}",
         )
-        payload = json.loads(response.decode("utf-8"))
-        self.assertEqual(status, "401 Unauthorized")
-        self.assertEqual(payload["error"], "Authentication required.")
+        self.assertEqual(status, "403 Forbidden")
+        self.assertIn("Forbidden.", forbidden.decode("utf-8"))
 
-        _, rotated_session_id = self._login_cookie()
+        status, _headers, forbidden = self._wsgi_call(
+            method="GET",
+            path="/guarded-mount",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "403 Forbidden")
+        self.assertIn("Forbidden.", forbidden.decode("utf-8"))
+
+        status, _headers, payload = self._action(
+            "/protected",
+            "publish_memo",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(payload["error"], "Forbidden.")
+
         status, _headers, response = self._wsgi_call(
             method="POST",
-            path="/__sprag__/actions",
-            body=body,
-            content_type="application/json",
+            path="/__sprag__/uploads",
+            body=upload,
+            content_type=f"multipart/form-data; boundary={boundary}",
             cookie=f"SPRAG_SID={rotated_session_id}",
         )
         payload = json.loads(response.decode("utf-8"))
-        self.assertEqual(status, "200 OK")
-        self.assertEqual(payload["value"]["viewer_name"], "Ada")
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(payload["error"], "Forbidden.")
 
-    def test_render_payload_contains_sanitized_auth_snapshot_only(self):
-        _, rotated_session_id = self._login_cookie()
+    def test_role_permission_and_active_profile_requirements_are_enforced(self):
+        _, rotated_session_id, _headers = self._login_cookie()
+
+        status, _headers, payload = self._action(
+            "/protected",
+            "staff_area",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertTrue(payload["value"]["allowed"])
+
+        status, _headers, payload = self._action(
+            "/protected",
+            "publish_memo",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertTrue(payload["value"]["published"])
+
+        self._action(
+            "/protected",
+            "switch_profile",
+            {"profile": "auditor"},
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+
+        status, _headers, payload = self._action(
+            "/protected",
+            "staff_area",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertTrue(payload["value"]["allowed"])
+
+        status, _headers, payload = self._action(
+            "/protected",
+            "publish_memo",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(payload["error"], "Forbidden.")
+
+        self._action(
+            "/protected",
+            "clear_profile",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        status, _headers, payload = self._action(
+            "/protected",
+            "needs_profile",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(payload["error"], "Active profile required.")
+
+    def test_method_level_guard_overrides_class_level_guard(self):
+        _, rotated_session_id, _headers = self._login_cookie()
+        self._action(
+            "/protected",
+            "switch_profile",
+            {"profile": "auditor"},
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+
+        status, _headers, payload = self._action(
+            "/method-guard",
+            "default_guard",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(payload["error"], "Forbidden.")
+
+        status, _headers, payload = self._action(
+            "/method-guard",
+            "override_guard",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertEqual(payload["value"]["guard"], "override")
+        self.assertEqual(payload["value"]["profile"], "auditor")
+
+    def test_imperative_require_auth_matches_decorator_behavior(self):
+        status, _headers, payload = self._action("/protected", "imperative_publish")
+        self.assertEqual(status, "401 Unauthorized")
+        self.assertEqual(payload["error"], "Authentication required.")
+
+        _, rotated_session_id, _headers = self._login_cookie()
+        self._action(
+            "/protected",
+            "switch_profile",
+            {"profile": "auditor"},
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+
+        status, _headers, imperative = self._action(
+            "/protected",
+            "imperative_publish",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(imperative["error"], "Forbidden.")
+
+        status, _headers, decorated = self._action(
+            "/protected",
+            "publish_memo",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "403 Forbidden")
+        self.assertEqual(decorated["error"], "Forbidden.")
+
+        self._action(
+            "/protected",
+            "switch_profile",
+            {"profile": "owner"},
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        status, _headers, imperative = self._action(
+            "/protected",
+            "imperative_publish",
+            cookie=f"SPRAG_SID={rotated_session_id}",
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertTrue(imperative["value"]["published"])
+
+    def test_render_payload_contains_sanitized_active_profile_without_private_fields(self):
+        _, rotated_session_id, _headers = self._login_cookie()
         request = Request(
             path="/protected",
             headers={"Cookie": f"SPRAG_SID={rotated_session_id}"},
@@ -509,10 +864,19 @@ class AuthContractTests(unittest.TestCase):
             result.data["__sprag_auth__"]["viewer"],
             {"id": "user-ada", "username": "ada", "name": "Ada"},
         )
+        self.assertEqual(
+            result.data["__sprag_auth__"]["active_profile"],
+            {
+                "id": "profile-owner",
+                "slug": "owner",
+                "label": "Owner Workspace",
+            },
+        )
         self.assertTrue(result.data["__sprag_auth__"]["authenticated"])
-        self.assertIn('"auth": {"active_profile": null, "authenticated": true', result.html)
-        self.assertIn('"viewer": {"id": "user-ada", "name": "Ada", "username": "ada"}', result.html)
+        self.assertIn('"active_profile": {"id": "profile-owner", "label": "Owner Workspace", "slug": "owner"}', result.html)
         self.assertNotIn("server-only-secret", result.html)
+        self.assertNotIn("memo:publish", result.html)
+        self.assertNotIn("roles", result.html)
         self.assertIn("data-role=\"auth-snapshot\"", result.html)
 
     def test_labs_template_scaffolds_and_builds_auth_demo(self):

@@ -141,6 +141,9 @@ def _serializable_routes(routes):
                     "module_state": entry["module_state"],
                 }
             )
+        for key in ("_provider_classes", "_browser_classes"):
+            if key in next_route:
+                del next_route[key]
         serializable.append(next_route)
     return serializable
 

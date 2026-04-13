@@ -140,7 +140,7 @@ class SpragWSGIApp:
         return self._respond_gzip(
             environ,
             start_response,
-            200,
+            result.status,
             "text/html; charset=utf-8",
             body,
             extra_headers=self._session_headers(request),
@@ -192,7 +192,7 @@ class SpragWSGIApp:
         return self._respond_gzip(
             environ,
             start_response,
-            200,
+            result.status,
             "text/html; charset=utf-8",
             body,
             extra_headers=self._session_headers(request),

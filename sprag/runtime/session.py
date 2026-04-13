@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import secrets
+import time
+from dataclasses import dataclass
+from email.utils import formatdate
 from http.cookies import SimpleCookie
 from typing import TYPE_CHECKING
 
@@ -11,6 +14,7 @@ if TYPE_CHECKING:
 
 
 SESSION_COOKIE_NAME = "SPRAG_SID"
+_SESSION_META_KEY = "__sprag_session__"
 
 
 def _generate_session_id() -> str:
@@ -36,11 +40,31 @@ def resolve_session_id(raw_cookie: str | None) -> tuple[str, bool]:
     return _generate_session_id(), True
 
 
-def session_cookie_header(session_id: str) -> tuple[str, str]:
-    return (
-        "Set-Cookie",
-        f"{SESSION_COOKIE_NAME}={session_id}; Path=/; HttpOnly; SameSite=Lax",
-    )
+@dataclass(frozen=True)
+class SessionPolicy:
+    idle_ttl_seconds: int | None = None
+    absolute_ttl_seconds: int | None = None
+    remember_me_ttl_seconds: int | None = None
+
+    def __post_init__(self):
+        for field_name in (
+            "idle_ttl_seconds",
+            "absolute_ttl_seconds",
+            "remember_me_ttl_seconds",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and int(value) < 1:
+                raise ValueError(
+                    f"SessionPolicy.{field_name} must be a positive integer or None."
+                )
+
+
+def session_cookie_header(session_id: str, *, max_age: int | None = None) -> tuple[str, str]:
+    header = f"{SESSION_COOKIE_NAME}={session_id}; Path=/; HttpOnly; SameSite=Lax"
+    if max_age is not None:
+        clamped = max(0, int(max_age))
+        header += f"; Max-Age={clamped}; Expires={formatdate(time.time() + clamped, usegmt=True)}"
+    return ("Set-Cookie", header)
 
 
 class RequestSession:
@@ -197,12 +221,39 @@ class AnonymousAuthService:
     def load_user(self, session, request):
         return None
 
+    def load_active_profile(self, user, session, request):
+        return None
+
+    def authorize(
+        self,
+        user,
+        active_profile,
+        session,
+        request,
+        *,
+        roles=None,
+        permissions=None,
+    ) -> bool:
+        return not roles and not permissions
+
     def public_snapshot(self, user, session, request) -> dict:
         return {}
 
     def login_session(self, user, session, request, extra_session=None) -> None:
         raise RuntimeError(
             "Controller.login(...) requires an app-level 'auth' provider."
+        )
+
+    def set_active_profile(
+        self,
+        profile,
+        user,
+        session,
+        request,
+        extra_session=None,
+    ) -> None:
+        raise RuntimeError(
+            "Controller.set_active_profile(...) requires an app-level 'auth' provider."
         )
 
 
@@ -218,6 +269,143 @@ def resolve_session_store(app=None):
 def resolve_auth_service(app=None):
     providers = getattr(app, "providers", None) or {}
     return providers.get("auth") or _DEFAULT_AUTH_SERVICE
+
+
+def resolve_session_policy(app=None) -> SessionPolicy:
+    policy = getattr(app, "session_policy", None)
+    if policy is None:
+        return SessionPolicy()
+    if isinstance(policy, SessionPolicy):
+        return policy
+    if isinstance(policy, dict):
+        return SessionPolicy(**policy)
+    raise TypeError(
+        "App.session_policy must be a SessionPolicy, dict, or None."
+    )
+
+
+def _policy_enabled(policy: SessionPolicy) -> bool:
+    return any(
+        value is not None
+        for value in (
+            policy.idle_ttl_seconds,
+            policy.absolute_ttl_seconds,
+            policy.remember_me_ttl_seconds,
+        )
+    )
+
+
+def _session_meta(session: RequestSession) -> dict:
+    meta = session.get(_SESSION_META_KEY)
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
+def _replace_session_meta(session: RequestSession, meta: dict) -> dict:
+    clean = {key: value for key, value in dict(meta or {}).items() if value is not None}
+    current = _session_meta(session)
+    if current != clean:
+        session.set(_SESSION_META_KEY, clean)
+    return clean
+
+
+def _session_cookie_max_age(session: RequestSession, policy: SessionPolicy) -> int | None:
+    meta = _session_meta(session)
+    if not meta.get("remember_me") or policy.remember_me_ttl_seconds is None:
+        return None
+    absolute_expiry = meta.get("absolute_expiry")
+    if absolute_expiry is None:
+        return int(policy.remember_me_ttl_seconds)
+    remaining = int(absolute_expiry) - int(time.time())
+    return max(0, remaining)
+
+
+def _reset_session_runtime(session: RequestSession, *, policy: SessionPolicy, now: int) -> None:
+    if not _policy_enabled(policy):
+        return
+    _replace_session_meta(
+        session,
+        {
+            "created_at": now,
+            "last_seen": now,
+            "remember_me": False,
+        },
+    )
+
+
+def stamp_login_session(
+    session: RequestSession,
+    *,
+    policy: SessionPolicy,
+    remember: bool = False,
+    now: int | None = None,
+) -> dict:
+    timestamp = int(time.time() if now is None else now)
+    persistent = bool(remember and policy.remember_me_ttl_seconds is not None)
+    absolute_expiry = None
+    candidates = []
+    if policy.absolute_ttl_seconds is not None:
+        candidates.append(timestamp + int(policy.absolute_ttl_seconds))
+    if persistent and policy.remember_me_ttl_seconds is not None:
+        candidates.append(timestamp + int(policy.remember_me_ttl_seconds))
+    if candidates:
+        absolute_expiry = min(candidates)
+    return _replace_session_meta(
+        session,
+        {
+            "created_at": timestamp,
+            "last_seen": timestamp,
+            "absolute_expiry": absolute_expiry,
+            "remember_me": persistent,
+        },
+    )
+
+
+def apply_session_policy(
+    session: RequestSession,
+    *,
+    app=None,
+    now: int | None = None,
+) -> RequestSession:
+    policy = resolve_session_policy(app)
+    timestamp = int(time.time() if now is None else now)
+    meta = _session_meta(session)
+    if not meta and not _policy_enabled(policy):
+        return session
+
+    created_at = int(meta.get("created_at") or timestamp)
+    last_seen = int(meta.get("last_seen") or created_at)
+    remember_me = bool(meta.get("remember_me"))
+    absolute_expiry = meta.get("absolute_expiry")
+    if absolute_expiry is not None:
+        absolute_expiry = int(absolute_expiry)
+
+    if policy.absolute_ttl_seconds is not None:
+        policy_expiry = created_at + int(policy.absolute_ttl_seconds)
+        absolute_expiry = min(absolute_expiry, policy_expiry) if absolute_expiry is not None else policy_expiry
+    if remember_me and policy.remember_me_ttl_seconds is not None:
+        remember_expiry = created_at + int(policy.remember_me_ttl_seconds)
+        absolute_expiry = min(absolute_expiry, remember_expiry) if absolute_expiry is not None else remember_expiry
+
+    expired_for_idle = (
+        policy.idle_ttl_seconds is not None
+        and last_seen + int(policy.idle_ttl_seconds) <= timestamp
+    )
+    expired_for_absolute = absolute_expiry is not None and absolute_expiry <= timestamp
+    if expired_for_idle or expired_for_absolute:
+        session.invalidate()
+        _reset_session_runtime(session, policy=policy, now=timestamp)
+        return session
+
+    _replace_session_meta(
+        session,
+        {
+            "created_at": created_at,
+            "last_seen": timestamp,
+            "absolute_expiry": absolute_expiry,
+            "remember_me": remember_me,
+        },
+    )
+    return session
 
 
 def hydrate_request(
@@ -265,8 +453,11 @@ def hydrate_request(
     request.session = session
     request.session_id = session.id
 
+    apply_session_policy(session, app=app)
+
     auth = resolve_auth_service(app)
     request.user = auth.load_user(session, request)
+    request.active_profile = auth.load_active_profile(request.user, session, request)
     return request
 
 
@@ -296,7 +487,12 @@ def commit_request_session(
 
     headers: list[tuple[str, str]] = []
     if allow_cookie_write and session.should_set_cookie():
-        headers.append(session_cookie_header(session.id))
+        headers.append(
+            session_cookie_header(
+                session.id,
+                max_age=_session_cookie_max_age(session, resolve_session_policy(app)),
+            )
+        )
     session.mark_committed()
     return headers
 

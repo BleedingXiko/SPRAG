@@ -47,6 +47,7 @@ class Request:
     cookies: dict = field(default_factory=dict)
     session: object | None = None
     user: object = None
+    active_profile: object = None
     content_type: str | None = None
     form: dict = field(default_factory=dict)
     files: dict = field(default_factory=dict)

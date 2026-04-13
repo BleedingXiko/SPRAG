@@ -1,3 +1,5 @@
+import json
+
 from sprag import Screen, hydrate
 
 from .components import LoginCard
@@ -9,5 +11,12 @@ class LoginScreen(Screen):
 
     def render(self, data):
         login = self.module(LoginModule)
-        login.set_state(data)
+        snapshot = dict(data or {})
+        snapshot["auth_snapshot_text"] = json.dumps(
+            snapshot.get("__sprag_auth__") or {},
+            indent=2,
+            sort_keys=True,
+        )
+        snapshot.setdefault("client_auth_text", "{}")
+        login.set_state(snapshot)
         return hydrate(LoginCard, module=login)

@@ -13,6 +13,8 @@ class LoginModule(Module):
                 "hint": "",
                 "__sprag_auth__": {},
                 "client_auth": None,
+                "auth_snapshot_text": "{}",
+                "client_auth_text": "{}",
                 "submitting": False,
             },
         )
@@ -20,18 +22,30 @@ class LoginModule(Module):
     def on_start(self):
         self.delegate(self.element, "submit", "[data-role='login-form']", self.on_submit)
         payload = browser.window.__SPRAG_PAYLOAD__ or {}
-        self.set_state({"client_auth": payload.auth or None})
+        client_auth = payload.auth or None
+        self.set_state(
+            {
+                "client_auth": client_auth,
+                "client_auth_text": browser.window.JSON.stringify(client_auth or {}, None, 2),
+            }
+        )
 
     def on_submit(self, event):
         event.prevent_default()
         snapshot = self.form_data(event)
+        payload = {
+            "username": snapshot.get("username"),
+            "password": snapshot.get("password"),
+            "next": snapshot.get("next"),
+            "remember": bool(snapshot.get("remember")),
+        }
         self.set_state(
             {
                 "error": "",
                 "submitting": True,
             }
         )
-        self.call_action("login", snapshot).then(self.on_login_result).catch(self.on_login_error)
+        self.call_action("login", payload).then(self.on_login_result).catch(self.on_login_error)
 
     def on_login_result(self, result):
         data = result.value or {}

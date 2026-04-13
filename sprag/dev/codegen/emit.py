@@ -70,6 +70,13 @@ def emit_generated_files(output_dir: Path, hydration_entries: list[dict], *, mou
 
     for entry in route_entries:
         declared_import_aliases.update((entry.get("modules") or {}).keys())
+        for browser_class in entry.get("_browser_classes", []):
+            from ...runtime.browser import Component, Module
+
+            if isinstance(browser_class, type) and issubclass(browser_class, Component):
+                _register_browser_class(component_classes, browser_class, "Component")
+            elif isinstance(browser_class, type) and issubclass(browser_class, Module):
+                _register_browser_class(module_classes, browser_class, "Module")
         for provider_class in entry.get("_provider_classes", []):
             _register_browser_class(module_classes, provider_class, "Module")
 
@@ -1498,6 +1505,8 @@ def _serializable_manifest(manifest):
             )
         if "_provider_classes" in next_route:
             del next_route["_provider_classes"]
+        if "_browser_classes" in next_route:
+            del next_route["_browser_classes"]
         routes.append(next_route)
     mounts = []
     for mount in manifest.get("mounts", []):

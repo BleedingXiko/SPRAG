@@ -1,16 +1,8 @@
-import json
-
 from sprag import Component, ui
-
-
-def pretty_auth(snapshot):
-    return json.dumps(snapshot or {}, indent=2, sort_keys=True)
 
 
 class LoginCard(Component):
     def render(self, props=None):
-        auth_snapshot = self.state.get("__sprag_auth__") or {}
-        client_auth = self.state.get("client_auth")
         return ui.div(
             ui.h2(self.state.get("title", "Reference Login")),
             ui.p(
@@ -60,13 +52,22 @@ class LoginCard(Component):
                     ),
                     class_="form-actions",
                 ),
+                ui.label(
+                    ui.input(
+                        type="checkbox",
+                        name="remember",
+                        value="true",
+                    ),
+                    ui.span("Request a remembered session cookie"),
+                    class_="checkbox-row",
+                ),
                 class_="sprag-form",
                 data_role="login-form",
             ),
             ui.div(
                 ui.h3("SSR `__sprag_auth__`"),
                 ui.div(
-                    pretty_auth(auth_snapshot),
+                    self.state.get("auth_snapshot_text", "{}"),
                     class_="form-snapshot",
                     style="white-space: pre-wrap; font-family: monospace;",
                 ),
@@ -74,7 +75,7 @@ class LoginCard(Component):
             ui.div(
                 ui.h3("window.__SPRAG_PAYLOAD__.auth"),
                 ui.div(
-                    pretty_auth(client_auth),
+                    self.state.get("client_auth_text", "{}"),
                     class_="form-snapshot",
                     style="white-space: pre-wrap; font-family: monospace;",
                 ),

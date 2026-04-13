@@ -19,7 +19,10 @@ class LoginController(Controller):
             "title": "Reference Login",
             "next": safe_next(self.request.query.get("next")),
             "error": "",
-            "hint": "Demo credentials: ada / analytical-engine or grace / compiler.",
+            "hint": (
+                "Demo credentials: ada / analytical-engine. Login starts in the "
+                "Owner profile, and the protected route can switch into Auditor."
+            ),
         }
 
     @action(
@@ -30,10 +33,11 @@ class LoginController(Controller):
                 "username": Field(str, required=True),
                 "password": Field(str, required=True),
                 "next": Field(str, required=False, default=DEFAULT_NEXT),
+                "remember": Field(bool, required=False, default=False),
             },
         ),
     )
-    def submit_login(self, username, password, next=DEFAULT_NEXT):
+    def submit_login(self, username, password, next=DEFAULT_NEXT, remember=False):
         auth = self.service("auth")
         user = auth.authenticate(username, password)
         if user is None:
@@ -42,5 +46,10 @@ class LoginController(Controller):
                 "error": "Invalid credentials. Try ada / analytical-engine.",
                 "next": safe_next(next),
             }
-        self.login(user, viewer=auth.viewer_for(user))
+        self.login(
+            user,
+            viewer=auth.viewer_for(user),
+            active_profile=auth.default_profile_for(user),
+            remember=remember,
+        )
         return self.redirect(safe_next(next), status=303)

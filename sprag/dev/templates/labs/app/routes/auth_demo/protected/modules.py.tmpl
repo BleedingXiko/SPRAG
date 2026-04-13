@@ -10,8 +10,12 @@ class ProtectedAuthModule(Module):
                 "title": "Protected Route",
                 "message": "",
                 "viewer_name": "",
+                "active_profile_name": "",
+                "available_profiles": [],
                 "__sprag_auth__": {},
                 "client_auth": None,
+                "auth_snapshot_text": "{}",
+                "client_auth_text": "{}",
                 "status": "ready",
             },
         )
@@ -19,8 +23,26 @@ class ProtectedAuthModule(Module):
     def on_start(self):
         self.delegate(self.element, "click", "[data-role='logout']", self.on_logout)
         self.delegate(self.element, "click", "[data-role='whoami']", self.on_whoami)
+        self.delegate(
+            self.element,
+            "click",
+            "[data-role='publish-report']",
+            self.on_publish_report,
+        )
+        self.delegate(
+            self.element,
+            "click",
+            "[data-role='switch-profile']",
+            self.on_switch_profile,
+        )
         payload = browser.window.__SPRAG_PAYLOAD__ or {}
-        self.set_state({"client_auth": payload.auth or None})
+        client_auth = payload.auth or None
+        self.set_state(
+            {
+                "client_auth": client_auth,
+                "client_auth_text": browser.window.JSON.stringify(client_auth or {}, None, 2),
+            }
+        )
 
     def on_logout(self, event):
         event.prevent_default()
@@ -33,12 +55,45 @@ class ProtectedAuthModule(Module):
             self.on_error
         )
 
+    def on_publish_report(self, event):
+        event.prevent_default()
+        self.set_state({"status": "Checking profile permissions..."})
+        self.call_action("publish-report", {}).then(self.on_publish_result).catch(self.on_error)
+
+    def on_switch_profile(self, event):
+        event.prevent_default()
+        profile = event.target.dataset.profile
+        self.set_state({"status": f"Switching to {profile}..."})
+        self.call_action("switch-profile", {"profile": profile}).then(
+            self.on_switch_profile_result
+        ).catch(self.on_error)
+
     def on_whoami_result(self, result):
         data = result.value or {}
         self.set_state(
             {
                 "status": data.get("label", "refreshed"),
                 "viewer_name": data.get("viewer_name", self.state.get("viewer_name")),
+                "active_profile_name": data.get(
+                    "active_profile_name",
+                    self.state.get("active_profile_name"),
+                ),
+            }
+        )
+
+    def on_publish_result(self, result):
+        data = result.value or {}
+        self.set_state({"status": data.get("status", "Published.")})
+
+    def on_switch_profile_result(self, result):
+        data = result.value or {}
+        self.set_state(
+            {
+                "status": data.get("status", "Profile updated."),
+                "active_profile_name": data.get(
+                    "active_profile_name",
+                    self.state.get("active_profile_name"),
+                ),
             }
         )
 

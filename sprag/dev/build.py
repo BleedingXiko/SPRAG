@@ -30,6 +30,7 @@ from ..runtime.rendering import (
     build_document_html,
     build_mount_html,
     build_redirect_html,
+    build_status_html,
     load_controller_data,
     load_mount_data,
     render_screen,
@@ -70,6 +71,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         page_modules = serialize_module_imports(
             resolve_effective_surface_modules(app=app, surface=page)
         )
+        route_browser_classes = _route_browser_classes([], page)
 
         for build_entry in build_entries:
             actual_path = normalize_route_path(build_entry.path)
@@ -89,11 +91,16 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             page_dir.mkdir(parents=True, exist_ok=True)
 
             build_request = Request(path=actual_path, params=build_entry.params, method="BUILD")
-            data, data_error, redirect = load_controller_data(page, request=build_request, app=app)
+            data, data_error, redirect, status = load_controller_data(
+                page,
+                request=build_request,
+                app=app,
+            )
             hydration = []
             render_error = None
             page_meta = _resolved_surface_metadata(page.metadata, data)
-            if redirect is None:
+            shell_assets = None
+            if redirect is None and status == 200:
                 body_html, hydration, render_error = render_screen(page, data)
                 body_html, shell_assets = apply_shell(
                     body_html,
@@ -115,21 +122,24 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 build_errors.append(
                     {"path": actual_path, "stage": "render", "error": render_error}
                 )
+            route_browser_classes = _route_browser_classes(hydration, page)
             _validate_surface_import_aliases(
                 actual_path,
                 declared_modules=page_modules,
-                browser_classes=_route_browser_classes(hydration, page),
+                browser_classes=route_browser_classes,
             )
 
             script_path = _relative_web_path(page_dir, output_dir / "app.js")
             preload_html = render_preload_hints(
-                shell_assets.css if redirect is None else (),
-                script_path=script_path if redirect is None else None,
+                shell_assets.css if redirect is None and status == 200 else (),
+                script_path=script_path if redirect is None and status == 200 else None,
                 document_path=actual_path,
             )
             document_html = (
                 build_redirect_html(redirect.location)
                 if redirect is not None
+                else build_status_html(status, data_error or f"{status} Error")
+                if status != 200
                 else build_document_html(
                     title=_resolved_page_title(page, data, actual_path),
                     body_html=body_html,
@@ -181,6 +191,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     "modules": page_modules,
                     "providers": {k: v.__name__ for k, v in page.providers.items()},
                     "_provider_classes": list(page.providers.values()),
+                    "_browser_classes": list(route_browser_classes),
                 }
             )
 
@@ -194,11 +205,16 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         mount_actions = sorted(mt.boot.sprag_actions().keys()) if mt.boot else []
 
         build_request = Request(path=mt.path, method="BUILD")
-        data, data_error, redirect = load_mount_data(mt, request=build_request, app=app)
+        data, data_error, redirect, status = load_mount_data(
+            mt,
+            request=build_request,
+            app=app,
+        )
         if data_error:
             build_errors.append({"path": mt.path, "stage": "mount_load", "error": data_error})
         mount_meta = _resolved_surface_metadata(mt.metadata, data)
-        if redirect is None:
+        shell_assets = None
+        if redirect is None and status == 200:
             body_html, shell_assets = apply_shell(
                 '<div id="app-root"></div>',
                 app=app,
@@ -227,6 +243,8 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         document_html = (
             build_redirect_html(redirect.location)
             if redirect is not None
+            else build_status_html(status, data_error or f"{status} Error")
+            if status != 200
             else build_mount_html(
                 title=mount_meta.get("title") or mt.name or mt.path,
                 mount_info={
@@ -375,7 +393,11 @@ def _serializable_manifest(manifest):
         ],
         "routes": [
             {
-                **{k: v for k, v in route.items() if k != "_provider_classes"},
+                **{
+                    k: v
+                    for k, v in route.items()
+                    if k not in {"_provider_classes", "_browser_classes"}
+                },
                 "hydration": serializable_hydration(route["hydration"]),
             }
             for route in manifest["routes"]
@@ -427,6 +449,8 @@ def _route_browser_classes(hydration, page) -> set[type]:
         for entry in hydration
         if entry.get("module_class") is not None
     )
+    if getattr(page, "screen", None) is not None:
+        roots.add(page.screen)
     roots.update(page.providers.values())
     return _expand_browser_classes(roots)
 

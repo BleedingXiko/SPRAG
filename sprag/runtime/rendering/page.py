@@ -20,7 +20,7 @@ from ..request import Request
 from ..routing import normalize_route_path
 from ..session import hydrate_request, inject_auth_data
 from ..socket_bridge import surface_socket_enabled
-from ..server import Redirect, authorize_controller_method, controller_context
+from ..server import ActionDispatchError, Redirect, authorize_controller_method, controller_context
 from ..shell import apply_shell, resolve_effective_surface_modules
 from ..stores import declared_stores, store_fingerprint
 
@@ -36,6 +36,7 @@ class PageResult:
     data_error: str | None = None
     render_error: str | None = None
     redirect: Redirect | None = None
+    status: int = 200
 
 
 @dataclass
@@ -46,13 +47,14 @@ class MountResult:
     data: dict
     data_error: str | None = None
     redirect: Redirect | None = None
+    status: int = 200
 
 
 def render_page(page, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> PageResult:
     """Render a page through its controller and screen, returning full HTML."""
     request = request or Request(path=normalize_route_path(page.path), method="GET")
     with _ensure_app_booted(app):
-        data, data_error, redirect = load_controller_data(page, request=request, app=app)
+        data, data_error, redirect, status = load_controller_data(page, request=request, app=app)
         if redirect is not None:
             return PageResult(
                 html=build_redirect_html(redirect.location),
@@ -62,6 +64,17 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
                 data_error=data_error,
                 render_error=None,
                 redirect=redirect,
+            )
+        if status != 200:
+            message = data_error or f"{status} Error"
+            return PageResult(
+                html=build_status_html(status, message),
+                body_html="",
+                data={},
+                hydration=[],
+                data_error=data_error,
+                render_error=None,
+                status=status,
             )
         body_html, hydration, render_error = render_screen(page, data)
         page_meta = _resolved_surface_metadata(page.metadata, data)
@@ -118,19 +131,27 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
             hydration=hydration,
             data_error=data_error,
             render_error=render_error,
+            status=status,
         )
 
 
 def render_mount(mount, *, request: Request | None = None, app=None, script_path: str = "/app.js") -> MountResult:
     """Render the boot document for a client app mount."""
     with _ensure_app_booted(app):
-        data, data_error, redirect = load_mount_data(mount, request=request, app=app)
+        data, data_error, redirect, status = load_mount_data(mount, request=request, app=app)
         if redirect is not None:
             return MountResult(
                 html=build_redirect_html(redirect.location),
                 data={},
                 data_error=data_error,
                 redirect=redirect,
+            )
+        if status != 200:
+            return MountResult(
+                html=build_status_html(status, data_error or f"{status} Error"),
+                data={},
+                data_error=data_error,
+                status=status,
             )
 
         mount_slug = mount.name or _route_slug(mount.path)
@@ -181,7 +202,7 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
             preload_html=preload_html,
         )
 
-        return MountResult(html=document, data=data, data_error=data_error)
+        return MountResult(html=document, data=data, data_error=data_error, status=status)
 
 
 @contextmanager
@@ -199,7 +220,7 @@ def _ensure_app_booted(app):
 
 def load_controller_data(
     page, *, request: Request | None = None, app=None
-) -> tuple[dict, str | None, Redirect | None]:
+) -> tuple[dict, str | None, Redirect | None, int]:
     """Load route data through the lifecycle-owned page controller."""
     request = hydrate_request(request, app=app)
     if app is not None and hasattr(app, "controller_for_page"):
@@ -211,20 +232,22 @@ def load_controller_data(
             authorize_controller_method(controller, "load")
             data = controller.load()
         if isinstance(data, Redirect):
-            return {}, None, data
-        return inject_auth_data(data, request, app=app), None, None
+            return {}, None, data, 200
+        return inject_auth_data(data, request, app=app), None, None, 200
     except Redirect as exc:
-        return {}, None, exc
+        return {}, None, exc, 200
+    except ActionDispatchError as exc:
+        return {}, str(exc), None, exc.status_code
     except Exception as exc:
-        return {}, f"{exc.__class__.__name__}: {exc}", None
+        return {}, f"{exc.__class__.__name__}: {exc}", None, 200
 
 
 def load_mount_data(
     mount, *, request: Request | None = None, app=None
-) -> tuple[dict, str | None, Redirect | None]:
+) -> tuple[dict, str | None, Redirect | None, int]:
     """Load boot data through the lifecycle-owned mount controller."""
     if mount.boot is None:
-        return inject_auth_data({}, request, app=app), None, None
+        return inject_auth_data({}, request, app=app), None, None, 200
     request = hydrate_request(request, app=app)
     if app is not None and hasattr(app, "controller_for_mount"):
         controller = app.controller_for_mount(mount)
@@ -235,12 +258,14 @@ def load_mount_data(
             authorize_controller_method(controller, "load")
             data = controller.load()
         if isinstance(data, Redirect):
-            return {}, None, data
-        return inject_auth_data(data, request, app=app), None, None
+            return {}, None, data, 200
+        return inject_auth_data(data, request, app=app), None, None, 200
     except Redirect as exc:
-        return {}, None, exc
+        return {}, None, exc, 200
+    except ActionDispatchError as exc:
+        return {}, str(exc), None, exc.status_code
     except Exception as exc:
-        return {}, f"{exc.__class__.__name__}: {exc}", None
+        return {}, f"{exc.__class__.__name__}: {exc}", None, 200
 
 
 def render_screen(page, data) -> tuple[str, list[dict], str | None]:
@@ -407,6 +432,28 @@ def build_redirect_html(location: str, *, title: str = "Redirecting") -> str:
 </head>
 <body>
   <p>Redirecting to <a href="{escaped_location}">{escaped_location}</a>...</p>
+</body>
+</html>
+"""
+
+
+def build_status_html(status: int, message: str, *, title: str | None = None) -> str:
+    """Build a minimal status document for auth failures during GET boot."""
+    resolved_title = title or f"{status} Error"
+    escaped_title = html.escape(str(resolved_title))
+    escaped_message = html.escape(str(message or resolved_title))
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escaped_title}</title>
+</head>
+<body>
+  <main>
+    <h1>{status}</h1>
+    <p>{escaped_message}</p>
+  </main>
 </body>
 </html>
 """
