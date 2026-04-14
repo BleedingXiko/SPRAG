@@ -354,6 +354,9 @@ a:hover { color: var(--accent-ink); }
   overflow: hidden;
   border: 1px solid #334155;
   box-shadow: 0 8px 32px rgba(15, 23, 42, 0.12);
+  background: var(--code-bg);
+  display: flex;
+  flex-direction: column;
 }
 
 .landing-code-tab {
@@ -367,6 +370,7 @@ a:hover { color: var(--accent-ink); }
 }
 
 .landing-code pre {
+  flex: 1;
   margin: 0;
   padding: 1.25rem 1.5rem;
   background: var(--code-bg);
