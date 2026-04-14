@@ -13,6 +13,8 @@ sprag new myapp && cd myapp && sprag dev
 
 > **Status: pre-alpha.** The framework is real and working. The API surface is not pinned yet.
 
+**[Read the docs →](https://bleedingxiko.github.io/SPRAG/docs)**
+
 ---
 
 ## What SPRAG Actually Is
@@ -633,3 +635,19 @@ SPRAG sits on two runtimes:
 - **Ragot** in the browser — components, modules, DOM ownership, stores, hydration, virtual scrolling, animation, and teardown
 
 SPRAG makes them feel like one framework. `set_state`, `listen`, `emit`, `subscribe`, `timeout`, `interval`, and `adopt` follow the same mental model on both sides.
+
+---
+
+## Documentation
+
+Full documentation lives in `docs/` and is published to GitHub Pages:
+
+**[bleedingxiko.github.io/SPRAG](https://bleedingxiko.github.io/SPRAG)**
+
+The docs site is itself a SPRAG app built with the `docs` template — dogfooding the framework. Topics covered:
+
+- **Getting Started** — installation, first app, project structure
+- **Framework** — two runtimes, routes, controllers, stores, auth, uploads, realtime, codegen
+- **Specter** — services, schemas, queues (server runtime)
+- **Ragot** — components, modules, ui primitives, decorators (browser runtime)
+- **Guides** — deployment, forms, background jobs

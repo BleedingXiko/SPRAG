@@ -1,0 +1,1 @@
+"""Dynamic docs article route."""

@@ -1,0 +1,114 @@
+---
+title: Realtime
+description: WebSocket communication — server push, browser subscription, topics, and the signal-then-refetch pattern.
+order: 16
+---
+
+# Realtime
+
+SPRAG's realtime layer connects server events to browser handlers over WebSockets. The design follows a simple principle: **signal then refetch**.
+
+## The pattern
+
+Instead of pushing full state snapshots over the socket, the server emits a lightweight signal. The browser receives it and calls a server action to fetch authoritative data:
+
+```
+Server: emit_socket("items_changed", {})
+Browser: on_socket("items_changed") → call_action("get_items", {})
+```
+
+This keeps the socket channel thin and ensures the browser always has validated, authoritative state.
+
+## Server → browser
+
+From any controller, push a socket event:
+
+```python
+# Broadcast to all connected clients
+self.emit_socket("items_changed", {"source": "bulk_import"})
+
+# Target a specific session
+self.emit_socket("notification", {
+    "message": "Your export is ready"
+}, session_id=self.request.session_id)
+
+# Target a topic (room)
+self.emit_socket("room_update", {
+    "action": "new_message"
+}, topic="room:42")
+```
+
+## Browser subscription
+
+In a Module's `on_start()`, subscribe to socket events:
+
+```python
+class ChatModule(Module):
+    def on_start(self):
+        self.on_socket("new_message", self._on_message)
+
+    def _on_message(self, data):
+        # Refetch authoritative state from server
+        self.call_action("get_messages", {})
+```
+
+## Topics (rooms)
+
+Topics partition socket events so clients only receive what's relevant:
+
+```python
+class ChatModule(Module):
+    def on_start(self):
+        room_id = self.state.get("room_id")
+        self.join_topic(f"room:{room_id}")
+        self.on_socket("room_update", self._on_update)
+
+    def on_stop(self):
+        room_id = self.state.get("room_id")
+        self.leave_topic(f"room:{room_id}")
+```
+
+On the server, target the topic when emitting:
+
+```python
+self.emit_socket("room_update", data, topic=f"room:{room_id}")
+```
+
+## Convenience: refetch on socket
+
+For the common signal-then-refetch pattern, use the shorthand:
+
+```python
+class ItemsModule(Module):
+    def on_start(self):
+        # When "items_changed" arrives, automatically call the "get_items" action
+        self.refetch_on_socket("items_changed", action="get_items")
+```
+
+On the server side, there's a matching shortcut:
+
+```python
+# Emit the signal and include the refetch hint in one call
+self.emit_socket_refetch("items_changed", action="get_items")
+```
+
+## Session targeting
+
+To push events to a specific user's browser session:
+
+```python
+# In an action — target the current user
+self.emit_socket("export_ready", {
+    "url": download_url
+}, session_id=self.request.session_id)
+```
+
+Store the `session_id` when you need to push from a background job or service later.
+
+## Diagnostics
+
+```bash
+sprag routes
+```
+
+Controllers that use the socket bridge are tagged with `[socket]` in the output.

@@ -1,0 +1,40 @@
+# docs — SPRAG Docs Site
+
+A static-first docs and blog starter for SPRAG.
+
+This template is built around:
+
+- file-based content in `app/content/docs/` and `app/content/blog/`
+- dynamic routes for docs catch-all pages and blog slugs
+- static site generation through `sprag build`
+- one client-only interactive route that still works on a static host
+
+## Run
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+sprag dev --port 8000
+```
+
+Optional env settings live in `.env.example`. Copy the keys you want into
+`.env` or `.env.local`. Only `SPRAG_PUBLIC_` values are exposed to browser
+Modules and Components.
+
+## Build Static Output
+
+```bash
+sprag build
+```
+
+Deploy the generated static site from `dist/public/`.
+
+## Routes
+
+- `/` home
+- `/docs` docs index
+- `/docs/[...segments]` docs articles from `app/content/docs/`
+- `/blog` blog index
+- `/blog/[slug]` blog posts from `app/content/blog/`
+- `/playground` client-only interactive examples
