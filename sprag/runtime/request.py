@@ -32,6 +32,12 @@ class UploadedFile:
         destination.write_bytes(self.data)
         return destination
 
+    @classmethod
+    def from_path(cls, path, *, name: str, filename: str, content_type: str | None = None) -> "UploadedFile":
+        """Construct an UploadedFile by reading assembled bytes from disk."""
+        data = Path(path).read_bytes()
+        return cls(name=name, filename=filename, content_type=content_type, data=data)
+
 
 @dataclass
 class Request:

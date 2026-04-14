@@ -1397,8 +1397,6 @@ def _spawn_deferred_action(
     finishes, the result (or error) is pushed to the requesting browser
     session via the websocket transport.
     """
-    import gevent
-
     task_id = f"deferred-{uuid.uuid4().hex[:12]}"
     session_id = getattr(request, "session_id", None)
     route_path = getattr(request, "path", None) or "/"
@@ -1462,7 +1460,7 @@ def _spawn_deferred_action(
             route=route_path,
         )
 
-    gevent.spawn(_run)
+    app.runtime_root().spawn(_run, label=f"deferred:{action_name}")
     return ActionResult(
         ok=True,
         value={"deferred": True, "task_id": task_id},

@@ -10,10 +10,8 @@ import os
 import re
 import time
 import traceback
-from collections import OrderedDict
 from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
-from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 from gevent.pool import Pool
@@ -34,9 +32,6 @@ _COMPRESSIBLE_TYPES = {
 
 _GZIP_MIN_SIZE = 1024
 _GZIP_LEVEL = 5
-_GZIP_CACHE_MAX = 128
-_gzip_cache: OrderedDict = OrderedDict()
-_gzip_cache_lock = Lock()
 
 from ..observability import ensure_request_id, log_request_event
 from ..request import Request, UploadedFile
@@ -110,6 +105,18 @@ class SpragWSGIApp:
 
         if method == "POST" and path == "/__sprag__/actions":
             return self._handle_action(environ, start_response)
+
+        if method == "GET" and path == "/__sprag__/uploads/negotiate":
+            return self._handle_upload_negotiate(environ, start_response)
+
+        if method == "POST" and path == "/__sprag__/uploads/init":
+            return self._handle_upload_init(environ, start_response)
+
+        if method == "POST" and path == "/__sprag__/uploads/chunk":
+            return self._handle_upload_chunk(environ, start_response)
+
+        if method == "POST" and path == "/__sprag__/uploads/cancel":
+            return self._handle_upload_cancel(environ, start_response)
 
         if method == "POST" and path == "/__sprag__/uploads":
             return self._handle_upload(environ, start_response)
@@ -541,6 +548,280 @@ class SpragWSGIApp:
                 "status": result.status,
                 "redirect": result.redirect.as_payload() if result.redirect is not None else None,
             },
+            extra_headers=self._session_headers(request),
+        )
+
+    # -- Chunked upload endpoints -----------------------------------------------
+
+    def _handle_upload_negotiate(self, environ, start_response):
+        manager = self._sprag_app.upload_manager()
+        return self._json_response(start_response, 200, manager.negotiate())
+
+    def _handle_upload_init(self, environ, start_response):
+        started_at = time.time()
+        headers = self._extract_headers(environ)
+        request = hydrate_request(Request(
+            path="/",
+            method="POST",
+            headers=headers,
+        ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
+        ensure_request_id(request)
+
+        try:
+            content_length = int(environ.get("CONTENT_LENGTH", "0"))
+        except ValueError:
+            return self._json_response(
+                start_response, 400,
+                {"ok": False, "error": "Invalid Content-Length header."},
+                extra_headers=self._session_headers(request),
+            )
+
+        raw_body = environ["wsgi.input"].read(content_length) if content_length else b""
+        try:
+            body = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return self._json_response(
+                start_response, 400,
+                {"ok": False, "error": "Invalid JSON request body."},
+                extra_headers=self._session_headers(request),
+            )
+
+        route = body.get("route")
+        action = body.get("action")
+        payload = body.get("payload", {})
+        file_specs = body.get("files", [])
+
+        if not route or not action or not file_specs:
+            return self._json_response(
+                start_response, 400,
+                {"ok": False, "error": "Missing route, action, or files in upload init."},
+                extra_headers=self._session_headers(request),
+            )
+
+        manager = self._sprag_app.upload_manager()
+        session = manager.init_session(
+            route=route,
+            action=action,
+            payload=payload,
+            file_specs=file_specs,
+            session_id=request.session_id,
+        )
+
+        log_request_event(
+            "request.upload.init",
+            request=request,
+            status=200,
+            duration_ms=_duration_ms(started_at),
+            outcome="ok",
+            route=route,
+            action=action,
+            upload_id=session.upload_id,
+            chunks_expected=session.chunks_expected,
+        )
+
+        return self._json_response(
+            start_response, 200,
+            {
+                "ok": True,
+                "upload_id": session.upload_id,
+                "chunk_size": session.chunk_size,
+                "chunks_expected": session.chunks_expected,
+            },
+            extra_headers=self._session_headers(request),
+        )
+
+    def _handle_upload_chunk(self, environ, start_response):
+        started_at = time.time()
+        headers = self._extract_headers(environ)
+        request = hydrate_request(Request(
+            path="/",
+            method="POST",
+            headers=headers,
+        ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
+        ensure_request_id(request)
+
+        content_type = environ.get("CONTENT_TYPE", "")
+        if "multipart/form-data" not in content_type.lower():
+            return self._json_response(
+                start_response, 415,
+                {"ok": False, "error": "Chunk upload requires multipart/form-data."},
+                extra_headers=self._session_headers(request),
+            )
+
+        form_storage = cgi.FieldStorage(
+            fp=environ["wsgi.input"],
+            environ=environ,
+            keep_blank_values=True,
+        )
+
+        upload_id = None
+        file_index = None
+        chunk_index = None
+        chunk_data = None
+
+        for item in form_storage.list or []:
+            if not getattr(item, "name", None):
+                continue
+            if item.name == "upload_id":
+                upload_id = item.value
+            elif item.name == "file_index":
+                file_index = int(item.value)
+            elif item.name == "chunk_index":
+                chunk_index = int(item.value)
+            elif item.name == "chunk":
+                chunk_data = item.file.read() if item.file is not None else b""
+
+        if upload_id is None or file_index is None or chunk_index is None or chunk_data is None:
+            return self._json_response(
+                start_response, 400,
+                {"ok": False, "error": "Missing upload_id, file_index, chunk_index, or chunk data."},
+                extra_headers=self._session_headers(request),
+            )
+
+        manager = self._sprag_app.upload_manager()
+        try:
+            session, is_complete = manager.receive_chunk(upload_id, file_index, chunk_index, chunk_data)
+        except KeyError:
+            return self._json_response(
+                start_response, 404,
+                {"ok": False, "error": f"Unknown upload session: {upload_id}"},
+                extra_headers=self._session_headers(request),
+            )
+
+        if not is_complete:
+            return self._json_response(
+                start_response, 200,
+                {
+                    "ok": True,
+                    "chunks_received": len(session.chunks_received),
+                    "chunks_expected": session.chunks_expected,
+                },
+                extra_headers=self._session_headers(request),
+            )
+
+        # Auto-finalize: assemble files and dispatch the controller action.
+        try:
+            assembled_files = manager.assemble_files(upload_id)
+        except Exception:
+            manager.cancel(upload_id)
+            return self._json_response(
+                start_response, 500,
+                {"ok": False, "error": "Failed to assemble uploaded files."},
+                extra_headers=self._session_headers(request),
+            )
+
+        # Build the request object for the controller action.
+        files_dict = {}
+        for uploaded in assembled_files:
+            SpragWSGIApp._append_multipart_value(files_dict, uploaded.name, uploaded)
+
+        request.path = session.route or "/"
+        request.content_type = "multipart/form-data"
+        request.form = {}
+        request.files = files_dict
+
+        try:
+            result = dispatch_controller_action(
+                self._sprag_app.pages(),
+                route_path=session.route,
+                action_name=session.action,
+                payload=session.payload,
+                request=request,
+                app=self._sprag_app,
+                mounts=self._sprag_app.mounts(),
+            )
+        except ActionDispatchError as exc:
+            manager.cancel(upload_id)
+            log_request_event(
+                "request.upload.chunk",
+                request=request,
+                level=_status_log_level(exc.status_code),
+                status=exc.status_code,
+                duration_ms=_duration_ms(started_at),
+                outcome="error",
+                route=session.route,
+                action=session.action,
+                upload_id=upload_id,
+                error=str(exc),
+            )
+            return self._json_response(
+                start_response, exc.status_code,
+                {"ok": False, "error": str(exc)},
+                extra_headers=self._session_headers(request),
+            )
+
+        # Clean up temp files after successful dispatch.
+        manager.cancel(upload_id)
+
+        log_request_event(
+            "request.upload.chunk",
+            request=request,
+            status=200,
+            action_status=result.status,
+            duration_ms=_duration_ms(started_at),
+            outcome="finalized",
+            route=session.route,
+            action=session.action,
+            upload_id=upload_id,
+        )
+
+        return self._json_response(
+            start_response, 200,
+            {
+                "ok": result.ok,
+                "finalized": True,
+                "route": session.route,
+                "action": session.action,
+                "value": result.value,
+                "error": result.error,
+                "status": result.status,
+                "redirect": result.redirect.as_payload() if result.redirect is not None else None,
+            },
+            extra_headers=self._session_headers(request),
+        )
+
+    def _handle_upload_cancel(self, environ, start_response):
+        headers = self._extract_headers(environ)
+        request = hydrate_request(Request(
+            path="/",
+            method="POST",
+            headers=headers,
+        ), app=self._sprag_app, raw_cookie=environ.get("HTTP_COOKIE"))
+        ensure_request_id(request)
+
+        try:
+            content_length = int(environ.get("CONTENT_LENGTH", "0"))
+        except ValueError:
+            return self._json_response(
+                start_response, 400,
+                {"ok": False, "error": "Invalid Content-Length header."},
+                extra_headers=self._session_headers(request),
+            )
+
+        raw_body = environ["wsgi.input"].read(content_length) if content_length else b""
+        try:
+            body = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return self._json_response(
+                start_response, 400,
+                {"ok": False, "error": "Invalid JSON request body."},
+                extra_headers=self._session_headers(request),
+            )
+
+        upload_id = body.get("upload_id")
+        if not upload_id:
+            return self._json_response(
+                start_response, 400,
+                {"ok": False, "error": "Missing upload_id."},
+                extra_headers=self._session_headers(request),
+            )
+
+        manager = self._sprag_app.upload_manager()
+        manager.cancel(upload_id)
+
+        return self._json_response(
+            start_response, 200,
+            {"ok": True},
             extra_headers=self._session_headers(request),
         )
 

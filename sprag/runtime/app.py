@@ -6,65 +6,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from specter import registry
+from specter import Service, registry
 
 from .assets import normalize_module_imports
 from .discovery import discover_surfaces
 from .session import AnonymousAuthService, InMemorySessionStore, SessionPolicy
 from .socket_bridge import SpragSocketBridge, controller_uses_socket_bridge
+from .uploads import UploadSessionManager
 
 
-class _AppRuntimeRoot:
-    """Small ownership root for App-managed providers/controllers/transports."""
+class _AppRuntimeRoot(Service):
+    """Ownership root for App-managed providers/controllers/transports."""
 
     def __init__(self, name: str):
-        self.name = name
-        self.running = False
-        self._cleanups = []
-
-    def start(self):
-        self.running = True
-        return self
-
-    def add_cleanup(self, fn):
-        if not callable(fn):
-            return fn
-        if not self.running:
-            try:
-                fn()
-            except Exception:
-                pass
-            return fn
-        self._cleanups.append(fn)
-        return fn
-
-    def addCleanup(self, fn):  # pragma: no cover - compatibility shim for owner APIs
-        return self.add_cleanup(fn)
-
-    def adopt(self, child):
-        if child is None:
-            return child
-
-        def _stop_child():
-            if hasattr(child, "stop"):
-                child.stop()
-            elif hasattr(child, "close"):
-                child.close()
-
-        self.add_cleanup(_stop_child)
-        return child
-
-    def stop(self):
-        if not self.running and not self._cleanups:
-            return
-        self.running = False
-        cleanups = list(reversed(self._cleanups))
-        self._cleanups.clear()
-        for cleanup in cleanups:
-            try:
-                cleanup()
-            except Exception:
-                pass
+        super().__init__(name)
 
 
 @dataclass
@@ -77,6 +32,8 @@ class App:
     modules: dict = field(default_factory=dict)
     server_mode: str = "auto"
     session_policy: SessionPolicy = field(default_factory=SessionPolicy)
+    upload_chunk_size: int = 2 * 1024 * 1024
+    upload_temp_dir: str | None = None
 
     def __post_init__(self):
         if self.server_mode not in {"auto", "wsgi", "websocket"}:
@@ -97,6 +54,7 @@ class App:
         self._mounts = None
         self._controllers = {}
         self._socket_bridge = None
+        self._upload_manager = None
         self._runtime_root = None
         self._controller_root = None
         self._booted = False
@@ -125,6 +83,18 @@ class App:
         self._pages = None
         self._mounts = None
 
+    def upload_manager(self):
+        """Return the app-owned upload session manager (Specter Service)."""
+        if self._upload_manager is None:
+            mgr = UploadSessionManager(
+                temp_root=self.upload_temp_dir,
+                chunk_size=self.upload_chunk_size,
+            )
+            runtime = self._ensure_runtime_root()
+            runtime.adopt(mgr)
+            self._upload_manager = mgr
+        return self._upload_manager
+
     def boot(self):
         """Provide app providers/controllers into Specter's registry and start them."""
         if self._booted:
@@ -132,12 +102,16 @@ class App:
         self._ensure_surfaces()
         self._ensure_runtime_root()
         self._ensure_socket_runtime()
+        self.upload_manager()
         for name, svc in self.providers.items():
             for registry_key in self._provider_registry_keys(name, svc):
                 registry.provide(registry_key, svc, owner=self._runtime_root, replace=True)
             if not getattr(svc, "running", True) and hasattr(svc, "start"):
                 svc.start()
-            self._runtime_root.adopt(svc)
+            if isinstance(svc, Service):
+                self._runtime_root.adopt(svc, start=False)
+            elif hasattr(svc, "stop") or hasattr(svc, "close"):
+                self._runtime_root.own(svc)
         self._ensure_controllers()
         self._booted = True
 
@@ -150,6 +124,7 @@ class App:
         self._runtime_root = None
         self._controller_root = None
         self._socket_bridge = None
+        self._upload_manager = None
 
     def controller_for_page(self, page):
         """Return the lifecycle-owned controller instance for a page."""
@@ -184,9 +159,6 @@ class App:
         registry_key = _controller_registry_key(key, controller)
         registry.provide(registry_key, controller, owner=owner, replace=True)
         owner.adopt(controller)
-
-        if not controller.running:
-            controller.start()
 
         if controller_uses_socket_bridge(controller_cls):
             controller.build_handler(self.socket_bridge())
@@ -251,8 +223,12 @@ class App:
         if self._socket_bridge is None:
             self._socket_bridge = SpragSocketBridge(self)
             if self._runtime_root is not None:
-                self._runtime_root.adopt(self._socket_bridge)
+                self._runtime_root.own(self._socket_bridge)
         self._socket_bridge.provide_registry(owner=self._runtime_root)
+
+    def runtime_root(self):
+        """Return the app-level runtime root Service."""
+        return self._ensure_runtime_root()
 
     def _ensure_runtime_root(self):
         if self._runtime_root is None:

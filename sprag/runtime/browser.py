@@ -437,6 +437,14 @@ class Module:
         """Submit a multipart form upload with progress; returns a Promise in JS."""
         _browser_only("Module.upload_form")
 
+    def upload(self, name, file, payload=None, on_progress=None):
+        """Programmatic file upload (drag-drop, File API); returns a Promise in JS.
+
+        Accepts a ``File``/``Blob`` directly. Automatically uses chunked
+        upload for files above the negotiated threshold.
+        """
+        _browser_only("Module.upload")
+
     def navigate(self, target, options=None):
         """Navigate the browser to another route or URL."""
         _browser_only("Module.navigate")
@@ -548,6 +556,14 @@ class Component:
     def upload_form(self, name, source, on_progress=None):
         """Submit a multipart form upload with progress; returns a Promise in JS."""
         _browser_only("Component.upload_form")
+
+    def upload(self, name, file, payload=None, on_progress=None):
+        """Programmatic file upload (drag-drop, File API); returns a Promise in JS.
+
+        Accepts a ``File``/``Blob`` directly. Automatically uses chunked
+        upload for files above the negotiated threshold.
+        """
+        _browser_only("Component.upload")
 
     def action_error_message(self, error, fallback=None):
         """Resolve a user-facing message from a rejected action/upload error."""

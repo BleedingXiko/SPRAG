@@ -25,10 +25,17 @@ class UploadDemoModule(Module):
 
     def on_start(self):
         self.delegate(self.element, "submit", "[data-role='upload-form']", self.on_submit)
+        drop_zone = self.element.querySelector("[data-role='drop-zone']")
+        if drop_zone:
+            self.on(drop_zone, "drop", self.on_drop_upload)
+            self.on(drop_zone, "dragover", self.on_dragover)
         self.on_socket("lab:upload.changed", self.on_upload_changed)
         topic = self.state.get("upload_topic")
         if topic:
             self.join_topic(topic)
+
+    def on_dragover(self, event):
+        event.prevent_default()
 
     def on_submit(self, event):
         event.prevent_default()
@@ -36,15 +43,30 @@ class UploadDemoModule(Module):
         request = self.upload_form("upload_asset", event, self.on_upload_progress)
         request.then(self.on_upload_result).catch(self.on_upload_error)
 
+    def on_drop_upload(self, event):
+        event.prevent_default()
+        event.stop_propagation()
+        files = event.data_transfer.files
+        if files.length == 0:
+            return
+        file = files[0]
+        self.set_progress_dom(0, f"Uploading {file.name} via programmatic upload()...")
+        payload = {"title": file.name, "notes": "Uploaded via drag-drop", "publish": False}
+        request = self.upload("upload_asset", file, payload, self.on_upload_progress)
+        request.then(self.on_upload_result).catch(self.on_upload_error)
+
     def on_upload_progress(self, progress):
         percent = progress.get("percent", 0)
         loaded = progress.get("loaded", 0)
         total = progress.get("total", 0)
-        message = (
-            f"Uploading... {percent}% ({loaded}/{total} bytes)"
-            if total > 0
-            else f"Uploading... {percent}%"
-        )
+        phase = progress.get("phase", "uploading")
+        file_name = progress.get("file_name", "")
+        if phase == "finalizing":
+            message = f"Finalizing {file_name}..."
+        elif total > 0:
+            message = f"Uploading... {percent}% ({loaded}/{total} bytes)"
+        else:
+            message = f"Uploading... {percent}%"
         self.set_progress_dom(percent, message)
 
     def on_upload_result(self, result):

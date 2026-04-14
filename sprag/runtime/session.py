@@ -190,27 +190,36 @@ class InMemorySessionStore:
     name = "session_store"
 
     def __init__(self):
-        self._sessions: dict[str, dict] = {}
+        from specter import create_store
+
+        self._store = create_store("sprag.sessions")
 
     def load(self, session_id):
-        snapshot = self._sessions.get(str(session_id))
-        return dict(snapshot or {})
+        snapshot = self._store.get(str(session_id))
+        return dict(snapshot) if isinstance(snapshot, dict) else {}
 
     def save(self, session: RequestSession):
         snapshot = session.snapshot()
         if snapshot:
-            self._sessions[session.id] = snapshot
+            self._store.set({session.id: snapshot})
             return
-        self._sessions.pop(session.id, None)
+        self._store.delete(session.id)
 
     def delete(self, session_id):
-        self._sessions.pop(str(session_id), None)
+        self._store.delete(str(session_id))
 
     def rotate(self, session: RequestSession):
         previous = session.rotated_from
-        if previous:
-            self.delete(previous)
-        self.save(session)
+
+        def _atomic_rotate(draft):
+            if previous and previous in draft:
+                del draft[previous]
+            snapshot = session.snapshot()
+            if snapshot:
+                draft[session.id] = snapshot
+            return draft
+
+        self._store.update(_atomic_rotate)
 
 
 class AnonymousAuthService:

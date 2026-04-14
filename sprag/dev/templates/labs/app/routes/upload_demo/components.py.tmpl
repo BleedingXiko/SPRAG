@@ -19,7 +19,9 @@ class UploadDemoCard(Component):
                 "Native file inputs stay DOM-owned until submit. "
                 "upload_form(...) sends multipart to a dedicated upload endpoint, "
                 "keeps metadata JSON-safe, and the authoritative server snapshot "
-                "comes back through a socket signal plus status refetch."
+                "comes back through a socket signal plus status refetch. "
+                "Files above 2 MB auto-switch to the chunked upload protocol. "
+                "The drop zone below exercises the programmatic upload() API."
             ),
             ui.div(
                 ui.span("Status"),
@@ -129,6 +131,19 @@ class UploadDemoCard(Component):
                 ),
                 class_="sprag-form",
                 data_role="upload-form",
+            ),
+            ui.div(
+                ui.h3("Programmatic upload (drag-drop)"),
+                ui.p(
+                    "Drop a file here to test self.upload(). "
+                    "Large files (>2 MB) use the chunked protocol automatically."
+                ),
+                ui.div(
+                    ui.p("Drop file here", class_="drop-label"),
+                    class_="drop-zone",
+                    data_role="drop-zone",
+                ),
+                class_="form-field",
             ),
             ui.div(
                 ui.h3("Server result"),
