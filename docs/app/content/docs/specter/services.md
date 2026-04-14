@@ -33,7 +33,7 @@ class MetricsService(Service):
 
 | Method | When it runs |
 |---|---|
-| `on_start()` | After the service is initialised and the app is booted |
+| `on_start()` | After the service is initialized and the app is booted |
 | `on_stop()` | During app shutdown, before process exit |
 
 ## Managed concurrency

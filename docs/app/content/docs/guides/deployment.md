@@ -1,6 +1,6 @@
 ---
 title: Deployment
-description: Building, optimising, and deploying SPRAG apps — static hosting, WSGI, and WebSocket modes.
+description: Building, optimizing, and deploying SPRAG apps — static hosting, WSGI, and WebSocket modes.
 order: 40
 ---
 
@@ -22,7 +22,7 @@ This emits the full site into `dist/`:
 - `dist/runtime/` — SPRAG bridge files
 - `dist/manifest.json` — route/mount/asset manifest
 
-## Production optimisation
+## Production optimization
 
 ```bash
 sprag pack
@@ -30,11 +30,11 @@ sprag pack
 
 This post-processes `dist/` with:
 
-| Optimisation | Flag to skip |
+| Optimization | Flag to skip |
 |---|---|
 | CSS/JS minification (terser, cleancss) | `--skip-minify` |
 | Python bytecode compilation | `--skip-bytecode` |
-| Image optimisation | `--skip-images` |
+| Image optimization | `--skip-images` |
 | Pre-gzip compression | (always runs) |
 | Content-hash fingerprinting | (always runs) |
 

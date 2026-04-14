@@ -67,7 +67,7 @@ app = App(routes="app.routes", shell=app_shell)
 |---|---|
 | `sprag dev` | Dev server with file watching and hot rebuild |
 | `sprag build` | Build into `dist/` — fully static output |
-| `sprag pack` | Production optimisation of `dist/` |
+| `sprag pack` | Production optimization of `dist/` |
 | `sprag routes` | List all discovered routes and actions |
 | `sprag inspect /path` | Show compiled JS output for a route |
 | `sprag doctor` | Structural diagnostics |

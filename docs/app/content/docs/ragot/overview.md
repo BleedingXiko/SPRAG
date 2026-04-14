@@ -70,6 +70,32 @@ sprag inspect /counter
 
 This shows the generated JavaScript with source location comments mapping back to your Python.
 
+## Decision Matrix
+
+Use this to decide which primitive is right for the job.
+
+| Situation | Use | Do Not Default To |
+|---|---|---|
+| Parent owns child component lifecycle | `adoptComponent` | registry lookup |
+| Parent owns child module lifecycle | `adopt` | bus events |
+| Parent pushes module state into child UI | `adoptComponent(..., { sync })` | registry indirection |
+| Shared writable state across independent modules | `createStateStore` | bus-only state transfer |
+| App startup service registration | `ragotRegistry.provide` | manual globals |
+| Service may appear later | `waitForCancellable` | plain `waitFor` |
+| One event, many independent listeners | `bus` | registry call chains |
+
+## Common Pitfalls
+
+1. **`watchState` signature**: The first argument must be a function.
+2. **`subscribe` signature**: The first argument must be a function.
+3. **`adopt()` defaults**: `adopt()` defaults to the `stop` method; components usually need `unmount`.
+4. **Detached mounting**: Mounting into detached containers breaks measurements and observers.
+5. **Keyed siblings**: Mixing keyed and unkeyed siblings in `morphDOM` causes ordering issues. Use `data-ragot-key` consistently.
+6. **Socket validation**: Calling `onSocket` with a non-socket first argument logs a warning and skips binding.
+7. **Pending `waitFor`**: Awaiting `waitFor(...)` without cancellation in lifecycle owners can leak pending handles.
+8. **Registry for ownership**: Using the registry for parent-owned child wiring makes ownership and teardown ambiguous.
+9. **Logic split**: Implementing the same behavior through both direct calls and bus events causes split logic paths.
+
 Add `--rebuild` to force a fresh compile:
 
 ```bash

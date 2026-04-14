@@ -15,7 +15,7 @@ order: 1
 ## Install SPRAG
 
 ```bash
-pip install sprag
+pip install spragkit
 ```
 
 Or install from source during pre-alpha:

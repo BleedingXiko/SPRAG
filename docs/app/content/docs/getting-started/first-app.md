@@ -101,10 +101,10 @@ sprag build
 
 This emits the full site into `dist/`. Open `dist/counter/index.html` in a browser — the counter still works, fully static.
 
-For production optimisation:
+For production optimization:
 
 ```bash
 sprag pack
 ```
 
-This minifies, gzips, fingerprints, and optimises the `dist/` output.
+This minifies, gzips, fingerprints, and optimizes the `dist/` output.

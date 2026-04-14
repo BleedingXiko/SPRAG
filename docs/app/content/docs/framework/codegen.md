@@ -26,7 +26,7 @@ If it's in a `Component` or `Module` subclass, it compiles to JS. Everything els
 | `return value` | `return value` |
 | `if / elif / else` | `if / else if / else` |
 | `for x in items` | `for (const x of items)` |
-| `for i in range(n)` | `for (let i = 0; i < n; i++)` (optimised, no array) |
+| `for i in range(n)` | `for (let i = 0; i < n; i++)` (optimized, no array) |
 | `while condition` | `while (condition)` |
 | `try / except / finally` | `try / catch / finally` |
 | `break` / `continue` | `break` / `continue` |
@@ -146,7 +146,7 @@ Works in statements. Not supported inside comprehensions or lambdas.
 | `max(...)` | `Math.max(...)` |
 | `round(x)` | `Math.round(x)` |
 | `print(...)` | `console.log(...)` |
-| `range(n)` | Materialised array (but `for i in range(n)` optimises to C-style loop) |
+| `range(n)` | Materialized array (but `for i in range(n)` optimizes to C-style loop) |
 | `sum(items)` | `.reduce((a, b) => a + b, 0)` |
 
 ## Name mapping

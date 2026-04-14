@@ -17,7 +17,7 @@ This means one `.py` file can define the server action that handles a form submi
 ## Try it
 
 ```bash
-pip install sprag
+pip install spragkit
 sprag new hello
 cd hello
 sprag dev

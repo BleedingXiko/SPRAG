@@ -51,3 +51,31 @@ from sprag import (
 ```
 
 These are the same primitives SPRAG itself uses internally. Using them directly gives you full control when the SPRAG surface doesn't fit.
+
+## Decision Matrix
+
+Use this to decide which primitive is right for the job.
+
+| Situation | Use | Do Not Default To |
+|---|---|---|
+| Background lifecycle with timers/listeners | `Service` | module-level greenlets |
+| Queue-backed worker pipeline | `QueueService` | manual queue + ad-hoc worker loops |
+| Feature spans routes + sockets + state | `Controller` | split logic across unrelated modules |
+| Class-based socket event ownership | `Handler` | free-function handler registrars |
+| One socket event with multiple backend listeners | `SocketIngress` | registering competing handlers directly on Socket.IO |
+| Polling external state | `Watcher(poll=...)` | hand-rolled `while True` loops |
+| Stream-following external source | `Watcher(stream=...)` or `ManagedProcess` | unmanaged reader greenlets |
+| Shared mutable flat state | `create_store` | global dict + manual locks |
+| Nested runtime state | `create_model` | deep dict mutation scattered in services |
+| Expensive data with expiry | `create_cache` | perpetual stale globals |
+| Broadcast internal notifications | `bus` | import chains for fanout |
+| Provision shared services | `registry.provide` | ad-hoc globals |
+
+## Common Pitfalls
+
+1. **Synchronous Bus**: `bus.emit` is synchronous; long listeners block the emitter greenlet. Spawn a new greenlet if necessary.
+2. **Locking in Cache**: `Cache.get_or_compute` executes the factory while holding the cache lock. Keep factories fast.
+3. **Socket Unregistration**: Direct registrations on Flask-SocketIO via `socketio.on` are not fully unregisterable. Use `Handler` or `SocketIngress` for clean teardown.
+4. **Schema Exceptions**: `Schema.require` raises `HTTPError` or `SchemaError`; ensure you handle these or use a `json_endpoint`.
+5. **Lifecycle State**: `Service.spawn`, `interval`, and `timeout` require the service to be running (`start()` has been called).
+6. **Registry Timeouts**: `registry.wait_for` can block indefinitely if the dependency never arrives. Always provide a `timeout`.
