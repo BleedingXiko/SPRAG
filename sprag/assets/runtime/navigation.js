@@ -1,3 +1,5 @@
+import { $$, attr } from '../vendor/ragot.esm.min.js';
+
 function trimTrailingSlash(value) {
     if (!value || value === '/') {
         return '';
@@ -83,7 +85,7 @@ export function createNavigationRuntime({ manifest, surface }) {
         if (typeof document === 'undefined') {
             return;
         }
-        for (const anchor of document.querySelectorAll('a[href]')) {
+        for (const anchor of $$('a[href]')) {
             const rawHref = anchor.getAttribute('href');
             if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('mailto:') || rawHref.startsWith('tel:')) {
                 continue;
@@ -97,7 +99,7 @@ export function createNavigationRuntime({ manifest, surface }) {
                 if (!canonical) {
                     continue;
                 }
-                anchor.setAttribute('href', `${withSpragBase(canonical)}${parsed.search}${parsed.hash}`);
+                attr(anchor, { href: `${withSpragBase(canonical)}${parsed.search}${parsed.hash}` });
             } catch (_error) {
                 // Ignore invalid href values.
             }

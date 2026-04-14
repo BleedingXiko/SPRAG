@@ -187,6 +187,17 @@ class Landing(Component):
                     class_="card",
                 ),
                 ui.a(
+                    ui.h3("Deferred Actions →"),
+                    ui.p(
+                        "@action(defer=True) runs in a background greenlet "
+                        "and signals the result via sprag:action.resolved "
+                        "on the socket. Lighter than a full QueueService."
+                    ),
+                    ui.span("hybrid · @action(defer=True)", class_="tag"),
+                    href="/defer-demo",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Lifecycle Mount →"),
                     ui.p(
                         "A client app mount with one root Module, arbitrary "

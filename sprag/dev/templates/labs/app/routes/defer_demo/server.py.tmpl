@@ -1,0 +1,35 @@
+import gevent
+
+from sprag import Controller, Schema, Field, action
+
+
+class DeferDemoController(Controller):
+    route = "/defer-demo"
+
+    def load(self):
+        return {
+            "status": "idle",
+            "result": None,
+        }
+
+    @action(schema=Schema("start_job", {"seconds": Field(int, required=True)}), defer=True)
+    def start_job(self, seconds):
+        """Simulates a long-running task.  The browser gets an immediate
+        ``{deferred: true}`` response and receives the real result via
+        ``sprag:action.resolved`` on the socket once the greenlet finishes.
+        """
+        seconds = max(1, min(seconds, 10))
+        for i in range(seconds):
+            gevent.sleep(1)
+            self.emit_socket(
+                "defer-demo:progress",
+                {"step": i + 1, "total": seconds},
+                session_id=self.request.session_id,
+            )
+        return {"message": f"Finished after {seconds}s of work.", "seconds": seconds}
+
+    @action(schema=Schema("start_failing_job", {}), defer=True)
+    def start_failing_job(self):
+        """Demonstrates the ``sprag:action.failed`` signal path."""
+        gevent.sleep(1)
+        raise RuntimeError("Intentional failure to demonstrate error signalling.")

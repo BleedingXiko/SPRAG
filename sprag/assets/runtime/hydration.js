@@ -1,3 +1,4 @@
+import { $, createElement, clear, append } from '../vendor/ragot.esm.min.js';
 import { provideOwned } from './registry.js';
 
 export async function resolveSurfaceImports(currentSurface, resolveJSImportSrc) {
@@ -31,16 +32,35 @@ export async function resolveSurfaceImports(currentSurface, resolveJSImportSrc) 
 
 export function renderBootError(error) {
     const message = error && error.message ? error.message : String(error);
-    const target = document.querySelector('#app-root') || document.body;
+    const target = $('#app-root') || document.body;
     if (!target) {
         return;
     }
-    target.innerHTML = `
-        <section data-sprag-boot-error style="max-width: 52rem; margin: 3rem auto; padding: 1.25rem; border: 1px solid #d7b2b2; border-radius: 12px; background: #fff4f4; color: #5f1d1d; font-family: ui-sans-serif, system-ui, sans-serif;">
-          <h1 style="margin: 0 0 0.75rem; font-size: 1.25rem;">SPRAG boot error</h1>
-          <p style="margin: 0; white-space: pre-wrap;">${message}</p>
-        </section>
-    `;
+    clear(target);
+    append(target,
+        createElement('section', {
+            dataset: { spragBootError: '' },
+            style: {
+                maxWidth: '52rem',
+                margin: '3rem auto',
+                padding: '1.25rem',
+                border: '1px solid #d7b2b2',
+                borderRadius: '12px',
+                background: '#fff4f4',
+                color: '#5f1d1d',
+                fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+            },
+        },
+            createElement('h1', {
+                style: { margin: '0 0 0.75rem', fontSize: '1.25rem' },
+                textContent: 'SPRAG boot error',
+            }),
+            createElement('p', {
+                style: { margin: '0', whiteSpace: 'pre-wrap' },
+                textContent: message,
+            }),
+        ),
+    );
 }
 
 function mountRecord(root, record) {
@@ -87,7 +107,7 @@ export function mountHydrationEntries(root) {
 }
 
 export function mountHydrationEntry(root, entry) {
-    const target = document.querySelector(`[data-sprag-hydrate-id="${entry.id}"]`);
+    const target = $(`[data-sprag-hydrate-id="${entry.id}"]`);
     if (!target) {
         return null;
     }
@@ -100,7 +120,7 @@ export function mountHydrationEntry(root, entry) {
 
     const ModuleClass = entry.module ? root.moduleRegistry[entry.module] : null;
     const component = createComponent(ComponentClass, entry.state, entry.props);
-    target.innerHTML = '';
+    clear(target);
 
     if (ModuleClass) {
         const module = new ModuleClass(entry.module_state || {});
@@ -130,7 +150,7 @@ export function mountHydrationEntry(root, entry) {
 }
 
 export function mountClientSurface(root) {
-    const target = document.querySelector('#app-root');
+    const target = $('#app-root');
     if (!target) {
         return null;
     }
@@ -145,7 +165,7 @@ export function mountClientSurface(root) {
 
     const ModuleClass = mount && mount.module ? root.moduleRegistry[mount.module] : null;
     const component = createComponent(ComponentClass, boot, boot);
-    target.innerHTML = '';
+    clear(target);
 
     if (ModuleClass) {
         const module = new ModuleClass(boot || {});

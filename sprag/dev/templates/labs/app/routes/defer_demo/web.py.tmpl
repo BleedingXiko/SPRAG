@@ -1,0 +1,13 @@
+from sprag import Screen, hydrate
+
+from .components import DeferCard
+from .modules import DeferDemoModule
+
+
+class DeferDemoScreen(Screen):
+    modules = [DeferDemoModule]
+
+    def render(self, data):
+        demo = self.module(DeferDemoModule)
+        demo.set_state(data)
+        return hydrate(DeferCard, module=demo)

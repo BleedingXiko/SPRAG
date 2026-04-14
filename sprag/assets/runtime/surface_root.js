@@ -1,5 +1,5 @@
-import { bus } from '../vendor/ragot.esm.min.js';
-import { RuntimeOwner, providerRegistryKeys, provideOwned } from './registry.js';
+import { Module } from '../vendor/ragot.esm.min.js';
+import { providerRegistryKeys, provideOwned } from './registry.js';
 import { mountClientSurface, mountHydrationEntries } from './hydration.js';
 import { createEventSourceBridge, createSurfaceSocketClient } from './sockets.js';
 
@@ -14,7 +14,7 @@ function cloneSerializable(value, fallback = null) {
     }
 }
 
-export class SurfaceRoot extends RuntimeOwner {
+export class SurfaceRoot extends Module {
     constructor({
         actionClient,
         componentRegistry,
@@ -26,7 +26,9 @@ export class SurfaceRoot extends RuntimeOwner {
         surface,
         uploadClient,
     }) {
-        super(`sprag.surface.${(surface && surface.path) || 'unknown'}`);
+        super();
+        this._label = `sprag.surface.${(surface && surface.path) || 'unknown'}`;
+        this._stopReason = null;
         this.actionClient = actionClient;
         this.componentRegistry = componentRegistry || {};
         this.manifest = manifest || {};
@@ -41,7 +43,16 @@ export class SurfaceRoot extends RuntimeOwner {
         this.uploadClient = uploadClient;
     }
 
-    boot() {
+    /**
+     * Compatibility shim: RuntimeOwner exposed `stopped` (true when torn down).
+     * Module uses `_isMounted` (true when running). This getter inverts the
+     * semantics so callers like boot.js can keep checking `root.stopped`.
+     */
+    get stopped() {
+        return !this._isMounted;
+    }
+
+    onStart() {
         provideOwned('sprag.route', this.surface, this);
         provideOwned('sprag.actions', this.actionClient, this);
 
@@ -87,8 +98,6 @@ export class SurfaceRoot extends RuntimeOwner {
         });
         window.__SPRAG_EVENT_SOURCE__ = this.eventSource;
         this.adopt(this.eventSource);
-
-        return this;
     }
 
     currentHydrationSnapshots() {
@@ -129,7 +138,12 @@ export class SurfaceRoot extends RuntimeOwner {
     }
 
     stop(reason = 'teardown') {
-        super.stop(reason);
+        this._stopReason = reason;
+        super.stop();
+        return this;
+    }
+
+    onStop() {
         if (window.__SPRAG_RUNTIME_ROOT__ === this) {
             window.__SPRAG_RUNTIME_ROOT__ = null;
         }
@@ -148,6 +162,6 @@ export class SurfaceRoot extends RuntimeOwner {
         if (window.__SPRAG_TEARDOWN__ && window.__SPRAG_TEARDOWN__.__spragRoot === this) {
             window.__SPRAG_TEARDOWN__ = null;
         }
-        bus.emit('sprag:teardown', { reason });
+        this.emit('sprag:teardown', { reason: this._stopReason || 'teardown' });
     }
 }

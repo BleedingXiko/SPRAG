@@ -105,14 +105,22 @@ def redirect(location, *, status=302, replace=None) -> Redirect:
     return Redirect(location, status=status, replace=replace)
 
 
-def action(fn=None, *, schema=None, name=None):
-    """Mark a controller method as a route action."""
+def action(fn=None, *, schema=None, name=None, defer=False):
+    """Mark a controller method as a route action.
+
+    When ``defer=True`` the action body runs in a background greenlet and
+    the HTTP response returns immediately with ``{"deferred": True}``.
+    On completion the framework emits ``sprag:action.resolved`` (or
+    ``sprag:action.failed``) via the websocket transport targeted to the
+    requesting session.
+    """
 
     def decorator(method):
         method._sprag_action = True
         method._sprag_action_meta = {
             "name": name or method.__name__,
             "schema": schema,
+            "defer": bool(defer),
         }
         return method
 
@@ -1198,6 +1206,14 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
             status_code=400,
         ) from exc
 
+    if meta.get("defer"):
+        return _spawn_deferred_action(
+            bound_action, args, kwargs,
+            action_name=action_name,
+            request=request,
+            app=app,
+        )
+
     try:
         with controller_context(request=request, app=app):
             result = bound_action(*args, **kwargs)
@@ -1364,3 +1380,104 @@ def _coerce_action_result(result) -> ActionResult:
             redirect=redirect_response,
         )
     return ActionResult(ok=True, value=result, status=200)
+
+
+def _spawn_deferred_action(
+    bound_action,
+    args,
+    kwargs,
+    *,
+    action_name,
+    request,
+    app,
+):
+    """Run an ``@action(defer=True)`` method in a background greenlet.
+
+    Returns an accepted ``ActionResult`` immediately.  When the greenlet
+    finishes, the result (or error) is pushed to the requesting browser
+    session via the websocket transport.
+    """
+    import gevent
+
+    task_id = f"deferred-{uuid.uuid4().hex[:12]}"
+    session_id = getattr(request, "session_id", None)
+    route_path = getattr(request, "path", None) or "/"
+
+    if session_id is None:
+        logger.warning(
+            "[SPRAG] @action(defer=True) %r dispatched without a session id — "
+            "the result cannot be delivered to the browser.",
+            action_name,
+        )
+
+    def _run():
+        try:
+            with controller_context(request=request, app=app):
+                result = bound_action(*args, **kwargs)
+        except Redirect as exc:
+            _emit_deferred_signal(
+                app,
+                "sprag:action.resolved",
+                {
+                    "action": action_name,
+                    "task_id": task_id,
+                    "ok": True,
+                    "value": None,
+                    "redirect": exc.as_payload(),
+                },
+                session_id=session_id,
+                route=route_path,
+            )
+            return
+        except Exception as exc:
+            logger.error(
+                "Deferred action %r failed: %s", action_name, exc, exc_info=True,
+            )
+            _emit_deferred_signal(
+                app,
+                "sprag:action.failed",
+                {
+                    "action": action_name,
+                    "task_id": task_id,
+                    "ok": False,
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                },
+                session_id=session_id,
+                route=route_path,
+            )
+            return
+
+        coerced = _coerce_action_result(result)
+        _emit_deferred_signal(
+            app,
+            "sprag:action.resolved",
+            {
+                "action": action_name,
+                "task_id": task_id,
+                "ok": coerced.ok,
+                "value": coerced.value,
+                "error": coerced.error,
+            },
+            session_id=session_id,
+            route=route_path,
+        )
+
+    gevent.spawn(_run)
+    return ActionResult(
+        ok=True,
+        value={"deferred": True, "task_id": task_id},
+        status=202,
+    )
+
+
+def _emit_deferred_signal(app, event, payload, *, session_id=None, route=None):
+    """Push a deferred-action result to the browser via the socket transport."""
+    transport = registry.resolve("socket_transport")
+    if transport is None:
+        logger.warning(
+            "[SPRAG] Deferred action %r completed but no socket transport is "
+            "available to deliver the result.",
+            payload.get("action"),
+        )
+        return
+    transport.emit(event, payload, session_id=session_id, route=route)

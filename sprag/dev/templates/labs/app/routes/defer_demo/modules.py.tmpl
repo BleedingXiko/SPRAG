@@ -1,0 +1,62 @@
+from sprag import Module
+
+
+class DeferDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state
+            or {
+                "status": "idle",
+                "result": None,
+                "error": None,
+                "progress": None,
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='start-job']", self.on_start_job)
+        self.delegate(self.element, "click", "[data-role='start-failing']", self.on_start_failing)
+        self.on_socket("defer-demo:progress", self.on_progress)
+        self.on_socket("sprag:action.resolved", self.on_resolved)
+        self.on_socket("sprag:action.failed", self.on_failed)
+
+    def on_start_job(self, event):
+        event.prevent_default()
+        seconds = int(event.target.dataset.seconds or "3")
+        self.set_state({"status": "running", "result": None, "error": None, "progress": None})
+        self.call_action("start_job", {"seconds": seconds}).then(self.on_accepted).catch(self.on_call_error)
+
+    def on_start_failing(self, event):
+        event.prevent_default()
+        self.set_state({"status": "running", "result": None, "error": None, "progress": None})
+        self.call_action("start_failing_job", {}).then(self.on_accepted).catch(self.on_call_error)
+
+    def on_accepted(self, result):
+        value = result.value
+        if value and value.deferred:
+            self.set_state({"status": "deferred (task: " + str(value.task_id) + ")"})
+
+    def on_call_error(self, error):
+        self.set_state({"status": "error", "error": self.action_error_message(error, "Action call failed.")})
+
+    def on_progress(self, payload):
+        self.set_state({"progress": payload})
+
+    def on_resolved(self, payload):
+        if payload.action == "start_job" or payload.action == "start_failing_job":
+            self.set_state({
+                "status": "done",
+                "result": payload.value,
+                "error": None,
+                "progress": None,
+            })
+
+    def on_failed(self, payload):
+        if payload.action == "start_job" or payload.action == "start_failing_job":
+            self.set_state({
+                "status": "failed",
+                "error": payload.error,
+                "result": None,
+                "progress": None,
+            })

@@ -1,0 +1,47 @@
+from sprag import Component, ui
+
+
+class DeferCard(Component):
+    def render(self, props=None):
+        status = self.state.get("status", "idle")
+        result = self.state.get("result", "")
+        error = self.state.get("error", "")
+        progress = self.state.get("progress", None)
+        progress_text = ("Step " + str(progress.get("step", "?")) + " / " + str(progress.get("total", "?"))) if progress else ""
+
+        return ui.div(
+            ui.h2("Deferred Actions"),
+            ui.p(
+                "Actions marked @action(defer=True) return immediately with "
+                "{deferred: true} and run in a background greenlet. "
+                "Results arrive via sprag:action.resolved on the socket."
+            ),
+            ui.div(
+                ui.div(
+                    ui.span("Status"),
+                    ui.strong(status),
+                    class_="metric",
+                ),
+                class_="queue-actions",
+            ),
+            ui.p(progress_text, class_="status-line"),
+            ui.div(
+                ui.button(
+                    "Run 3s deferred job",
+                    type="button",
+                    class_="btn",
+                    data_role="start-job",
+                    data_seconds="3",
+                ),
+                ui.button(
+                    "Run failing job",
+                    type="button",
+                    class_="btn btn-ghost",
+                    data_role="start-failing",
+                ),
+                class_="queue-actions",
+            ),
+            ui.p(str(result) if result else "", class_="status-line"),
+            ui.p(error if error else "", class_="status-line"),
+            class_="demo-card queue-card",
+        )

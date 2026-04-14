@@ -224,14 +224,15 @@ def cmd_routes(args):
         for action_name, action_fn in sorted(actions.items()):
             meta = getattr(action_fn, "_sprag_action_meta", None) or {}
             schema = meta.get("schema")
+            defer_tag = " [defer]" if meta.get("defer") else ""
             if schema is not None:
                 fields_desc = ", ".join(
                     f"{fname}: {f.type.__name__}{' [required]' if f.required else ''}"
                     for fname, f in schema._fields.items()
                 ) if hasattr(schema, "_fields") else ""
-                print(f"  @{action_name}({fields_desc})")
+                print(f"  @{action_name}({fields_desc}){defer_tag}")
             else:
-                print(f"  @{action_name}()")
+                print(f"  @{action_name}(){defer_tag}")
 
         if not (isinstance(page.controller, type) and issubclass(page.controller, SpragController)):
             warnings.append(f"  {module_name}: controller {page.controller.__name__} is not a sprag.Controller subclass")
@@ -252,14 +253,15 @@ def cmd_routes(args):
             for action_name, action_fn in sorted(actions.items()):
                 meta = getattr(action_fn, "_sprag_action_meta", None) or {}
                 schema = meta.get("schema")
+                defer_tag = " [defer]" if meta.get("defer") else ""
                 if schema is not None:
                     fields_desc = ", ".join(
                         f"{fname}: {f.type.__name__}{' [required]' if f.required else ''}"
                         for fname, f in schema._fields.items()
                     ) if hasattr(schema, "_fields") else ""
-                    print(f"  @{action_name}({fields_desc})")
+                    print(f"  @{action_name}({fields_desc}){defer_tag}")
                 else:
-                    print(f"  @{action_name}()")
+                    print(f"  @{action_name}(){defer_tag}")
 
     if warnings:
         print()

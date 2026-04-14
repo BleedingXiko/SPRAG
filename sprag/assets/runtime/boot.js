@@ -1,3 +1,4 @@
+import { Module } from '../vendor/ragot.esm.min.js';
 import { actionErrorMessageSprag, createActionClient } from './actions.js';
 import { registerDevReloadListener } from './dev_reload.js';
 import { resolveSurfaceImports, renderBootError } from './hydration.js';
@@ -22,30 +23,54 @@ function resolveSurface(manifest, payload, surfaceRef) {
     return liveSurface || matched;
 }
 
-export function startSurfaceBoot({
-    componentRegistry,
-    manifest,
-    moduleRegistry,
-    surfaceRef = null,
-}) {
-    let activeRoot = null;
+class BootModule extends Module {
+    constructor({
+        componentRegistry,
+        manifest,
+        moduleRegistry,
+        surfaceRef = null,
+    }) {
+        super();
+        this._componentRegistry = componentRegistry;
+        this._manifest = manifest;
+        this._moduleRegistry = moduleRegistry;
+        this._surfaceRef = surfaceRef;
+        this._activeRoot = null;
+    }
 
-    async function boot() {
-        if (activeRoot && !activeRoot.stopped) {
-            return activeRoot;
+    onStart() {
+        this.on(window, 'pagehide', () => {
+            if (this._activeRoot) {
+                this._activeRoot.stop('pagehide');
+                this._activeRoot = null;
+            }
+        });
+
+        this.on(window, 'pageshow', (event) => {
+            if (event.persisted && !this._activeRoot) {
+                void this.boot();
+            }
+        });
+
+        void this.boot();
+    }
+
+    async boot() {
+        if (this._activeRoot && !this._activeRoot.stopped) {
+            return this._activeRoot;
         }
         try {
             const payload = window.__SPRAG_PAYLOAD__ || {};
-            const surface = resolveSurface(manifest, payload, surfaceRef);
+            const surface = resolveSurface(this._manifest, payload, this._surfaceRef);
             if (!surface) {
                 throw new Error('[SPRAG] Could not resolve the current surface.');
             }
 
-            window.__SPRAG_MANIFEST__ = manifest || {};
+            window.__SPRAG_MANIFEST__ = this._manifest || {};
             window.__SPRAG_ENV__ = payload.env || {};
             window.__SPRAG_IMPORTS__ = window.__SPRAG_IMPORTS__ || {};
 
-            const navigation = createNavigationRuntime({ manifest, surface });
+            const navigation = createNavigationRuntime({ manifest: this._manifest, surface });
             window.__SPRAG_BASE__ = navigation.basePrefix || '';
             window.__SPRAG_NAVIGATE__ = navigation.navigate;
 
@@ -79,10 +104,10 @@ export function startSurfaceBoot({
 
             const root = new SurfaceRoot({
                 actionClient,
-                componentRegistry,
-                manifest,
+                componentRegistry: this._componentRegistry,
+                manifest: this._manifest,
                 metadata,
-                moduleRegistry,
+                moduleRegistry: this._moduleRegistry,
                 navigation,
                 payload,
                 surface,
@@ -90,8 +115,8 @@ export function startSurfaceBoot({
             });
 
             const teardown = (reason = 'teardown') => {
-                if (activeRoot === root) {
-                    activeRoot = null;
+                if (this._activeRoot === root) {
+                    this._activeRoot = null;
                 }
                 root.stop(reason);
             };
@@ -104,13 +129,14 @@ export function startSurfaceBoot({
                 root.addCleanup(unsubscribe);
             }
 
-            root.boot();
-            activeRoot = root;
+            root.start();
+            this._activeRoot = root;
+            this.adopt(root);
             return root;
         } catch (error) {
-            if (activeRoot) {
-                activeRoot.stop('boot-error');
-                activeRoot = null;
+            if (this._activeRoot) {
+                this._activeRoot.stop('boot-error');
+                this._activeRoot = null;
             }
             renderBootError(error);
             console.error(error);
@@ -118,33 +144,41 @@ export function startSurfaceBoot({
         }
     }
 
+    teardown(reason = 'teardown') {
+        if (this._activeRoot) {
+            this._activeRoot.stop(reason);
+            this._activeRoot = null;
+        }
+    }
+}
+
+export function startSurfaceBoot({
+    componentRegistry,
+    manifest,
+    moduleRegistry,
+    surfaceRef = null,
+}) {
+    const boot = new BootModule({
+        componentRegistry,
+        manifest,
+        moduleRegistry,
+        surfaceRef,
+    });
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
-            void boot();
+            boot.start();
         }, { once: true });
     } else {
-        void boot();
+        boot.start();
     }
 
-    window.addEventListener('pagehide', () => {
-        if (activeRoot) {
-            activeRoot.stop('pagehide');
-            activeRoot = null;
-        }
-    });
-    window.addEventListener('pageshow', (event) => {
-        if (event.persisted && !activeRoot) {
-            void boot();
-        }
-    });
-
     return {
-        boot,
+        boot() {
+            return boot.boot();
+        },
         teardown(reason = 'teardown') {
-            if (activeRoot) {
-                activeRoot.stop(reason);
-                activeRoot = null;
-            }
+            boot.teardown(reason);
         },
     };
 }

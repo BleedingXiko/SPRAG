@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import DeferDemoController
+from .web import DeferDemoScreen
+
+
+defer_demo = page(
+    path="/defer-demo",
+    controller=DeferDemoController,
+    screen=DeferDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Deferred Actions — SPRAG Labs"},
+)

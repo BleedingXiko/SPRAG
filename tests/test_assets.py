@@ -292,7 +292,7 @@ class AssetContractTests(unittest.TestCase):
             self.assertIn("async function resolveSurfaceImports(currentSurface, resolveJSImportSrc)", hydration_runtime)
             self.assertIn("await import(src)", hydration_runtime)
             self.assertIn("window.__SPRAG_IMPORTS__ = resolved;", hydration_runtime)
-            self.assertIn("data-sprag-boot-error", hydration_runtime)
+            self.assertIn("spragBootError", hydration_runtime)
 
             socket_runtime = sockets_path.read_text(encoding="utf-8")
             self.assertIn("type: 'topic'", socket_runtime)

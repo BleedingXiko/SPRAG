@@ -1,3 +1,5 @@
+import { $$, createElement, append, remove, attr } from '../vendor/ragot.esm.min.js';
+
 function metadataContent(value) {
     if (Array.isArray(value)) {
         return value
@@ -34,46 +36,49 @@ function listManagedHeadElements() {
     if (typeof document === 'undefined' || !document.head) {
         return [];
     }
-    return Array.from(document.head.querySelectorAll('[data-sprag-head="true"]'));
+    return $$('[data-sprag-head="true"]', document.head);
 }
 
 function managedHeadElementsForKey(key) {
-    return listManagedHeadElements().filter((element) => element.getAttribute('data-sprag-head-key') === key);
+    return listManagedHeadElements().filter(
+        (element) => element.getAttribute('data-sprag-head-key') === key,
+    );
 }
 
 function ensureManagedHeadElement(key) {
     const matches = managedHeadElementsForKey(key);
     const first = matches[0] || null;
     for (const duplicate of matches.slice(1)) {
-        duplicate.remove();
+        remove(duplicate);
     }
 
     let element = first;
     if (key === 'canonical') {
         if (!element || element.tagName !== 'LINK') {
             if (element) {
-                element.remove();
+                remove(element);
             }
-            element = document.createElement('link');
-            element.setAttribute('rel', 'canonical');
-            document.head.appendChild(element);
+            element = createElement('link', { rel: 'canonical' });
+            append(document.head, element);
         }
     } else {
         if (!element || element.tagName !== 'META') {
             if (element) {
-                element.remove();
+                remove(element);
             }
-            element = document.createElement('meta');
-            document.head.appendChild(element);
+            element = createElement('meta');
+            append(document.head, element);
         }
-        const attr = key.startsWith('og:') ? 'property' : 'name';
-        const staleAttr = attr === 'property' ? 'name' : 'property';
+        const nameAttr = key.startsWith('og:') ? 'property' : 'name';
+        const staleAttr = nameAttr === 'property' ? 'name' : 'property';
         element.removeAttribute(staleAttr);
-        element.setAttribute(attr, key);
+        attr(element, { [nameAttr]: key });
     }
 
-    element.setAttribute('data-sprag-head', 'true');
-    element.setAttribute('data-sprag-head-key', key);
+    attr(element, {
+        'data-sprag-head': 'true',
+        'data-sprag-head-key': key,
+    });
     return element;
 }
 
@@ -91,7 +96,7 @@ export class MetadataManager {
         for (const element of listManagedHeadElements()) {
             const key = element.getAttribute('data-sprag-head-key') || '';
             if (!nextKeys.has(key)) {
-                element.remove();
+                remove(element);
             }
         }
 
@@ -101,9 +106,9 @@ export class MetadataManager {
             }
             const element = ensureManagedHeadElement(key);
             if (key === 'canonical') {
-                element.setAttribute('href', content);
+                attr(element, { href: content });
             } else {
-                element.setAttribute('content', content);
+                attr(element, { content });
             }
         }
 
