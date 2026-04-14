@@ -174,6 +174,8 @@ Server-side it backs a Specter model. Browser-side SPRAG rewrites the import to 
 The shared frame is plain HTML and CSS:
 
 ```python
+from sprag import App, shell
+
 app = App(
     routes="app.routes",
     shell=shell(template="app/shell.html", css=["app/shell.css"]),
@@ -188,10 +190,7 @@ app = App(
 </div>
 ```
 
-Per-surface extras live on the surface itself: use `css=[...]` for route- or
-mount-specific styles, `js=[...]` for extra scripts, and put pass-through files
-under `app/static/`. Files in `app/static/` are published at `/static/...`;
-other declared local assets land under `/assets/...`.
+Per-surface extras live on the surface itself: use `css=[...]` for route- or mount-specific styles, `js=[...]` for extra scripts, and put pass-through files under `app/static/`. Files in `app/static/` are published at `/static/...`; other declared local assets land under `/assets/...`.
 
 ### JavaScript Interop
 
@@ -299,8 +298,7 @@ Same authoring rule as the rest of SPRAG:
 
 ### File Uploads
 
-Keep ordinary forms on the JSON action path, and use the dedicated multipart
-upload path when native file inputs are involved:
+Keep ordinary forms on the JSON action path, and use the dedicated multipart upload path when native file inputs are involved:
 
 ```python
 class AssetModule(Module):
@@ -320,17 +318,13 @@ class AssetController(Controller):
         return {"title": title, "filename": primary.filename, "extra_count": len(extras)}
 ```
 
-`upload_form(...)` sends `multipart/form-data` to a separate upload endpoint,
-keeps non-file fields JSON-safe for schema validation, and exposes uploaded
 files on `self.request.files`, `self.request.file(name)`, and
-`self.request.files_list(name)`. The intended realtime pairing is:
-store the authoritative upload snapshot on the server, emit a lightweight
-socket signal, and let the browser refetch status through a normal action.
+`upload_form(...)` sends `multipart/form-data` to a separate upload endpoint, keeps non-file fields JSON-safe for schema validation, and exposes uploaded files on `self.request.files`, `self.request.file(name)`, and `self.request.files_list(name)`. The intended realtime pairing is: store the authoritative upload snapshot on the server, emit a lightweight socket signal, and let the browser refetch status through a normal action.
 
 ### Background Jobs
 
 `QueueService` now has a first-class SPRAG job contract on top of Specter's
-raw queue workers:
+`QueueService` has a first-class SPRAG job contract on top of Specter's raw queue workers:
 
 ```python
 class BuildQueue(QueueService):
@@ -362,12 +356,7 @@ class BuildController(Controller):
         return self.request_job_cancel("build_queue", job_id)
 ```
 
-`self.enqueue(...)` returns one stable payload shape:
-`{"accepted": ..., "job": ..., "queue": ..., "message": ...}`.
-The queue owns the authoritative job record (`queued`/`running`/`cancelling`/
-`completed`/`failed`/`cancelled`), progress, result/error fields, and targeted
-socket invalidation metadata. The intended browser pattern is: call the action,
-listen for `sprag:queue.job.changed`, then refetch `status(...)` for the job.
+`self.enqueue(...)` returns one stable payload shape: `{"accepted": ..., "job": ..., "queue": ..., "message": ...}`. The queue owns the authoritative job record (`queued`/`running`/`cancelling`/`completed`/`failed`/`cancelled`), progress, result/error fields, and targeted socket invalidation metadata. The intended browser pattern is: call the action, listen for `sprag:queue.job.changed`, then refetch `status(...)` for the job.
 
 ### Dynamic Routes and Content
 
@@ -425,7 +414,7 @@ class ChatModule(Module):
         self.emit_socket("chat:message", {"text": text})
 ```
 
-Targeting stays websocket-first in this milestone:
+Targeting:
 
 ```python
 self.emit_socket("upload:changed", {"reason": "stored"}, session_id=self.request.session_id)
@@ -445,15 +434,64 @@ class UploadModule(Module):
         self.call_action("status", {}).then(self.on_status)
 ```
 
-Recommended pattern: treat sockets as a selective invalidation channel, not
-the source of truth. Mutate authoritative server state first, emit a small
-signal event, then refetch the current snapshot through normal SPRAG actions
-or route loads. Topic names should be app-namespaced strings such as
-`upload:123` or `room:alpha`.
+Recommended pattern: treat sockets as a selective invalidation channel, not the source of truth. Mutate authoritative server state first, emit a small signal event, then refetch the current snapshot through normal SPRAG actions or route loads. Topic names should be app-namespaced strings such as `upload:123` or `room:alpha`.
 
 SSE remains the broadcast-only path in this release.
 
 If any surface declares socket ingress, `server_mode="auto"` promotes to websocket transport automatically.
+
+### Auth and Sessions
+
+SPRAG includes built-in session management and authentication:
+
+```python
+from sprag import App, SessionPolicy, InMemorySessionStore, AnonymousAuthService
+
+app = App(
+    routes="app.routes",
+    session_store=InMemorySessionStore(),
+    auth_service=AnonymousAuthService(),
+    session_policy=SessionPolicy(
+        idle_ttl_seconds=3600,
+        absolute_ttl_seconds=86400,
+        remember_me_ttl_seconds=2592000,
+    ),
+)
+```
+
+Protect routes with `@requires_auth`:
+
+```python
+from sprag import requires_auth
+
+class DashboardController(Controller):
+    route = "/dashboard"
+
+    @requires_auth(roles=["admin"])
+    def load(self):
+        return {"user": self.request.user}
+```
+
+### Redirects
+
+First-class redirects with fluent API:
+
+```python
+from sprag import redirect
+
+class AuthController(Controller):
+    route = "/auth"
+
+    @action
+    def login(self):
+        # Server-side redirect
+        return redirect("/dashboard", status=302)
+
+    @action
+    def login_replace(self):
+        # Browser history replacement
+        return redirect("/dashboard", replace=True)
+```
 
 ---
 
@@ -494,7 +532,7 @@ sprag pack --zip                     # optimize + archive
 ```
 
 `sprag pack` runs:
-- CSS/JS minification, including local ESM `.mjs` assets (terser/cleancss if installed, regex fallback otherwise)
+- CSS/JS minification (terser/cleancss if installed, regex fallback otherwise)
 - Python bytecode compilation with source stripping
 - Image optimization with WebP + responsive variants (requires Pillow)
 - Pre-gzip compression of static assets
@@ -512,8 +550,8 @@ sprag pack --no-webp --no-srcset     # skip variant generation
 ```bash
 sprag doctor                         # structural health check
 sprag doctor --verbose               # with tracebacks
-sprag inspect /counter --rebuild     # show compiled output for a route
-sprag inspect /counter --open-files  # just the generated file paths
+sprag inspect /counter --rebuild   # show compiled output for a route
+sprag inspect /counter --open-files # just the generated file paths
 ```
 
 ---
@@ -523,18 +561,17 @@ sprag inspect /counter --open-files  # just the generated file paths
 ```
 myapp/
 ├── app/
-│   ├── __init__.py          # App(...) declaration
 │   ├── shell.html           # shared layout
-│   ├── shell.css            # shared styles
-│   ├── stores.py            # cross-runtime state
+│   ├── shell.css           # shared styles
+│   ├── stores.py          # cross-runtime state
 │   ├── routes/
-│   │   ├── home/            # document route
-│   │   ├── counter/         # hybrid route
-│   │   └── blog/[slug]/     # dynamic route
+│   │   ├── home/         # document route
+│   │   ├── counter/      # hybrid route
+│   │   └── blog/[slug]/ # dynamic route
 │   ├── mounts/
-│   │   └── dashboard/       # browser-owned mount
+│   │   └── dashboard/    # browser-owned mount
 │   └── content/
-│       └── docs/            # markdown content
+│       └── docs/         # markdown content
 └── requirements.txt
 ```
 
@@ -542,12 +579,10 @@ Each hybrid route:
 
 ```
 app/routes/counter/
-├── __init__.py
-├── page.py          # page(...) declaration
-├── server.py        # Controller + @actions
-├── web.py           # Screen + hydrate(...)
+├── page.py            # page(...) declaration
+├── server.py          # Controller + @actions
 ├── components.py    # Component classes (both runtimes)
-└── modules.py       # Module classes (browser, compiled to JS)
+└── modules.py        # Module classes (browser, compiled to JS)
 ```
 
 ---
@@ -558,7 +593,7 @@ Browser `Module` and `Component` code is compiled Python — not an embedded Pyt
 
 **Supported:**
 
-- Control flow: `if`/`elif`/`else`, `for`, `while`, `break`, `continue`, `try`/`except`/`finally`
+- Control flow: `if`/`elif`/`else`, `for`/`while`, `break`/`continue`, `try`/`except`/`finally`
 - Comprehensions: list, dict, set, generator (one-generator with `if` filters)
 - Destructuring: tuple unpacking in assigns and loop targets
 - Dict operations: spread `{**a}`, merge `a | b`, augmented merge `a |= b`
@@ -567,7 +602,7 @@ Browser `Module` and `Component` code is compiled Python — not an embedded Pyt
 - String methods: `.upper()`, `.lower()`, `.strip()` map to JS equivalents
 - Builtins: `len`, `str`, `int`, `float`, `bool`, `abs`, `min`, `max`, `round`, `print`, `range`, `sum`
 - Async: `async def`, `await`
-- Decorators: `@action`, `@debounce`, `@throttle`, `@animate`, `@virtual_scroll`, `@infinite_scroll`, `ref()`
+- Decorators: `@debounce`, `@throttle`, `@animate`, `@virtual_scroll`, `@infinite_scroll`, `@ref()`
 
 **Deliberately rejected** (clear `JSCodegenError` at build time):
 
