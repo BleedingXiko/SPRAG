@@ -1,4 +1,4 @@
-from sprag import Controller, Schema, action, socket_target
+from sprag import Controller, Schema, action
 
 
 class SocketDemoController(Controller):
@@ -18,13 +18,13 @@ class SocketDemoController(Controller):
     def handle_ping(self, payload=None):
         payload = payload or {}
         count = payload.get("count", 0)
-        self.emit_socket(
+        # Reply to the exact socket client that sent the ping.
+        self.emit_to_caller(
             "lab:socket.pong",
             {
                 "message": f"Controller received ping #{count} from browser socket ingress.",
                 "count": count,
             },
-            route=self.route,
         )
 
     @action(schema=Schema("snapshot", {}))
@@ -36,13 +36,8 @@ class SocketDemoController(Controller):
 
     @action(schema=Schema("broadcast", {}))
     def broadcast(self):
-        delivered = self.emit_socket_refetch(
-            "snapshot",
-            target=socket_target(
-                route=self.route,
-                session_id=self.request.session_id,
-            ),
-        )
+        # The blessed refetch pattern — one line instead of manual targeting.
+        delivered = self.refetch_session("snapshot")
         return {
             "message": (
                 "Session-targeted socket refetch signal sent."

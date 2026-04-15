@@ -251,6 +251,14 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
                 }
             });
         },
+        reset() {
+            _store.batch((state) => {
+                for (const key of Object.keys(state)) {
+                    delete state[key];
+                }
+                Object.assign(state, JSON.parse(JSON.stringify(initial)));
+            });
+        },
         subscribe(listener, options) {
             const resolved = options || {};
             const selector = resolved.selector;
@@ -289,6 +297,9 @@ _STORES_SHIM_RUNTIME = """function createStoreBridge(name, initial) {
             }
             const result = memo(_store.getState());
             return result === undefined ? fallback : result;
+        },
+        listen(path, listener) {
+            return bridge.subscribe(listener, { selector: path });
         },
         _store
     };

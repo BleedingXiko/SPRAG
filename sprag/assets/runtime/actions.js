@@ -1,3 +1,5 @@
+import { pushError } from './dev_overlay.js';
+
 export function createActionClient({ currentRoute, navigate, withSpragBase }) {
     const knownActions = new Set((currentRoute && currentRoute.actions) || []);
     const endpoint = withSpragBase((currentRoute && currentRoute.action_endpoint) || '/__sprag__/actions');
@@ -51,6 +53,15 @@ export function createActionClient({ currentRoute, navigate, withSpragBase }) {
                 const error = new Error(result.error || `[SPRAG] Action "${name}" failed.`);
                 error.status = response.status;
                 error.response = result;
+                if (currentRoute && currentRoute.dev_reload) {
+                    pushError({
+                        kind: 'action',
+                        title: `Action "${name}" failed (${response.status})`,
+                        message: result.error || 'Unknown action error',
+                        stack: result.traceback || '',
+                        source: `${(currentRoute && currentRoute.path) || '/'} -> ${name}`,
+                    });
+                }
                 throw error;
             }
 

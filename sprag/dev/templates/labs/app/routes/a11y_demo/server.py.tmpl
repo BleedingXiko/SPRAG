@@ -1,0 +1,28 @@
+from sprag import Controller, action
+
+
+class A11yDemoController(Controller):
+    route = "/a11y-demo"
+
+    def load(self):
+        return {
+            "tabs": [
+                {"id": "labels", "label": "Form Labels", "content": "Accessible form fields with linked labels, hints, and error messages."},
+                {"id": "live", "label": "Live Region", "content": "Status announcements via aria-live without stealing focus."},
+                {"id": "keyboard", "label": "Keyboard", "content": "Arrow-key tab navigation with programmatic focus management."},
+            ],
+            "active_tab": "labels",
+            "feedback": "",
+            "form_errors": {},
+        }
+
+    @action(derive=True)
+    def validate_form(self, name: str = "", email: str = ""):
+        errors = {}
+        if not name.strip():
+            errors["name"] = "Name is required."
+        if not email.strip() or "@" not in email:
+            errors["email"] = "A valid email is required."
+        if errors:
+            return {"ok": False, "errors": errors, "feedback": "Please fix the errors below."}
+        return {"ok": True, "errors": {}, "feedback": f"Saved for {name}."}

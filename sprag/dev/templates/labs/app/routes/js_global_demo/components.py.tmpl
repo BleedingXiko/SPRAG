@@ -7,10 +7,18 @@ class JSGlobalDemoCard(Component):
         return ui.section(
             ui.h2(props.get("title", "Classic/global JS")),
             ui.p(
-                "The page loads a plain deferred script from app/static/, "
-                "then the Module reaches for its global through browser.* "
-                "and tears it down in on_stop()."
+                "A plain IIFE script on globalThis drives a canvas particle system. "
+                "Click or drag inside the canvas to spawn sparks. "
+                "The Module controls hue and burst via the widget\u2019s JS API."
             ),
             ui.div("", data_role="widget-host", class_="demo-host"),
+            ui.div(
+                ui.button("Burst", data_role="burst", class_="btn btn-small"),
+                ui.button("Warm", data_role="hue-warm", class_="btn btn-small"),
+                ui.button("Cool", data_role="hue-cool", class_="btn btn-small"),
+                class_="demo-controls",
+                style="display:flex;gap:0.5rem;margin-top:0.75rem;",
+            ),
+            ui.p("", data_role="stats", class_="muted", style="font-size:0.82rem;margin-top:0.5rem;"),
             class_="card",
         )

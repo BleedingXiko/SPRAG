@@ -1,0 +1,11 @@
+from sprag import Screen, hydrate
+
+from .components import A11yDemoCard
+from .modules import A11yDemoModule
+
+
+class A11yDemoScreen(Screen):
+    modules = [A11yDemoModule]
+
+    def render(self, data):
+        return hydrate(A11yDemoCard, module=self.module(A11yDemoModule), props=data)

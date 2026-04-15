@@ -105,7 +105,49 @@ def redirect(location, *, status=302, replace=None) -> Redirect:
     return Redirect(location, status=status, replace=replace)
 
 
-def action(fn=None, *, schema=None, name=None, defer=False):
+def _derive_schema_from_signature(action_name, method):
+    """Inspect a method's type hints and defaults to build a Schema automatically.
+
+    Skips ``self`` and any parameter without an annotation. Maps Python
+    type hints to ``Field(type, required=..., default=...)`` using the same
+    type coercion that Specter ``Schema.validate`` already supports (str, int,
+    float, bool, list, dict).
+    """
+    sig = inspect.signature(method)
+    hints = getattr(method, "__annotations__", {})
+    fields = {}
+    for param_name, param in sig.parameters.items():
+        if param_name == "self":
+            continue
+        # If the default is already a Field, use it directly.
+        if isinstance(param.default, Field):
+            field = param.default
+            # Merge annotated type if the Field didn't specify one.
+            if field.type is str and param_name in hints and hints[param_name] is not str:
+                field = Field(
+                    hints[param_name],
+                    required=field.required,
+                    default=field.default,
+                    choices=getattr(field, "choices", None),
+                    validator=getattr(field, "validator", None),
+                    label=getattr(field, "label", None),
+                )
+            fields[param_name] = field
+            continue
+        # Infer from annotation + default.
+        param_type = hints.get(param_name, str)
+        if param_type is inspect.Parameter.empty:
+            param_type = str
+        has_default = param.default is not inspect.Parameter.empty
+        fields[param_name] = Field(
+            param_type,
+            required=not has_default,
+            default=param.default if has_default else None,
+        )
+    return Schema(action_name, fields)
+
+
+def action(fn=None, *, schema=None, name=None, defer=False, derive=False):
     """Mark a controller method as a route action.
 
     When ``defer=True`` the action body runs in a background greenlet and
@@ -113,13 +155,36 @@ def action(fn=None, *, schema=None, name=None, defer=False):
     On completion the framework emits ``sprag:action.resolved`` (or
     ``sprag:action.failed``) via the websocket transport targeted to the
     requesting session.
+
+    When ``derive=True`` and no explicit ``schema`` is provided, the schema
+    is automatically derived from the method's type hints and default values::
+
+        @action(derive=True)
+        def save_draft(self, title: str, email: str, summary: str = ""):
+            ...
+
+    This is equivalent to::
+
+        @action(schema=Schema("save_draft", {
+            "title": Field(str, required=True),
+            "email": Field(str, required=True),
+            "summary": Field(str, required=False, default=""),
+        }))
+        def save_draft(self, title, email, summary=""):
+            ...
+
+    Explicit ``schema=Schema(...)`` always takes precedence over derivation.
     """
 
     def decorator(method):
+        resolved_schema = schema
+        if resolved_schema is None and derive:
+            action_name = name or method.__name__
+            resolved_schema = _derive_schema_from_signature(action_name, method)
         method._sprag_action = True
         method._sprag_action_meta = {
             "name": name or method.__name__,
-            "schema": schema,
+            "schema": resolved_schema,
             "defer": bool(defer),
         }
         return method
@@ -204,6 +269,27 @@ def _server_only(name):
         "on a server-side Service or Controller. The stub exists so the "
         "error is loud instead of an AttributeError."
     )
+
+
+# Reserved event prefixes — user code should not emit these directly.
+_RESERVED_EVENT_PREFIXES = ("sprag:",)
+_warned_events: set[str] = set()
+
+
+def _warn_reserved_event(event):
+    """Log a warning when user code emits a framework-reserved event name."""
+    if not isinstance(event, str):
+        return
+    for prefix in _RESERVED_EVENT_PREFIXES:
+        if event.startswith(prefix) and event not in _warned_events:
+            _warned_events.add(event)
+            logger.warning(
+                "[SPRAG] Emitting reserved event %r — the sprag:* namespace "
+                "is reserved for framework events. Use a project-specific "
+                "prefix instead (e.g. 'app:' or 'myfeature:').",
+                event,
+            )
+            break
 
 
 def socket_target(*, route=None, client_id=None, session_id=None, topic=None):
@@ -335,6 +421,7 @@ class Service(SPECTERService):
             return False
         if route is None:
             route = getattr(self, "route", None)
+        _warn_reserved_event(event)
         return bool(
             transport.emit(
                 event,
@@ -960,6 +1047,7 @@ class Controller(SPECTERController):
             return False
         if route is None:
             route = getattr(self, "route", None)
+        _warn_reserved_event(event)
         return bool(
             transport.emit(
                 event,
@@ -1000,6 +1088,68 @@ class Controller(SPECTERController):
             client_id=client_id,
             session_id=session_id,
             topic=topic,
+        )
+
+    # -- Session/caller-scoped socket shortcuts (request-context required) --
+
+    def _require_request(self, method_name):
+        request = self.request
+        if request is None:
+            raise RuntimeError(
+                f"Controller.{method_name}() requires a current request context."
+            )
+        return request
+
+    def emit_to_session(self, event, data=None, *, topic=None):
+        """Emit to all browser clients in the requesting session on this route.
+
+        Shortcut for the most common targeting pattern::
+
+            self.emit_socket(event, data,
+                             session_id=self.request.session_id)
+        """
+        request = self._require_request("emit_to_session")
+        return self.emit_socket(
+            event, data,
+            session_id=request.session_id,
+            topic=topic,
+        )
+
+    def emit_to_caller(self, event, data=None):
+        """Emit to the single socket client that sent the current message.
+
+        Only meaningful inside ``build_events`` handlers where the request
+        carries the originating socket client id. Falls back to session
+        targeting when the client id is unavailable.
+        """
+        request = self._require_request("emit_to_caller")
+        client_id = (
+            request.headers.get("X-SPRAG-Socket-Id")
+            if request.headers else None
+        )
+        if client_id:
+            return self.emit_socket(event, data, client_id=client_id)
+        return self.emit_to_session(event, data)
+
+    def refetch_session(self, action, payload=None, *, event="sprag:refetch"):
+        """Signal the requesting session to refetch an action.
+
+        The blessed "emit signal, client refetches state" pattern::
+
+            # Instead of:
+            self.emit_socket_refetch("snapshot", {},
+                target=socket_target(route=self.route,
+                                     session_id=self.request.session_id))
+
+            # Write:
+            self.refetch_session("snapshot")
+        """
+        request = self._require_request("refetch_session")
+        return self.emit_socket_refetch(
+            action,
+            payload,
+            event=event,
+            session_id=request.session_id,
         )
 
     @classmethod
@@ -1160,9 +1310,10 @@ class Controller(SPECTERController):
 class ActionDispatchError(RuntimeError):
     """Structured action-dispatch failure for SPRAG bridge responses."""
 
-    def __init__(self, message, *, status_code=400):
+    def __init__(self, message, *, status_code=400, traceback_text=None):
         super().__init__(message)
         self.status_code = status_code
+        self.traceback_text = traceback_text
 
 
 def dispatch_controller_action(pages, *, route_path, action_name, payload=None, request=None, app=None, mounts=None):
@@ -1222,9 +1373,11 @@ def dispatch_controller_action(pages, *, route_path, action_name, payload=None, 
     except ActionDispatchError:
         raise
     except Exception as exc:
+        import traceback as _tb
         raise ActionDispatchError(
             f"{exc.__class__.__name__}: {exc}",
             status_code=500,
+            traceback_text="".join(_tb.format_exception(type(exc), exc, exc.__traceback__)),
         ) from exc
 
     return _coerce_action_result(result)

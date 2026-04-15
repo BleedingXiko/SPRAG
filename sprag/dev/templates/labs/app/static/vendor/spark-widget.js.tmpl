@@ -1,24 +1,150 @@
 (function (global) {
   function SPRAGSparkWidget(target, options) {
+    var opts = options || {};
     var host = target;
-    var label = (options && options.label) || "Widget ready";
+    var particles = [];
+    var raf = null;
+    var running = true;
+    var hue = opts.hue || 210;
+    var maxParticles = opts.maxParticles || 80;
+    var onStats = opts.onStats || null;
+
+    /* ── DOM ─────────────────────────────────────────────── */
     var root = document.createElement("div");
-    root.className = "lab-widget";
-    root.style.padding = "0.9rem 1rem";
+    root.className = "lab-widget spark-canvas-host";
+    root.style.position = "relative";
     root.style.borderRadius = "14px";
-    root.style.background = "linear-gradient(135deg, #183153, #275d7f)";
-    root.style.color = "#f6fbff";
-    root.style.fontWeight = "600";
-    root.style.boxShadow = "0 16px 30px rgba(24, 49, 83, 0.18)";
-    root.textContent = label;
+    root.style.overflow = "hidden";
+    root.style.background = "linear-gradient(135deg, #0d1b2a, #1b2d45)";
+    root.style.boxShadow = "0 16px 30px rgba(13, 27, 42, 0.35)";
+    root.style.cursor = "crosshair";
+
+    var canvas = document.createElement("canvas");
+    canvas.style.display = "block";
+    canvas.style.width = "100%";
+    canvas.style.height = "260px";
+    root.appendChild(canvas);
+
+    var badge = document.createElement("div");
+    badge.style.cssText =
+      "position:absolute;bottom:10px;right:14px;font:600 11px/1 system-ui;" +
+      "color:rgba(246,251,255,0.45);pointer-events:none;";
+    badge.textContent = opts.label || "click to spark";
+    root.appendChild(badge);
+
     host.innerHTML = "";
     host.appendChild(root);
 
-    return {
-      destroy: function () {
-        if (root.parentNode) {
-          root.parentNode.removeChild(root);
+    var ctx = canvas.getContext("2d");
+
+    /* ── sizing ──────────────────────────────────────────── */
+    function resize() {
+      var rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * (window.devicePixelRatio || 1);
+      canvas.height = rect.height * (window.devicePixelRatio || 1);
+      ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+    }
+    resize();
+
+    /* ── particle factory ────────────────────────────────── */
+    function spawn(x, y, count) {
+      for (var i = 0; i < count; i++) {
+        var angle = Math.random() * Math.PI * 2;
+        var speed = 0.4 + Math.random() * 2.2;
+        particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 0.3,
+          r: 1.5 + Math.random() * 3,
+          life: 1.0,
+          decay: 0.006 + Math.random() * 0.012,
+          h: hue + (Math.random() - 0.5) * 40,
+        });
+      }
+      if (particles.length > maxParticles) {
+        particles.splice(0, particles.length - maxParticles);
+      }
+    }
+
+    /* seed a few ambient sparks */
+    var rect = canvas.getBoundingClientRect();
+    for (var s = 0; s < 18; s++) {
+      spawn(Math.random() * rect.width, Math.random() * rect.height, 1);
+    }
+
+    /* ── interaction ─────────────────────────────────────── */
+    function onPointer(e) {
+      var r = canvas.getBoundingClientRect();
+      spawn(e.clientX - r.left, e.clientY - r.top, 12 + Math.floor(Math.random() * 8));
+    }
+    canvas.addEventListener("pointerdown", onPointer);
+    canvas.addEventListener("pointermove", function (e) {
+      if (e.buttons) onPointer(e);
+    });
+
+    /* ── render loop ─────────────────────────────────────── */
+    var frameCount = 0;
+    function tick() {
+      if (!running) return;
+      var w = canvas.getBoundingClientRect().width;
+      var h = canvas.getBoundingClientRect().height;
+      ctx.clearRect(0, 0, w, h);
+
+      for (var i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.012;
+        p.life -= p.decay;
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+          continue;
         }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+        ctx.fillStyle =
+          "hsla(" +
+          Math.round(p.h) +
+          ", 85%, " +
+          Math.round(50 + 30 * p.life) +
+          "%, " +
+          p.life.toFixed(2) +
+          ")";
+        ctx.shadowColor =
+          "hsla(" + Math.round(p.h) + ", 90%, 65%, " + (p.life * 0.5).toFixed(2) + ")";
+        ctx.shadowBlur = 8 * p.life;
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+
+      /* ambient drift particles when idle */
+      frameCount++;
+      if (frameCount % 20 === 0 && particles.length < 15) {
+        spawn(Math.random() * w, Math.random() * h, 1);
+      }
+
+      if (onStats) {
+        onStats({ particles: particles.length, frame: frameCount });
+      }
+
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+
+    /* ── public API ──────────────────────────────────────── */
+    return {
+      burst: function (x, y, count) {
+        spawn(x || rect.width / 2, y || rect.height / 2, count || 20);
+      },
+      setHue: function (h) {
+        hue = h;
+      },
+      destroy: function () {
+        running = false;
+        if (raf) cancelAnimationFrame(raf);
+        canvas.removeEventListener("pointerdown", onPointer);
+        if (root.parentNode) root.parentNode.removeChild(root);
       },
     };
   }

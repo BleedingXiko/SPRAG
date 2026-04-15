@@ -630,7 +630,7 @@ class AuthContractTests(unittest.TestCase):
             session_policy=SessionPolicy(idle_ttl_seconds=5, absolute_ttl_seconds=30)
         )
         session_store = app.providers["session_store"]
-        session_store._sessions["expired-session"] = {
+        session_store._store.set({"expired-session": {
             "auth_user_id": "user-ada",
             "active_profile_id": "profile-owner",
             "note": "stale",
@@ -640,7 +640,7 @@ class AuthContractTests(unittest.TestCase):
                 "absolute_expiry": 130,
                 "remember_me": False,
             },
-        }
+        }})
         with patch("sprag.runtime.session.time.time", return_value=200):
             status, headers, _body = self._wsgi_call(
                 method="GET",

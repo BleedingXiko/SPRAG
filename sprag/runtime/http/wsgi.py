@@ -392,14 +392,17 @@ class SpragWSGIApp:
                 payload=_payload_shape(payload),
                 error=str(exc),
             )
+            body = {
+                "ok": False,
+                "route": route_path,
+                "action": action_name,
+                "error": str(exc),
+            }
+            if exc.traceback_text and getattr(self._sprag_app, "_sprag_dev_reload", False):
+                body["traceback"] = exc.traceback_text
             return self._json_response(
                 start_response, exc.status_code,
-                {
-                    "ok": False,
-                    "route": route_path,
-                    "action": action_name,
-                    "error": str(exc),
-                },
+                body,
                 extra_headers=self._session_headers(request),
             )
 
@@ -511,15 +514,18 @@ class SpragWSGIApp:
                 files=_files_shape(files),
                 error=str(exc),
             )
+            body = {
+                "ok": False,
+                "route": route_path,
+                "action": action_name,
+                "error": str(exc),
+            }
+            if exc.traceback_text and getattr(self._sprag_app, "_sprag_dev_reload", False):
+                body["traceback"] = exc.traceback_text
             return self._json_response(
                 start_response,
                 exc.status_code,
-                {
-                    "ok": False,
-                    "route": route_path,
-                    "action": action_name,
-                    "error": str(exc),
-                },
+                body,
                 extra_headers=self._session_headers(request),
             )
 
@@ -744,9 +750,12 @@ class SpragWSGIApp:
                 upload_id=upload_id,
                 error=str(exc),
             )
+            body = {"ok": False, "error": str(exc)}
+            if exc.traceback_text and getattr(self._sprag_app, "_sprag_dev_reload", False):
+                body["traceback"] = exc.traceback_text
             return self._json_response(
                 start_response, exc.status_code,
-                {"ok": False, "error": str(exc)},
+                body,
                 extra_headers=self._session_headers(request),
             )
 

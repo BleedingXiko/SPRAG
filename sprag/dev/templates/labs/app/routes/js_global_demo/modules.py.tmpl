@@ -5,7 +5,26 @@ class JSGlobalDemoModule(Module):
     def on_start(self):
         Widget = browser.SPRAGSparkWidget
         host = self.element.query_selector("[data-role='widget-host']")
-        self.widget = Widget(host, {"label": "Classic script loaded before SPRAG boot"})
+        self.stats_el = self.element.query_selector("[data-role='stats']")
+        self.widget = Widget(host, {
+            "label": "click to spark",
+            "hue": 210,
+            "onStats": self._on_stats,
+        })
+        self.on(self.element, "click", self._on_click)
+
+    def _on_stats(self, info):
+        if self.stats_el:
+            self.stats_el.textContent = "particles: " + str(info["particles"])
+
+    def _on_click(self, event):
+        role = event.target.dataset.role
+        if role == "burst":
+            self.widget.burst(None, None, 30)
+        elif role == "hue-warm":
+            self.widget.setHue(20)
+        elif role == "hue-cool":
+            self.widget.setHue(210)
 
     def on_stop(self):
         if self.widget and self.widget.destroy:

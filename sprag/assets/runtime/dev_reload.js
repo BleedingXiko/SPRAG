@@ -1,4 +1,5 @@
 import { bus } from '../vendor/ragot.esm.min.js';
+import { pushError, clearErrors } from './dev_overlay.js';
 
 function currentStoreSnapshots() {
     const payload = window.__SPRAG_PAYLOAD__ || {};
@@ -72,9 +73,16 @@ function persistDevReloadState(root, eventPayload) {
 export function registerDevReloadListener(root) {
     return bus.on('sprag:dev.rebuild', (payload) => {
         if (!payload || payload.ok === false) {
-            console.warn('[SPRAG] Rebuild failed; keeping current page live.', payload && payload.error);
+            const errorText = (payload && payload.error) || 'Unknown build error';
+            console.warn('[SPRAG] Rebuild failed; keeping current page live.', errorText);
+            pushError({
+                kind: 'build',
+                title: 'Rebuild failed',
+                message: errorText,
+            });
             return;
         }
+        clearErrors();
         persistDevReloadState(root, payload);
         window.location.reload();
     });

@@ -198,6 +198,17 @@ class Landing(Component):
                     class_="card",
                 ),
                 ui.a(
+                    ui.h3("Accessibility Demo →"),
+                    ui.p(
+                        "Form labels with for/aria-describedby, live regions "
+                        "with aria-live, keyboard tab navigation with arrow "
+                        "keys and focus management."
+                    ),
+                    ui.span("hybrid · aria_* · keyboard", class_="tag"),
+                    href="/a11y-demo",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Lifecycle Mount →"),
                     ui.p(
                         "A client app mount with one root Module, arbitrary "

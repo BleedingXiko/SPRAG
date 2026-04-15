@@ -1,0 +1,13 @@
+from sprag import page
+
+from .server import A11yDemoController
+from .web import A11yDemoScreen
+
+
+a11y_demo = page(
+    path="/a11y-demo",
+    controller=A11yDemoController,
+    screen=A11yDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Accessibility Conventions \u2014 SPRAG Labs"},
+)

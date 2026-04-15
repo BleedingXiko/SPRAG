@@ -1,6 +1,7 @@
 import { Module } from '../vendor/ragot.esm.min.js';
 import { actionErrorMessageSprag, createActionClient } from './actions.js';
 import { registerDevReloadListener } from './dev_reload.js';
+import { pushError, clearErrors, getErrors, installGlobalCatchers, guardClass } from './dev_overlay.js';
 import { resolveSurfaceImports, renderBootError } from './hydration.js';
 import { MetadataManager } from './metadata.js';
 import { createNavigationRuntime } from './navigation.js';
@@ -59,6 +60,7 @@ class BootModule extends Module {
         if (this._activeRoot && !this._activeRoot.stopped) {
             return this._activeRoot;
         }
+        installGlobalCatchers();
         try {
             const payload = window.__SPRAG_PAYLOAD__ || {};
             const surface = resolveSurface(this._manifest, payload, this._surfaceRef);
@@ -102,6 +104,15 @@ class BootModule extends Module {
             navigation.rewriteInternalLinks();
             await resolveSurfaceImports(surface, navigation.resolveJSImportSrc);
 
+            if (surface.dev_reload) {
+                for (const [name, cls] of Object.entries(this._componentRegistry)) {
+                    guardClass(cls, name);
+                }
+                for (const [name, cls] of Object.entries(this._moduleRegistry)) {
+                    guardClass(cls, name);
+                }
+            }
+
             const root = new SurfaceRoot({
                 actionClient,
                 componentRegistry: this._componentRegistry,
@@ -132,12 +143,23 @@ class BootModule extends Module {
             root.start();
             this._activeRoot = root;
             this.adopt(root);
+
+            if (surface.dev_reload) {
+                _installDebugAPI(root);
+            }
+
             return root;
         } catch (error) {
             if (this._activeRoot) {
                 this._activeRoot.stop('boot-error');
                 this._activeRoot = null;
             }
+            pushError({
+                kind: 'boot',
+                title: 'Boot failed',
+                message: error && error.message ? error.message : String(error),
+                stack: error && error.stack ? error.stack : '',
+            });
             renderBootError(error);
             console.error(error);
             return null;
@@ -150,6 +172,58 @@ class BootModule extends Module {
             this._activeRoot = null;
         }
     }
+}
+
+function _installDebugAPI(root) {
+    const bridges = window.__SPRAG_STORE_BRIDGES__ || {};
+    window.__SPRAG_DEBUG__ = {
+        /** Inspect all store state, or a single store by name. */
+        stores(name) {
+            if (name) {
+                const bridge = bridges[name];
+                return bridge ? bridge.snapshot() : undefined;
+            }
+            const result = {};
+            for (const [key, bridge] of Object.entries(bridges)) {
+                if (bridge && typeof bridge.snapshot === 'function') {
+                    result[key] = bridge.snapshot();
+                }
+            }
+            return result;
+        },
+        /** Get a live store bridge by name (for set/patch/subscribe). */
+        store(name) {
+            return bridges[name] || null;
+        },
+        /** List mounted component/module records on the current surface. */
+        records() {
+            return (root.records || []).map((r) => ({
+                type: r.type,
+                id: r.id || r.path || null,
+                component: r.component ? r.component.constructor.name : null,
+                module: r.module ? r.module.constructor.name : null,
+                state: r.component && r.component.state
+                    ? JSON.parse(JSON.stringify(r.component.state))
+                    : null,
+            }));
+        },
+        /** Current surface metadata. */
+        surface() {
+            return root.surface || null;
+        },
+        /** Current route payload. */
+        payload() {
+            return window.__SPRAG_PAYLOAD__ || null;
+        },
+        /** Show the error overlay with all captured errors. */
+        errors() {
+            return getErrors();
+        },
+        /** Clear all overlay errors. */
+        clearErrors() {
+            clearErrors();
+        },
+    };
 }
 
 export function startSurfaceBoot({

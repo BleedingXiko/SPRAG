@@ -18,13 +18,36 @@ _STATEMENT_HINTS = {
     ast.FunctionDef: "Lift nested functions to module scope or rewrite them as lambdas when possible.",
     ast.AsyncFunctionDef: "Lift nested async functions to module scope.",
     ast.ClassDef: "Lift nested classes to module scope.",
+    ast.Raise: "Use explicit error handling patterns; raise is not supported in browser codegen.",
+    ast.Global: "Browser methods do not support global declarations; pass values through state or arguments.",
+    ast.Nonlocal: "Browser methods do not support nonlocal declarations; use state or closures instead.",
 }
+if hasattr(ast, "AsyncFor"):
+    _STATEMENT_HINTS[ast.AsyncFor] = "Async for loops are not supported in browser codegen; use await with an eagerly materialised iterable."
 
 _EXPRESSION_HINTS = {
     ast.Set: "Rewrite this as a list/tuple for now; set literals are not supported in browser codegen yet.",
     ast.Slice: "Rewrite slices using explicit helper logic; Python slice syntax is not supported in browser codegen yet.",
     ast.Yield: "Move generator logic to server code or materialise the iterable eagerly.",
     ast.YieldFrom: "Move generator logic to server code or materialise the iterable eagerly.",
+}
+
+# BinOp operators that the codegen cannot lower to JS.
+_UNSUPPORTED_BINOP = {}
+for _op_cls, _hint in [
+    (ast.FloorDiv, "Use int(a / b) or Math.floor via browser.Math.floor(...) instead of //."),
+    (ast.Pow, "Use browser.Math.pow(base, exp) instead of **."),
+    (ast.LShift, "Bitwise left shift (<<) is not supported in browser codegen."),
+    (ast.RShift, "Bitwise right shift (>>) is not supported in browser codegen."),
+    (ast.BitAnd, "Bitwise AND (&) is not supported in browser codegen."),
+    (ast.BitXor, "Bitwise XOR (^) is not supported in browser codegen."),
+    (ast.MatMult, "Matrix multiply (@) is not supported in browser codegen."),
+]:
+    _UNSUPPORTED_BINOP[_op_cls] = _hint
+
+# UnaryOp operators that the codegen cannot lower.
+_UNSUPPORTED_UNARYOP = {
+    ast.Invert: "Bitwise NOT (~) is not supported in browser codegen.",
 }
 
 
@@ -351,6 +374,18 @@ def _lint_expr(node, *, source, source_file, class_name, method_name, line_offse
         )
         return
     if isinstance(node, ast.BinOp):
+        hint = _UNSUPPORTED_BINOP.get(type(node.op))
+        if hint is not None:
+            _raise(
+                f"Unsupported operator in browser codegen: {node.op.__class__.__name__}.",
+                node,
+                source=source,
+                source_file=source_file,
+                class_name=class_name,
+                method_name=method_name,
+                line_offset=line_offset,
+                suggestion=hint,
+            )
         _lint_expr(
             node.left,
             source=source,
@@ -437,6 +472,17 @@ def _lint_expr(node, *, source, source_file, class_name, method_name, line_offse
             )
         return
     if isinstance(node, (ast.ListComp, ast.DictComp, ast.GeneratorExp, ast.SetComp)):
+        if len(node.generators) > 1:
+            _raise(
+                "Multi-generator comprehensions are not supported in browser codegen.",
+                node,
+                source=source,
+                source_file=source_file,
+                class_name=class_name,
+                method_name=method_name,
+                line_offset=line_offset,
+                suggestion="Rewrite as nested loops or chain filter/map calls.",
+            )
         for generator in node.generators:
             _lint_assign_target(
                 generator.target,
@@ -568,6 +614,18 @@ def _lint_expr(node, *, source, source_file, class_name, method_name, line_offse
             )
         return
     if isinstance(node, ast.UnaryOp):
+        hint = _UNSUPPORTED_UNARYOP.get(type(node.op))
+        if hint is not None:
+            _raise(
+                f"Unsupported operator in browser codegen: {node.op.__class__.__name__}.",
+                node,
+                source=source,
+                source_file=source_file,
+                class_name=class_name,
+                method_name=method_name,
+                line_offset=line_offset,
+                suggestion=hint,
+            )
         _lint_expr(
             node.operand,
             source=source,

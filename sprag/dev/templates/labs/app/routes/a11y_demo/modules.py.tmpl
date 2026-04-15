@@ -1,0 +1,99 @@
+from sprag import Module, browser
+
+
+class A11yDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(
+            screen=screen,
+            state=state or {
+                "tabs": [],
+                "active_tab": "labels",
+                "feedback": "",
+                "form_errors": {},
+            },
+        )
+
+    def on_start(self):
+        self.delegate(self.element, "click", "[role='tab']", self._on_tab_click)
+        self.delegate(self.element, "keydown", "[role='tab']", self._on_tab_key)
+        self.delegate(self.element, "click", "[data-role='validate']", self._on_validate)
+        self.delegate(self.element, "click", "[data-role='announce']", self._on_announce)
+
+    # ── Tab switching with focus management ──
+
+    def _on_tab_click(self, event, target):
+        tab_id = target.dataset.tab
+        if tab_id:
+            self._select_tab(tab_id)
+            target.focus()
+
+    def _on_tab_key(self, event, target):
+        tabs = self.state["tabs"]
+        ids = [t["id"] for t in tabs]
+        current = target.dataset.tab
+        idx = ids.index(current) if current in ids else 0
+        next_idx = None
+
+        if event.key == "ArrowRight" or event.key == "ArrowDown":
+            next_idx = (idx + 1) % len(ids)
+        elif event.key == "ArrowLeft" or event.key == "ArrowUp":
+            next_idx = (idx - 1) % len(ids)
+        elif event.key == "Home":
+            next_idx = 0
+        elif event.key == "End":
+            next_idx = len(ids) - 1
+
+        if next_idx is not None:
+            event.prevent_default()
+            next_id = ids[next_idx]
+            self._select_tab(next_id)
+            next_tab = self.element.query_selector("#tab-" + next_id)
+            if next_tab:
+                next_tab.focus()
+
+    def _select_tab(self, tab_id):
+        self.set_state({"active_tab": tab_id})
+        tabs = self.element.query_selector_all("[role='tab']")
+        for tab in tabs:
+            is_active = tab.dataset.tab == tab_id
+            tab.set_attribute("aria-selected", str(is_active).lower())
+            tab.set_attribute("tabindex", "0" if is_active else "-1")
+            if is_active:
+                tab.class_list.add("is-active")
+            else:
+                tab.class_list.remove("is-active")
+        panels = self.element.query_selector_all("[role='tabpanel']")
+        for panel in panels:
+            panel_id = panel.id
+            if panel_id == "panel-" + tab_id:
+                panel.remove_attribute("hidden")
+            else:
+                panel.set_attribute("hidden", "")
+
+    # ── Form validation with ARIA error wiring ──
+
+    def _on_validate(self, event, target):
+        name_el = self.element.query_selector("#field-name")
+        email_el = self.element.query_selector("#field-email")
+        name = name_el.value if name_el else ""
+        email = email_el.value if email_el else ""
+        self.call_action("validate_form", {"name": name, "email": email}).then(
+            self._on_validate_result
+        )
+
+    def _on_validate_result(self, result):
+        data = result.value
+        self.set_state({
+            "form_errors": data["errors"],
+            "feedback": data["feedback"],
+        })
+        live = self.element.query_selector("[role='status']")
+        if live:
+            live.text_content = data["feedback"]
+
+    # ── Live region announcement ──
+
+    def _on_announce(self, event, target):
+        live = self.element.query_selector("[role='status']")
+        if live:
+            live.text_content = "Action completed at " + str(browser.Date.now())

@@ -21,9 +21,11 @@ that the SPRAG codegen routes to the right runtime:
       update     ->  bridge.update     (atomic mutator under lock)
       delete     ->  bridge.delete     (delete a nested path)
       clear      ->  bridge.clear      (reset to empty)
+      reset      ->  bridge.reset      (clear + re-seed from initial)
       snapshot   ->  bridge.snapshot   (deep snapshot of full state)
       get_state  ->  bridge.getState   (alias of snapshot for ergonomics)
       subscribe  ->  bridge.subscribe  (selector + immediate options)
+      listen     ->  bridge.listen     (path-scoped subscribe shorthand)
       select     ->  bridge.select     (memoized derived read)
 
 The bridged surface is intentionally Ragot-shaped — the JS shim fills the
@@ -44,7 +46,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any, Callable, Optional, Union
+
+logger = logging.getLogger(__name__)
 
 
 # Module-level registry of every store declared via ``store(...)``.
@@ -70,9 +75,11 @@ STORE_METHOD_JS = {
     "update": "update",
     "delete": "delete",
     "clear": "clear",
+    "reset": "reset",
     "snapshot": "snapshot",
     "get_state": "getState",
     "subscribe": "subscribe",
+    "listen": "listen",
     "select": "select",
 }
 
@@ -94,15 +101,16 @@ class StoreBridge:
     the JS side via ``STORE_METHOD_JS``.
     """
 
-    __slots__ = ("name", "initial", "_impl")
+    __slots__ = ("name", "initial", "debug", "_impl")
 
-    def __init__(self, name: str, initial: Optional[dict] = None):
+    def __init__(self, name: str, initial: Optional[dict] = None, *, debug: bool = False):
         if not isinstance(name, str) or not name:
             raise ValueError("store(name=...) requires a non-empty string")
         if initial is not None and not isinstance(initial, dict):
             raise TypeError("store(initial=...) must be a dict")
         self.name = name
         self.initial = dict(initial or {})
+        self.debug = bool(debug)
         self._impl = None  # lazy Specter Model
 
     # ---- Server-side backing store (lazy) ---------------------------------
@@ -113,6 +121,14 @@ class StoreBridge:
 
             self._impl = create_model(self.name, dict(self.initial))
         return self._impl
+
+    # ---- Debug logging -----------------------------------------------------
+
+    def _log_mutation(self, method: str, *args):
+        if not self.debug:
+            return
+        detail = ", ".join(repr(a) for a in args)
+        logger.info("[SPRAG store:%s] %s(%s)", self.name, method, detail)
 
     # ---- Bridged surface --------------------------------------------------
 
@@ -132,23 +148,40 @@ class StoreBridge:
 
     def set(self, path, value):
         """Set a nested path. Mirrors ``bridge.set(path, value)`` on the JS side."""
+        self._log_mutation("set", path, value)
         return self._backing().set(path, value)
 
     def patch(self, partial: dict) -> dict:
         """Shallow merge at the root. Mirrors ``bridge.patch(partial)`` on the JS side."""
+        self._log_mutation("patch", partial)
         return self._backing().patch(partial)
 
     def update(self, mutator: Callable[[dict], Any]) -> dict:
         """Atomic mutate under the store lock. Mirrors ``bridge.update(mutator)`` on the JS side."""
+        self._log_mutation("update", "<mutator>")
         return self._backing().update(mutator)
 
     def delete(self, path):
         """Delete a nested path if present. Mirrors ``bridge.delete(path)`` on the JS side."""
+        self._log_mutation("delete", path)
         return self._backing().delete(path)
 
     def clear(self) -> None:
         """Reset the store to an empty dict. Mirrors ``bridge.clear()`` on the JS side."""
+        self._log_mutation("clear")
         self._backing().clear()
+
+    def reset(self) -> dict:
+        """Clear the store and re-seed from the declared initial state.
+
+        Shorthand for ``store.clear(); store.patch(store.initial)`` — the
+        single operation that brings a store back to its known-good state.
+        """
+        self._log_mutation("reset")
+        self._backing().clear()
+        if self.initial:
+            return self._backing().patch(dict(self.initial))
+        return {}
 
     def subscribe(
         self,
@@ -169,6 +202,25 @@ class StoreBridge:
             immediate=immediate,
         )
 
+    def listen(self, path: str, fn: Callable) -> Callable:
+        """Subscribe to changes at a specific path. Sugar for a path-selector subscribe.
+
+        Instead of::
+
+            session.subscribe(
+                lambda val: handle(val),
+                selector=lambda s: s["prefs"]["theme"],
+            )
+
+        Write::
+
+            session.listen("prefs.theme", handle)
+
+        The callback receives the value at ``path`` (not the full snapshot).
+        Returns the unsubscribe function.
+        """
+        return self.subscribe(fn, selector=path, immediate=False)
+
     def select(self, selector: Union[str, Callable], default: Any = None) -> Any:
         """Read derived state via a path string or selector callable.
 
@@ -182,7 +234,7 @@ class StoreBridge:
         return f"<StoreBridge name={self.name!r}>"
 
 
-def store(name: str, *, initial: Optional[dict] = None) -> StoreBridge:
+def store(name: str, *, initial: Optional[dict] = None, debug: bool = False) -> StoreBridge:
     """Declare a SPRAG store: one Python object, mirrored on both runtimes.
 
     Usage::
@@ -217,8 +269,10 @@ def store(name: str, *, initial: Optional[dict] = None) -> StoreBridge:
                 f"SPRAG store {name!r} already declared with different initial state "
                 f"(existing={existing.initial!r}, new={initial!r})"
             )
+        if debug:
+            existing.debug = True
         return existing
-    bridge = StoreBridge(name, initial=initial)
+    bridge = StoreBridge(name, initial=initial, debug=debug)
     _STORE_REGISTRY.append(bridge)
     _STORE_BY_NAME[name] = bridge
     return bridge

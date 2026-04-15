@@ -1,0 +1,105 @@
+from sprag import Component, ui
+
+
+class A11yDemoCard(Component):
+    def render(self, props=None):
+        props = props or self.props
+        tabs = props.get("tabs", [])
+        active = props.get("active_tab", "labels")
+        errors = props.get("form_errors", {})
+        feedback = props.get("feedback", "")
+
+        # Build tab buttons
+        tab_buttons = ui.div(
+            ui.For(
+                tabs,
+                key="id",
+                render=lambda tab: ui.button(
+                    tab["label"],
+                    type="button",
+                    id="tab-" + tab["id"],
+                    role="tab",
+                    aria_selected=(tab["id"] == active),
+                    aria_controls="panel-" + tab["id"],
+                    tabindex="0" if tab["id"] == active else "-1",
+                    data_tab=tab["id"],
+                    class_="tab is-active" if tab["id"] == active else "tab",
+                ),
+            ),
+            role="tablist",
+            aria_label="Accessibility demos",
+            class_="a11y-tabs",
+        )
+
+        # Build tab panels
+        panels = ui.div(
+            ui.For(
+                tabs,
+                key="id",
+                render=lambda tab: ui.div(
+                    tab["content"],
+                    id="panel-" + tab["id"],
+                    role="tabpanel",
+                    aria_labelledby="tab-" + tab["id"],
+                    hidden=None if tab["id"] == active else True,
+                    class_="a11y-panel",
+                ),
+            ),
+        )
+
+        # Form labels panel (always rendered, shown/hidden by JS)
+        name_err = errors.get("name", "")
+        email_err = errors.get("email", "")
+        form_panel = ui.div(
+            ui.p("Each input is linked to its label via for/id, with aria-describedby for hints and aria-errormessage for errors."),
+            ui.div(
+                ui.label("Name", for_="field-name", class_="field-label"),
+                ui.input(
+                    type="text",
+                    id="field-name",
+                    name="name",
+                    aria_describedby="hint-name",
+                    aria_invalid=bool(name_err),
+                    aria_errormessage="err-name" if name_err else None,
+                    class_="field-input",
+                ),
+                ui.p("Your display name.", id="hint-name", class_="field-hint"),
+                class_="field-group",
+            ),
+            ui.div(
+                ui.label("Email", for_="field-email", class_="field-label"),
+                ui.input(
+                    type="email",
+                    id="field-email",
+                    name="email",
+                    aria_describedby="hint-email",
+                    aria_invalid=bool(email_err),
+                    aria_errormessage="err-email" if email_err else None,
+                    class_="field-input",
+                ),
+                ui.p("We'll never share it.", id="hint-email", class_="field-hint"),
+                class_="field-group",
+            ),
+            ui.button("Validate", type="button", data_role="validate", class_="btn"),
+            ui.div(
+                feedback,
+                role="status",
+                aria_live="polite",
+                aria_atomic="true",
+                class_="live-region",
+            ),
+            data_role="form-panel",
+        )
+
+        return ui.section(
+            ui.h2("Accessibility Conventions"),
+            ui.p(
+                "SPRAG normalises aria_* to aria-* automatically. "
+                "This entry shows the blessed patterns for form labels, "
+                "live regions, and keyboard navigation."
+            ),
+            tab_buttons,
+            panels,
+            form_panel,
+            class_="card",
+        )
