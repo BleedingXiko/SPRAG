@@ -171,7 +171,7 @@ _SHELL_URL_RE = re.compile(r'((?:href|src|action)=")(/)([^"]*")')
 def _relativize_shell_urls(html: str, document_path: str) -> str:
     """Rewrite absolute ``href``, ``src``, and ``action`` attributes in shell
     HTML so they work at any page depth (same logic as CSS/JS asset links)."""
-    if not document_path or document_path == "/":
+    if not document_path:
         return html
 
     def _rewrite(m: re.Match) -> str:
