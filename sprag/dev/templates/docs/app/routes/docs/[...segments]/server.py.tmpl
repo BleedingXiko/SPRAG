@@ -1,6 +1,6 @@
 from sprag import Controller
 
-from app.content import docs_collection, find_doc
+from app.content import docs_collection, find_doc, slim_doc
 
 
 class DocsArticleController(Controller):
@@ -12,7 +12,7 @@ class DocsArticleController(Controller):
         title = doc.title if doc else "Documentation"
         return {
             "__sprag_meta__": {"title": title},
-            "doc": doc,
-            "docs": docs_collection(),
+            "doc": slim_doc(doc) if doc else None,
+            "docs": [slim_doc(d) for d in docs_collection()],
             "current_path": "/docs/" + "/".join(segments),
         }

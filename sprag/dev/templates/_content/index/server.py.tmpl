@@ -1,6 +1,6 @@
 from sprag import Controller
 
-from app.content_support import content_collection
+from app.content_support import content_collection, slim_content_doc
 
 
 class {{class_name}}IndexController(Controller):
@@ -13,7 +13,7 @@ class {{class_name}}IndexController(Controller):
             "description": (
                 "Markdown files under `app/content/{{collection_name}}/` become pages in this collection."
             ),
-            "docs": content_collection("{{collection_name}}", base_url="{{route_path}}"),
+            "docs": [slim_content_doc(doc) for doc in content_collection("{{collection_name}}", base_url="{{route_path}}")],
             "route_path": "{{route_path}}",
             "article_path": "{{route_path}}/[...segments]",
             "collection_path": "app/content/{{collection_name}}/",

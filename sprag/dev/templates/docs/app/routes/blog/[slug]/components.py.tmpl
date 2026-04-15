@@ -15,15 +15,15 @@ class BlogArticlePage(Component):
             )
 
         sidebar_items = [
-            nav_item(item.title, item.url_path, active=(item.url_path == post.url_path))
+            nav_item(item["title"], item["url_path"], active=(item["url_path"] == post["url_path"]))
             for item in props["posts"]
         ]
         return article_shell(
             kicker="Blog",
-            title=post.title,
-            description=post.description,
-            meta=post.metadata.get("date", ""),
+            title=post["title"],
+            description=post["description"],
+            meta=post["metadata"].get("date", ""),
             sidebar_title="Recent posts",
             sidebar_items=sidebar_items,
-            body=ui.article(ui.HTML(post.html), class_="prose"),
+            body=ui.article(ui.HTML(post["html"]), class_="prose"),
         )

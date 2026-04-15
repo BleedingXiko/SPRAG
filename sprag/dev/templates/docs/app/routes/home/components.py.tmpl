@@ -44,7 +44,7 @@ class HomePage(Component):
                     class_="section-heading",
                 ),
                 ui.div(
-                    [card(doc.title, doc.url_path, doc.description, "Documentation") for doc in docs],
+                    [card(doc["title"], doc["url_path"], doc["description"], "Documentation") for doc in docs],
                     class_="card-grid",
                 ),
             ),
@@ -55,7 +55,7 @@ class HomePage(Component):
                     class_="section-heading",
                 ),
                 ui.div(
-                    [card(post.title, post.url_path, post.description, post.metadata.get("date", "Post")) for post in posts],
+                    [card(post["title"], post["url_path"], post["description"], post["metadata"].get("date", "Post")) for post in posts],
                     class_="card-grid",
                 ),
             ),

@@ -1,6 +1,6 @@
 from sprag import Controller
 
-from app.content import blog_collection, docs_by_section, docs_collection
+from app.content import blog_collection, docs_by_section, docs_collection, slim_doc, slim_doc_card, slim_nav_sections
 
 
 class HomeController(Controller):
@@ -44,7 +44,7 @@ class HomeController(Controller):
                     "description": "Choose document mode for pure SSR, hybrid for SSR plus hydration, or spa for full client rendering per route.",
                 },
             ],
-            "sections": sections,
-            "docs": docs,
-            "posts": posts,
+            "sections": slim_nav_sections(sections),
+            "docs": [slim_doc_card(doc) for doc in docs],
+            "posts": [slim_doc_card(post) for post in posts],
         }

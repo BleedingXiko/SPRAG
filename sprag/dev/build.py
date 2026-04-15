@@ -44,12 +44,23 @@ from ..runtime.shell import apply_shell, resolve_effective_surface_modules
 from ..runtime.stores import declared_stores
 
 
+_PAYLOAD_WARN_BYTES = 50 * 1024  # 50 KB
+
+
+def _payload_size(data) -> int:
+    try:
+        return len(json.dumps(data, default=str).encode())
+    except Exception:
+        return 0
+
+
 def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     mounts = mounts or []
     route_manifest = []
     mount_manifest = []
     build_errors = []
+    payload_warnings = []
     root_document = None
     seen_outputs = set()
     asset_registry = AssetRegistry(project_root=resolve_project_root(app))
@@ -98,6 +109,9 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 request=build_request,
                 app=app,
             )
+            size = _payload_size(data)
+            if size >= _PAYLOAD_WARN_BYTES:
+                payload_warnings.append({"path": actual_path, "size_kb": round(size / 1024, 1)})
             hydration = []
             render_error = None
             page_meta = _resolved_surface_metadata(page.metadata, data, app_metadata=getattr(app, "metadata", None))
@@ -215,6 +229,9 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             request=build_request,
             app=app,
         )
+        size = _payload_size(data)
+        if size >= _PAYLOAD_WARN_BYTES:
+            payload_warnings.append({"path": mt.path, "size_kb": round(size / 1024, 1)})
         if data_error:
             build_errors.append({"path": mt.path, "stage": "mount_load", "error": data_error})
         mount_meta = _resolved_surface_metadata(mt.metadata, data, app_metadata=getattr(app, "metadata", None))
@@ -312,6 +329,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         "mounts": mount_manifest,
         "assets": _serializable_assets(asset_registry.assets()),
         "errors": build_errors,
+        "payload_warnings": payload_warnings,
     }
     (output_dir / "manifest.json").write_text(
         json.dumps(_serializable_manifest(manifest), indent=2, sort_keys=True), encoding="utf-8"

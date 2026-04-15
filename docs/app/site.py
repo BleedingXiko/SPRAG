@@ -35,9 +35,9 @@ def docs_sidebar(sections, current_path, id_=None):
     for section in sections:
         items = [
             ui.li(ui.a(
-                doc.title,
-                href=doc.url_path,
-                class_="sidebar-link is-active" if doc.url_path == current_path else "sidebar-link",
+                doc["title"],
+                href=doc["url_path"],
+                class_="sidebar-link is-active" if doc["url_path"] == current_path else "sidebar-link",
             ))
             for doc in section["items"]
         ]

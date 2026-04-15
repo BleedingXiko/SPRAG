@@ -2,10 +2,10 @@ from sprag import Component, ui
 
 
 def _nav_item(doc, current_path):
-    label = doc.title
-    if doc.url_path == current_path:
+    label = doc["title"]
+    if doc["url_path"] == current_path:
         label = label + " (current)"
-    return ui.li(ui.a(label, href=doc.url_path))
+    return ui.li(ui.a(label, href=doc["url_path"]))
 
 
 class {{class_name}}ArticlePage(Component):
@@ -30,10 +30,9 @@ class {{class_name}}ArticlePage(Component):
                     ui.ul([_nav_item(item, props["current_path"]) for item in docs]),
                 ),
                 ui.article(
-                    ui.h1(doc.title),
-                    ui.p(doc.description) if doc.description else None,
-                    ui.p("Source: ", ui.code(doc.source_path.name)),
-                    ui.HTML(doc.html),
+                    ui.h1(doc["title"]),
+                    ui.p(doc["description"]) if doc["description"] else None,
+                    ui.HTML(doc["html"]),
                 ),
             ),
         )

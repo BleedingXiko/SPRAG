@@ -9,10 +9,10 @@ class BlogIndexPage(Component):
         posts = props["posts"]
         post_cards = [
             blog_card(
-                post.title,
-                post.url_path,
-                post.description,
-                post.metadata.get("date", ""),
+                post["title"],
+                post["url_path"],
+                post["description"],
+                post["metadata"].get("date", ""),
             )
             for post in posts
         ]

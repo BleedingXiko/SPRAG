@@ -31,7 +31,7 @@ class DocsIndexPage(Component):
                 class_="hero",
             ),
             ui.div(
-                [card(doc.title, doc.url_path, doc.description, "Documentation") for doc in props["docs"]],
+                [card(doc["title"], doc["url_path"], doc["description"], "Documentation") for doc in props["docs"]],
                 class_="card-grid",
             ),
         )

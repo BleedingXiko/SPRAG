@@ -28,6 +28,20 @@ def content_static_paths(name, *, base_url=None, reverse=False):
     ]
 
 
+def slim_content_doc(doc):
+    """Strip server-only fields before sending a doc to the browser payload."""
+    return {
+        "title": doc.title,
+        "description": doc.description,
+        "excerpt": doc.excerpt,
+        "html": doc.html,
+        "url_path": doc.url_path,
+        "slug": doc.slug,
+        "path_parts": list(doc.path_parts),
+        "metadata": doc.metadata,
+    }
+
+
 def find_content_doc(name, segments, *, base_url=None, reverse=False):
     wanted = tuple(part for part in (segments or []) if part)
     for doc in content_collection(name, base_url=base_url, reverse=reverse):

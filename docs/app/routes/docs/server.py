@@ -1,6 +1,6 @@
 from sprag import Controller
 
-from app.content import docs_by_section, docs_collection
+from app.content import docs_by_section, docs_collection, slim_doc_card, slim_nav_sections
 
 
 class DocsIndexController(Controller):
@@ -9,6 +9,6 @@ class DocsIndexController(Controller):
     def load(self):
         return {
             "__sprag_meta__": {"title": "Documentation"},
-            "sections": docs_by_section(),
-            "docs": docs_collection(),
+            "sections": slim_nav_sections(docs_by_section()),
+            "docs": [slim_doc_card(doc) for doc in docs_collection()],
         }

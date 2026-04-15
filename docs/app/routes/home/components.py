@@ -26,21 +26,21 @@ class HomePage(Component):
                     str(len(s["items"])) + " articles",
                     class_="section-card-count",
                 ),
-                href=s["items"][0].url_path if s["items"] else "/docs",
+                href=s["items"][0]["url_path"] if s["items"] else "/docs",
                 class_="section-card",
             )
             for s in sections
         ]
         doc_cards = [
-            card(doc.title, doc.url_path, doc.description)
+            card(doc["title"], doc["url_path"], doc["description"])
             for doc in docs
         ]
         post_cards = [
             blog_card(
-                post.title,
-                post.url_path,
-                post.description,
-                post.metadata.get("date", ""),
+                post["title"],
+                post["url_path"],
+                post["description"],
+                post["metadata"].get("date", ""),
             )
             for post in posts
         ]

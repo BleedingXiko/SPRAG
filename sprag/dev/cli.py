@@ -328,6 +328,17 @@ def cmd_routes(args):
             print(w)
 
 
+def _print_payload_warnings(payload_warnings):
+    if not payload_warnings:
+        return
+    print()
+    for w in payload_warnings:
+        print(
+            f"[SPRAG] payload warning: {w['path']} — load() returned {w['size_kb']} KB "
+            f"(threshold: 50 KB). See /docs/guides/payload-design"
+        )
+
+
 def cmd_build(args):
     app_target, app = _load_cli_app(args)
     project_root = Path(args.project_root)
@@ -344,6 +355,7 @@ def cmd_build(args):
         print(f"[SPRAG] static site → {result['dist_dir']}")
         if result["errors"]:
             print(json.dumps({"errors": result["errors"]}, indent=2))
+        _print_payload_warnings(result.get("payload_warnings", []))
     else:
         dist = build_dist_bundle(
             app_target,
@@ -353,6 +365,7 @@ def cmd_build(args):
         )
         print(f"[SPRAG] app: {app_target}")
         print(json.dumps(dist, indent=2, sort_keys=True))
+        _print_payload_warnings(dist.get("payload_warnings", []))
 
 
 def cmd_dev(args):
@@ -643,6 +656,21 @@ def cmd_doctor(args):
                     f"preview build succeeded with {len(manifest.get('routes', []))} route(s) and {len(manifest.get('mounts', []))} mount(s)",
                 )
 
+            payload_warnings = manifest.get("payload_warnings", [])
+            if payload_warnings:
+                _append_check(
+                    checks,
+                    "payload sizes",
+                    False,
+                    f"{len(payload_warnings)} route(s) with oversized load() payload (>50 KB)",
+                    details=[
+                        f"{w['path']} — {w['size_kb']} KB (see /docs/guides/payload-design)"
+                        for w in payload_warnings
+                    ],
+                )
+            else:
+                _append_check(checks, "payload sizes", True, "all load() payloads are under 50 KB")
+
         try:
             resolved_server_mode = resolve_server_mode(app)
             if resolved_server_mode == "websocket":
@@ -764,6 +792,7 @@ def _build_once(app, output_dir):
         f" with {len(manifest['errors'])} error(s) into {output_dir}"
         f" ({elapsed:.2f}s)"
     )
+    _print_payload_warnings(manifest.get("payload_warnings", []))
     return manifest
 
 

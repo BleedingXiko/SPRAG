@@ -37,6 +37,7 @@ def build_static_site(app_target, app, *, output_dir: Path, project_root: Path |
         "routes": _serializable_routes(manifest["routes"]),
         "mounts": _serializable_mounts(manifest.get("mounts", [])),
         "errors": manifest["errors"],
+        "payload_warnings": manifest.get("payload_warnings", []),
     }
 
 
@@ -103,6 +104,7 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
         "mounts": serializable_mounts,
         "errors": manifest["errors"],
         "packages": package_names,
+        "payload_warnings": manifest.get("payload_warnings", []),
     }
 
 

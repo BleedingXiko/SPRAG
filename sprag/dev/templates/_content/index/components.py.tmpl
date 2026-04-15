@@ -4,10 +4,10 @@ from sprag import Component, ui
 def _content_card(doc):
     return ui.li(
         ui.a(
-            ui.strong(doc.title),
-            ui.span(doc.url_path, style="display:block;margin-top:0.25rem;font-family:monospace;"),
-            ui.p(doc.description or "Open page", style="margin:0.5rem 0 0;"),
-            href=doc.url_path,
+            ui.strong(doc["title"]),
+            ui.span(doc["url_path"], style="display:block;margin-top:0.25rem;font-family:monospace;"),
+            ui.p(doc["description"] or "Open page", style="margin:0.5rem 0 0;"),
+            href=doc["url_path"],
         )
     )
 

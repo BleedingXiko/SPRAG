@@ -15,15 +15,15 @@ class DocsArticlePage(Component):
             )
 
         sidebar_items = [
-            nav_item(item.title, item.url_path, active=(item.url_path == doc.url_path))
+            nav_item(item["title"], item["url_path"], active=(item["url_path"] == doc["url_path"]))
             for item in props["docs"]
         ]
         return article_shell(
             kicker="Documentation",
-            title=doc.title,
-            description=doc.description,
-            meta=doc.source_path.name,
+            title=doc["title"],
+            description=doc["description"],
+            meta=doc["slug"],
             sidebar_title="All docs",
             sidebar_items=sidebar_items,
-            body=ui.article(ui.HTML(doc.html), class_="prose"),
+            body=ui.article(ui.HTML(doc["html"]), class_="prose"),
         )

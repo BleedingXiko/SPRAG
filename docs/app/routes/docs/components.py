@@ -9,7 +9,7 @@ class DocsIndexPage(Component):
         sections = props.get("sections", [])
         docs = props.get("docs", [])
         doc_cards = [
-            card(doc.title, doc.url_path, doc.description)
+            card(doc["title"], doc["url_path"], doc["description"])
             for doc in docs
         ]
         return docs_shell(

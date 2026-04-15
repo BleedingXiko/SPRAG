@@ -48,6 +48,41 @@ def docs_by_section():
     return sections
 
 
+def slim_doc(doc):
+    """Strip server-only fields before sending a doc to the browser payload."""
+    return {
+        "title": doc.title,
+        "description": doc.description,
+        "excerpt": doc.excerpt,
+        "html": doc.html,
+        "url_path": doc.url_path,
+        "slug": doc.slug,
+        "path_parts": list(doc.path_parts),
+        "metadata": doc.metadata,
+    }
+
+
+def slim_doc_card(doc):
+    """Minimal doc shape for listing pages — title, url_path, description, metadata."""
+    return {
+        "title": doc.title,
+        "description": doc.description,
+        "url_path": doc.url_path,
+        "metadata": doc.metadata,
+    }
+
+
+def slim_nav_sections(sections):
+    """Strip doc content from nav items — sidebar only needs title + url_path."""
+    return [
+        {
+            "label": section["label"],
+            "items": [{"title": doc.title, "url_path": doc.url_path} for doc in section["items"]],
+        }
+        for section in sections
+    ]
+
+
 def docs_static_paths():
     return [{"segments": list(doc.path_parts)} for doc in docs_collection()]
 

@@ -1,6 +1,6 @@
 from sprag import Controller
 
-from app.content_support import content_collection, find_content_doc
+from app.content_support import content_collection, find_content_doc, slim_content_doc
 
 
 class {{class_name}}ArticleController(Controller):
@@ -13,8 +13,8 @@ class {{class_name}}ArticleController(Controller):
         return {
             "__sprag_meta__": {"title": title},
             "title": "{{title}}",
-            "doc": doc,
-            "docs": content_collection("{{collection_name}}", base_url="{{route_path}}"),
+            "doc": slim_content_doc(doc) if doc else None,
+            "docs": [slim_content_doc(d) for d in content_collection("{{collection_name}}", base_url="{{route_path}}")],
             "route_path": "{{route_path}}",
             "current_path": "{{route_path}}/" + "/".join(segments),
             "collection_path": "app/content/{{collection_name}}/",
