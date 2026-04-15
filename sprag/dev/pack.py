@@ -296,19 +296,32 @@ def _rewrite_js_imports(
         orig_abs = public_dir / orig_rel
         hashed_abs = public_dir / hashed_rel
         # Compute the import path relative to this JS file's directory.
-        orig_import = "./" + posixpath.relpath(
+        orig_import = posixpath.relpath(
             orig_abs.as_posix(), file_dir.as_posix()
         )
-        hashed_import = "./" + posixpath.relpath(
+        hashed_import = posixpath.relpath(
             hashed_abs.as_posix(), file_dir.as_posix()
         )
+        # Ensure same-directory imports keep the ./ prefix so the browser
+        # resolves them as relative paths (bare specifiers would 404).
+        if not hashed_import.startswith("."):
+            hashed_import = "./" + hashed_import
+        if not orig_import.startswith("."):
+            orig_import_dotslash = "./" + orig_import
+        else:
+            orig_import_dotslash = orig_import
         if orig_import != hashed_import:
-            content = content.replace(f"'{orig_import}'", f"'{hashed_import}'")
+            content = content.replace(f"'{orig_import_dotslash}'", f"'{hashed_import}'")
+            content = content.replace(f'"{orig_import_dotslash}"', f'"{hashed_import}"')
+            # Also match without ./ prefix (posixpath.relpath output for same-dir)
+            if orig_import != orig_import_dotslash:
+                content = content.replace(f"'{orig_import}'", f"'{hashed_import}'")
+                content = content.replace(f'"{orig_import}"', f'"{hashed_import}"')
     return content
 
 
 _IMPORT_SPEC_RE = re.compile(
-    r"""(?:import\s+(?:[^'"]+?\s+from\s+)?|import\s*\()\s*['"]([^'"]+)['"]""",
+    r"""(?:import\s+(?:[^'"]+?\s+from\s*)?|import\s*\()\s*['"]([^'"]+)['"]""",
     re.M,
 )
 
@@ -376,23 +389,45 @@ def _rewrite_html_refs(
 ) -> str:
     """Rewrite asset references in an HTML file to use hashed filenames.
 
-    Handles relative paths at any nesting depth (``app.js``, ``../app.js``,
-    ``../../app.js``, etc.) by computing the expected relative href from this
-    HTML file's directory for each hashed asset.
+    Handles relative paths at any nesting depth and absolute paths.
     """
     html_dir = html_path.parent
     for orig_rel, hashed_rel in hash_map.items():
+        # Handle relative refs
         orig_abs = public_dir / orig_rel
+        orig_href = posixpath.relpath(orig_abs.as_posix(), html_dir.as_posix())
+        
         hashed_abs = public_dir / hashed_rel
-        # The relative href as it would appear in this HTML document.
-        orig_href = posixpath.relpath(
-            orig_abs.as_posix(), html_dir.as_posix()
-        )
-        hashed_href = posixpath.relpath(
-            hashed_abs.as_posix(), html_dir.as_posix()
-        )
+        hashed_href = posixpath.relpath(hashed_abs.as_posix(), html_dir.as_posix())
+        
         if orig_href != hashed_href:
-            content = content.replace(orig_href, hashed_href)
+            content = content.replace(f'"{orig_href}"', f'"{hashed_href}"')
+            content = content.replace(f"'{orig_href}'", f"'{hashed_href}'")
+
+        # Handle absolute-to-root refs
+        orig_root_href = "/" + orig_rel
+        hashed_root_href = "/" + hashed_rel
+        if orig_root_href != hashed_root_href:
+            content = content.replace(f'"{orig_root_href}"', f'"{hashed_root_href}"')
+            content = content.replace(f"'{orig_root_href}'", f"'{hashed_root_href}'")
+
+    return content
+
+
+def _rewrite_json_assets(
+    content: str,
+    hash_map: Dict[str, str],
+) -> str:
+    """Rewrite asset paths within JSON data (manifest.json)."""
+    # Simple replacement of exact unhashed web paths found in the JSON.
+    # Paths in SPRAG manifest/assets are typically "/assets/..." or "/static/..."
+    # or "generated/..."
+    for orig_rel, hashed_rel in hash_map.items():
+        # Try with and without leading slash
+        for prefix in ("/", ""):
+            orig = prefix + orig_rel
+            hashed = prefix + hashed_rel
+            content = content.replace(f'"{orig}"', f'"{hashed}"')
     return content
 
 
@@ -744,9 +779,11 @@ class SpragPack:
     def _phase_fingerprint(self):
         """Content-hash rename JS/CSS assets for immutable caching.
 
-        Processes the public JS import graph bottom-up so that parent files
-        reference already-hashed children before they themselves are hashed.
-        HTML documents are rewritten last.
+        Three clean phases to avoid file-not-found races:
+        1. Hash every asset and build the complete rename map.
+        2. Rewrite all import paths / HTML refs / JSON refs in-place
+           (files still at original names, so relative-path math is stable).
+        3. Rename every asset to its hashed filename.
         """
         self.phase("Fingerprinting Assets")
         public_dir = self.dist_dir / "public"
@@ -762,32 +799,55 @@ class SpragPack:
             self.log("No JS/CSS files to fingerprint")
             return
 
-        ordered_targets = _toposort_public_assets(all_targets, public_dir)
+        # --- Phase 1: compute content hashes, build the full map. -----------
         hash_map: Dict[str, str] = {}
-
-        for file_path in ordered_targets:
+        for file_path in all_targets:
             rel = file_path.relative_to(public_dir).as_posix()
-            if file_path.suffix.lower() in (".js", ".mjs"):
-                content = file_path.read_text(encoding="utf-8")
-                rewritten = _rewrite_js_imports(content, file_path, hash_map, public_dir)
-                if rewritten != content and not self.dry_run:
-                    file_path.write_text(rewritten, encoding="utf-8")
             digest = _file_content_hash(file_path)
             hashed_name = _hashed_filename(file_path.name, digest)
             hashed_rel = str(Path(rel).parent / hashed_name) if "/" in rel else hashed_name
             hashed_rel = hashed_rel.replace("\\", "/")
             hash_map[rel] = hashed_rel
-            if not self.dry_run:
-                file_path.rename(file_path.parent / hashed_name)
-            self.stats["fingerprinted"] += 1
 
-        html_files = sorted(public_dir.rglob("*.html"))
-        for html_path in html_files:
+        # --- Phase 2: rewrite all references using the complete map. --------
+        # JS/MJS — rewrite ES import paths + embedded JSON path strings.
+        for file_path in all_targets:
+            if file_path.suffix.lower() not in (".js", ".mjs"):
+                continue
+            content = file_path.read_text(encoding="utf-8")
+            rewritten = _rewrite_js_imports(content, file_path, hash_map, public_dir)
+            rewritten = _rewrite_json_assets(rewritten, hash_map)
+            if rewritten != content and not self.dry_run:
+                file_path.write_text(rewritten, encoding="utf-8")
+
+        # HTML — rewrite script src, link href, etc.
+        for html_path in sorted(public_dir.rglob("*.html")):
             content = html_path.read_text(encoding="utf-8")
             rewritten = _rewrite_html_refs(content, html_path, hash_map, public_dir)
             if rewritten != content and not self.dry_run:
                 html_path.write_text(rewritten, encoding="utf-8")
 
+        # JSON manifests — rewrite asset path strings.
+        for json_path in sorted(public_dir.rglob("*.json")):
+            if json_path.name == "asset-manifest.json":
+                continue
+            content = json_path.read_text(encoding="utf-8", errors="ignore")
+            rewritten = _rewrite_json_assets(content, hash_map)
+            if rewritten != content and not self.dry_run:
+                json_path.write_text(rewritten, encoding="utf-8")
+
+        # --- Phase 3: rename every asset to its hashed filename. ------------
+        if not self.dry_run:
+            for file_path in all_targets:
+                rel = file_path.relative_to(public_dir).as_posix()
+                hashed_rel = hash_map.get(rel)
+                if not hashed_rel or hashed_rel == rel:
+                    continue
+                hashed_name = Path(hashed_rel).name
+                file_path.rename(file_path.parent / hashed_name)
+        self.stats["fingerprinted"] = len(hash_map)
+
+        # Write the asset manifest so deployers can map original → hashed.
         if not self.dry_run:
             manifest = {orig: hashed for orig, hashed in sorted(hash_map.items())}
             manifest_path = public_dir / "asset-manifest.json"
