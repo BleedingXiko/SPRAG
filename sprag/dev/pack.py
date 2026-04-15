@@ -493,6 +493,11 @@ class SpragPack:
         self.skip_gzip = skip_gzip
         self.skip_fingerprint = skip_fingerprint
 
+        # A static dist has no server.py — assets live at dist/ directly.
+        # A full dist has server.py and assets live at dist/public/.
+        self.is_static = not (self.dist_dir / "server.py").exists()
+        self.assets_dir = self.dist_dir if self.is_static else self.dist_dir / "public"
+
         self.workers = os.cpu_count() or 4
         self.terser_bin = self._resolve_bin("terser")
         self.cleancss_bin = self._resolve_bin("cleancss")
@@ -543,9 +548,12 @@ class SpragPack:
         if not self.dist_dir.exists():
             self.error(f"dist directory does not exist: {self.dist_dir}")
             raise SystemExit(1)
-        if not (self.dist_dir / "server.py").exists():
-            self.error("Not a SPRAG dist — missing server.py. Run 'sprag build' first.")
+        if not self.dist_dir.is_dir() or not any(self.dist_dir.iterdir()):
+            self.error("dist directory is empty. Run 'sprag build' or 'sprag build static' first.")
             raise SystemExit(1)
+
+        if self.is_static:
+            self.log("static dist detected — skipping bytecode and server validation")
 
         if not self.skip_minify:
             self._phase_minify()
@@ -555,18 +563,19 @@ class SpragPack:
             self._phase_fingerprint()
         if not self.skip_gzip:
             self._phase_pregzip()
-        if not self.skip_bytecode:
+        if not self.skip_bytecode and not self.is_static:
             self._phase_bytecode()
-        self._phase_validate()
+        if not self.is_static:
+            self._phase_validate()
         if self.zip_output:
             self._phase_package()
         self._report()
 
     def _phase_minify(self):
         self.phase("Minifying Assets")
-        public_dir = self.dist_dir / "public"
+        public_dir = self.assets_dir
         if not public_dir.exists():
-            self.log("No public/ directory, skipping minification")
+            self.log("No assets directory, skipping minification")
             return
 
         css_files = [p for p in public_dir.rglob("*.css") if not p.name.endswith(".min.css")]
@@ -630,9 +639,9 @@ class SpragPack:
 
     def _phase_images(self):
         self.phase("Optimizing Images")
-        public_dir = self.dist_dir / "public"
+        public_dir = self.assets_dir
         if not public_dir.exists():
-            self.log("No public/ directory, skipping image optimization")
+            self.log("No assets directory, skipping image optimization")
             return
 
         image_files = [
@@ -789,9 +798,9 @@ class SpragPack:
         3. Rename every asset to its hashed filename.
         """
         self.phase("Fingerprinting Assets")
-        public_dir = self.dist_dir / "public"
+        public_dir = self.assets_dir
         if not public_dir.exists():
-            self.log("No public/ directory, skipping fingerprint")
+            self.log("No assets directory, skipping fingerprint")
             return
 
         all_targets = [
@@ -862,9 +871,9 @@ class SpragPack:
 
     def _phase_pregzip(self):
         self.phase("Pre-compressing Static Assets")
-        public_dir = self.dist_dir / "public"
+        public_dir = self.assets_dir
         if not public_dir.exists():
-            self.log("No public/ directory, skipping pre-compression")
+            self.log("No assets directory, skipping pre-compression")
             return
 
         count = 0
@@ -913,13 +922,13 @@ class SpragPack:
             return
 
         # Check public dir has content
-        public_dir = self.dist_dir / "public"
+        public_dir = self.assets_dir
         if public_dir.exists():
             html_count = len(list(public_dir.rglob("*.html")))
             js_count = len(list(public_dir.rglob("*.js"))) + len(list(public_dir.rglob("*.mjs")))
             self.log(f"Dist contains {html_count} HTML, {js_count} JS files")
         else:
-            self.log("No public/ dir in dist (mount-only app?)")
+            self.log("No assets dir in dist (mount-only app?)")
 
         # Check bytecode exists if source was stripped
         if self.stats["removed_py"] > 0:

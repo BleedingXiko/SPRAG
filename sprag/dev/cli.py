@@ -204,12 +204,14 @@ def _prompt_install_pillow(dist_dir: Path) -> None:
     except ImportError:
         pass
 
-    public_dir = dist_dir / "public"
-    if not public_dir.exists():
+    # Static dist has assets at dist/ directly; full dist has them at dist/public/.
+    is_static = not (dist_dir / "server.py").exists()
+    assets_dir = dist_dir if is_static else dist_dir / "public"
+    if not assets_dir.exists():
         return
     has_images = any(
         p.suffix.lower() in IMAGE_SUFFIXES
-        for p in public_dir.rglob("*")
+        for p in assets_dir.rglob("*")
         if p.is_file()
     )
     if not has_images:
