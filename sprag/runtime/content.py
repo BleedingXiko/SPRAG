@@ -223,8 +223,13 @@ def _render_inline(text: str) -> str:
         ),
         escaped,
     )
-    escaped = re.sub(r"\*\*([^*]+)\*\*", lambda match: stash(f"<strong>{match.group(1)}</strong>"), escaped)
-    escaped = re.sub(r"\*([^*]+)\*", lambda match: stash(f"<em>{match.group(1)}</em>"), escaped)
+    def _resolve(s: str) -> str:
+        for k, v in placeholders.items():
+            s = s.replace(k, v)
+        return s
+
+    escaped = re.sub(r"\*\*([^*]+)\*\*", lambda match: stash(f"<strong>{_resolve(match.group(1))}</strong>"), escaped)
+    escaped = re.sub(r"\*([^*]+)\*", lambda match: stash(f"<em>{_resolve(match.group(1))}</em>"), escaped)
 
     for key, value in placeholders.items():
         escaped = escaped.replace(key, value)
