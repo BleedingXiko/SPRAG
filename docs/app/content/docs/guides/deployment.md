@@ -10,17 +10,31 @@ SPRAG supports multiple deployment targets: static file hosting, WSGI servers, a
 
 ## Build
 
+### Full dist (server + assets)
+
 ```bash
 sprag build
 ```
 
-This emits the full site into `dist/`:
+Emits a self-contained deployable bundle into `dist/`:
 
 - `dist/public/` — static assets (HTML, CSS, JS, images)
-- `dist/generated/` — compiled components, modules, stores
-- `dist/vendor/` — Ragot runtime
-- `dist/runtime/` — SPRAG bridge files
-- `dist/manifest.json` — route/mount/asset manifest
+- `dist/app/` — shipped application code
+- `dist/sprag/` — shipped SPRAG runtime
+- `dist/server.py` — runnable server entry point
+- `dist/requirements.txt` — runtime Python dependencies
+
+Any files in your project's `public/` folder are merged into `dist/public/` automatically — no manual copying needed.
+
+### Static site (SSG)
+
+```bash
+sprag build static
+```
+
+Emits a pure static site into `dist/` — HTML, JS, CSS, and assets only. No Python server code is included. Use this for CDN, GitHub Pages, or Netlify deployments where you don't need server-side actions.
+
+Your project's `public/` folder (if present) is merged into the output root alongside the generated pages.
 
 ## Production optimization
 
@@ -34,9 +48,13 @@ This post-processes `dist/` with:
 |---|---|
 | CSS/JS minification (terser, cleancss) | `--skip-minify` |
 | Python bytecode compilation | `--skip-bytecode` |
-| Image optimization | `--skip-images` |
-| Pre-gzip compression | (always runs) |
-| Content-hash fingerprinting | (always runs) |
+| Image optimization (Pillow) | `--skip-images` |
+| Pre-gzip compression | `--skip-gzip` |
+| Content-hash fingerprinting | `--skip-fingerprint` |
+
+If images are found and Pillow is not installed, `sprag pack` will prompt you to install it into your active venv before continuing.
+
+If terser or cleancss are not installed, you'll be prompted to `npm install --save-dev` them locally (no global install).
 
 Optional ZIP output:
 
@@ -46,11 +64,11 @@ sprag pack --zip
 
 ## Static hosting
 
-For document-mode and hybrid-mode sites, serve `dist/public/` from any static host:
+Serve `dist/` (from `sprag build static`) or `dist/public/` (from `sprag build`) from any static host:
 
-- **Netlify** — set build command to `sprag build && sprag pack`, publish directory to `dist/public/`
-- **GitHub Pages** — push `dist/public/` to the `gh-pages` branch
-- **S3 + CloudFront** — upload `dist/public/`, set index document to `index.html`
+- **Netlify** — build command: `sprag build static`, publish directory: `dist`
+- **GitHub Pages** — push `dist/` (static build) to the `gh-pages` branch
+- **S3 + CloudFront** — upload `dist/` (static build), set index document to `index.html`
 - **Any CDN** — just serve the files
 
 No server process needed. Every page is pre-rendered HTML.

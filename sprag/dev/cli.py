@@ -17,7 +17,7 @@ from .. import __version__
 from ..runtime.http import SERVER_MODES, resolve_server_mode, serve_sprag_app
 from ..runtime.loader import load_app
 from ..runtime.routing import is_dynamic_path
-from .package import build_dist_bundle
+from .package import build_dist_bundle, build_static_site
 from .scaffold import (
     DEFAULT_ROUTE_MODE,
     ROUTE_MODES,
@@ -38,7 +38,7 @@ def main(argv=None):
 
 
 _SUBCOMMAND_HELP = {
-    "build": "Build the app into a deployable artifact",
+    "build": "Build the app into a deployable artifact (pass 'static' for SSG-only output)",
     "pack": "Optimize a built dist for production deployment",
     "routes": "List all discovered routes with actions and schemas",
     "dev": "Start the dev server with file watching",
@@ -72,6 +72,14 @@ def _build_parser():
         sub.add_argument("--app", dest="app_target", default=None)
         sub.add_argument("--project-root", default=os.getcwd())
         sub.add_argument("--output", default="dist" if name == "build" else ".sprag")
+        if name == "build":
+            sub.add_argument(
+                "mode",
+                nargs="?",
+                choices=["static"],
+                default=None,
+                help="'static' emits a pure SSG site (HTML/JS/CSS + public/) with no server code",
+            )
         if name == "dev":
             sub.add_argument("--port", type=int, default=8000)
             sub.add_argument("--interval", type=float, default=1.0)
@@ -183,11 +191,59 @@ def _prompt_install_npm_tool(binary: str, npm_package: str, description: str) ->
         print(f"  [+] {binary} installed")
 
 
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff"}
+
+
+def _prompt_install_pillow(dist_dir: Path) -> None:
+    """Prompt the user to install Pillow in the active venv if images are present."""
+    import subprocess
+
+    try:
+        from PIL import Image  # noqa: F401
+        return  # already available
+    except ImportError:
+        pass
+
+    public_dir = dist_dir / "public"
+    if not public_dir.exists():
+        return
+    has_images = any(
+        p.suffix.lower() in IMAGE_SUFFIXES
+        for p in public_dir.rglob("*")
+        if p.is_file()
+    )
+    if not has_images:
+        return
+
+    if not sys.stdin.isatty():
+        return
+
+    pip_cmd = f"{sys.executable} -m pip install Pillow"
+    try:
+        answer = input(
+            f"\n  Pillow not installed — required for image optimization.\n"
+            f"  Install it now? ({pip_cmd}) [y/N] "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if answer != "y":
+        return
+    print(f"  Running: {pip_cmd}")
+    result = subprocess.run([sys.executable, "-m", "pip", "install", "Pillow"], check=False)
+    if result.returncode != 0:
+        print("  [!] pip install failed — continuing without image optimization")
+    else:
+        print("  [+] Pillow installed")
+
+
 def cmd_pack(args):
     from .pack import SpragPack
 
     _prompt_install_npm_tool("cleancss", "clean-css-cli", "better CSS minification")
     _prompt_install_npm_tool("terser", "terser", "better JS minification")
+    if not args.skip_images:
+        _prompt_install_pillow(Path(args.dist).resolve())
 
     dist_dir = Path(args.dist).resolve()
     packer = SpragPack(
@@ -272,14 +328,29 @@ def cmd_routes(args):
 
 def cmd_build(args):
     app_target, app = _load_cli_app(args)
-    dist = build_dist_bundle(
-        app_target,
-        app,
-        output_dir=Path(args.output),
-        project_root=Path(args.project_root),
-    )
-    print(f"[SPRAG] app: {app_target}")
-    print(json.dumps(dist, indent=2, sort_keys=True))
+    project_root = Path(args.project_root)
+    output_dir = Path(args.output)
+
+    if getattr(args, "mode", None) == "static":
+        result = build_static_site(
+            app_target,
+            app,
+            output_dir=output_dir,
+            project_root=project_root,
+        )
+        print(f"[SPRAG] app: {app_target}")
+        print(f"[SPRAG] static site → {result['dist_dir']}")
+        if result["errors"]:
+            print(json.dumps({"errors": result["errors"]}, indent=2))
+    else:
+        dist = build_dist_bundle(
+            app_target,
+            app,
+            output_dir=output_dir,
+            project_root=project_root,
+        )
+        print(f"[SPRAG] app: {app_target}")
+        print(json.dumps(dist, indent=2, sort_keys=True))
 
 
 def cmd_dev(args):

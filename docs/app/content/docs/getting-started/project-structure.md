@@ -19,7 +19,9 @@ myapp/
 │   │       ├── web.py       # Screen (SSR layout + hydration)
 │   │       ├── components.py # Component classes (browser runtime)
 │   │       └── modules.py   # Module classes (browser runtime)
+│   ├── static/              # Served at /static/... (registered via AssetRegistry)
 │   └── shell.html           # Outer HTML shell wrapping all pages
+├── public/                  # Copied verbatim to build output root
 ├── requirements.txt
 └── .env
 ```
@@ -76,6 +78,19 @@ ui.img(src="/static/images/logo.png", alt="Logo")
 
 To add favicon and icon `<link>` tags to the document `<head>`, use the `icons` metadata key on `App` or on individual pages — see the [Routes](/docs/framework/routes) docs.
 
+## The public folder
+
+The `public/` directory at the project root is for files that should be copied verbatim to the build output root — `robots.txt`, `favicon.ico`, `sitemap.xml`, Open Graph images, etc. Unlike `app/static/`, these files are not registered with the asset pipeline; they land directly at the output root with no path prefix.
+
+```
+public/
+├── robots.txt
+├── favicon.ico
+└── og-image.png
+```
+
+Both `sprag build` and `sprag build static` merge this folder into the output automatically.
+
 ## App declaration
 
 `app/__init__.py` wires everything together:
@@ -92,7 +107,8 @@ app = App(routes="app.routes", shell=app_shell)
 | Command | What it does |
 |---|---|
 | `sprag dev` | Dev server with file watching and hot rebuild |
-| `sprag build` | Build into `dist/` — fully static output |
+| `sprag build` | Build full dist bundle into `dist/` (server + assets) |
+| `sprag build static` | Build a pure SSG static site into `dist/` (no server code) |
 | `sprag pack` | Production optimization of `dist/` |
 | `sprag routes` | List all discovered routes and actions |
 | `sprag inspect /path` | Show compiled JS output for a route |

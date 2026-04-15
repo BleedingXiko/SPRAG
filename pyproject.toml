@@ -7,7 +7,7 @@ name = "spragkit"
 dynamic = ["version"]
 description = "Python-first application framework over SPECTER and RAGOT"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [
@@ -17,6 +17,7 @@ keywords = ["python", "web-framework", "ssr", "hydration", "realtime"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.9",

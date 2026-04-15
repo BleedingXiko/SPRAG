@@ -13,6 +13,33 @@ from .build import build_web_preview
 from ..runtime.http import resolve_server_mode
 
 
+def build_static_site(app_target, app, *, output_dir: Path, project_root: Path | None = None) -> dict:
+    """Build a pure static site — HTML/JS/CSS/assets only, no server code."""
+    output_dir = output_dir.resolve()
+    _replace_dir(output_dir)
+
+    app_package = _app_package_name(app)
+    app_project_root = Path(project_root).resolve() if project_root else _project_root_for_package(app_package)
+
+    did_boot = not getattr(app, "_booted", False)
+    if did_boot:
+        app.boot()
+    try:
+        manifest = build_web_preview(app.pages(), output_dir, app=app, mounts=app.mounts())
+    finally:
+        if did_boot:
+            app.shutdown()
+
+    _copy_public_folder(app_project_root, output_dir)
+
+    return {
+        "dist_dir": str(output_dir),
+        "routes": _serializable_routes(manifest["routes"]),
+        "mounts": _serializable_mounts(manifest.get("mounts", [])),
+        "errors": manifest["errors"],
+    }
+
+
 def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path | None = None) -> dict:
     """Build a runnable dist artifact with app code and vendored runtimes."""
     output_dir = output_dir.resolve()
@@ -27,11 +54,13 @@ def build_dist_bundle(app_target, app, *, output_dir: Path, project_root: Path |
     finally:
         if did_boot:
             app.shutdown()
-    serializable_routes = _serializable_routes(manifest["routes"])
-    serializable_mounts = _serializable_mounts(manifest.get("mounts", []))
 
     app_package = _app_package_name(app)
     app_project_root = Path(project_root).resolve() if project_root else _project_root_for_package(app_package)
+    _copy_public_folder(app_project_root, public_dir)
+    serializable_routes = _serializable_routes(manifest["routes"])
+    serializable_mounts = _serializable_mounts(manifest.get("mounts", []))
+
     package_names = [app_package, "sprag"]
     for package_name in package_names:
         target_dir = output_dir / package_name
@@ -94,6 +123,19 @@ def _package_dir(package_name):
 
 def _project_root_for_package(package_name):
     return _package_dir(package_name).resolve().parent
+
+
+def _copy_public_folder(project_root: Path, output_dir: Path) -> None:
+    """Merge {project_root}/public/ into output_dir, if it exists."""
+    src = project_root / "public"
+    if not src.exists():
+        return
+    for item in src.rglob("*"):
+        if item.is_file():
+            rel = item.relative_to(src)
+            dest = output_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, dest)
 
 
 def _replace_dir(target_dir: Path, *, source_dir: Path | None = None):

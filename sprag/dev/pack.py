@@ -646,7 +646,10 @@ class SpragPack:
         try:
             from PIL import Image  # noqa: F401
         except ImportError:
-            self.log("Pillow not installed — skipping image optimization (pip install Pillow)")
+            self.log(
+                "Pillow not installed — skipping image optimization "
+                f"(install it with: {sys.executable} -m pip install Pillow)"
+            )
             return
 
         try:
