@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 
 from .tree import render_tree
-from ..assets import render_css_links, render_preload_hints, render_script_tags, serialize_module_imports
+from ..assets import _relative_asset_href, render_css_links, render_preload_hints, render_script_tags, serialize_module_imports
 from ..env import public_env
 from ..request import Request
 from ..routing import normalize_route_path
@@ -312,7 +312,7 @@ def build_document_html(
     """
     store_snap = store_snapshot or {}
     metadata_payload = _serializable_metadata(metadata, title=title)
-    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata_payload), head_html)
+    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata_payload, document_path=route_info.get("path")), head_html)
     escaped_title = html.escape(str(metadata_payload.get("title") or title))
     dev_reload = bool(route_info.get("dev_reload"))
     hot_reload_script_tag = ""
@@ -378,7 +378,7 @@ def build_mount_html(
     """Build the HTML boot document for a client app mount."""
     store_snap = store_snapshot or {}
     metadata_payload = _serializable_metadata(metadata, title=title)
-    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata_payload), head_html)
+    head_bits = _join_head_html(preload_html, _render_metadata_tags(metadata_payload, document_path=mount_info.get("path")), head_html)
     escaped_title = html.escape(str(metadata_payload.get("title") or title))
     dev_reload = bool(mount_info.get("dev_reload"))
     hot_reload_script_tag = ""
@@ -610,7 +610,7 @@ def _resolved_surface_metadata(static_metadata, data, *, app_metadata=None) -> d
     return metadata
 
 
-def _render_metadata_tags(metadata) -> str:
+def _render_metadata_tags(metadata, *, document_path: str | None = None) -> str:
     if not metadata:
         return ""
 
@@ -619,7 +619,7 @@ def _render_metadata_tags(metadata) -> str:
         if key == "title" or value is None or value == "":
             continue
         if key == "icons":
-            tags.extend(_render_icon_links(value))
+            tags.extend(_render_icon_links(value, document_path=document_path))
             continue
         content = _metadata_content(value)
         if not content:
@@ -644,7 +644,7 @@ def _render_metadata_tags(metadata) -> str:
     return "\n  ".join(tags)
 
 
-def _render_icon_links(icons) -> list[str]:
+def _render_icon_links(icons, *, document_path: str | None = None) -> list[str]:
     """Render ``metadata["icons"]`` entries into ``<link>`` tags.
 
     Each entry is a dict with ``href`` (required) and optional ``rel``,
@@ -661,7 +661,8 @@ def _render_icon_links(icons) -> list[str]:
             entry = {"href": entry, "rel": "icon"}
         if not isinstance(entry, dict) or "href" not in entry:
             continue
-        href = html.escape(entry["href"], quote=True)
+        href = _relative_asset_href(document_path, entry["href"])
+        href = html.escape(href, quote=True)
         rel = html.escape(entry.get("rel", "icon"), quote=True)
         attrs = f'rel="{rel}" href="{href}"'
         if "type" in entry:
