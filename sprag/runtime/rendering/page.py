@@ -80,7 +80,7 @@ def render_page(page, *, request: Request | None = None, app=None, script_path: 
                 status=status,
             )
         body_html, hydration, render_error = render_screen(page, data)
-        page_meta = _resolved_surface_metadata(page.metadata, data)
+        page_meta = _resolved_surface_metadata(page.metadata, data, app_metadata=getattr(app, "metadata", None))
         surface_modules = serialize_module_imports(
             resolve_effective_surface_modules(app=app, surface=page)
         )
@@ -185,7 +185,7 @@ def render_mount(mount, *, request: Request | None = None, app=None, script_path
             "providers": {key: value.__name__ for key, value in mount.providers.items()},
         }
 
-        mount_meta = _resolved_surface_metadata(mount.metadata, data)
+        mount_meta = _resolved_surface_metadata(mount.metadata, data, app_metadata=getattr(app, "metadata", None))
         body_html, shell_assets = apply_shell(
             '<div id="app-root"></div>',
             app=app,
@@ -600,8 +600,9 @@ def _surface_fingerprint(kind: str, info: dict, *, hydration: list[dict] | None 
     return hashlib.sha256(encoded).hexdigest()[:16]
 
 
-def _resolved_surface_metadata(static_metadata, data) -> dict:
-    metadata = dict(static_metadata or {})
+def _resolved_surface_metadata(static_metadata, data, *, app_metadata=None) -> dict:
+    metadata = dict(app_metadata or {})
+    metadata.update(static_metadata or {})
     if isinstance(data, dict):
         dynamic = data.get("__sprag_meta__")
         if isinstance(dynamic, dict):
@@ -616,6 +617,9 @@ def _render_metadata_tags(metadata) -> str:
     tags = []
     for key, value in metadata.items():
         if key == "title" or value is None or value == "":
+            continue
+        if key == "icons":
+            tags.extend(_render_icon_links(value))
             continue
         content = _metadata_content(value)
         if not content:
@@ -640,6 +644,34 @@ def _render_metadata_tags(metadata) -> str:
     return "\n  ".join(tags)
 
 
+def _render_icon_links(icons) -> list[str]:
+    """Render ``metadata["icons"]`` entries into ``<link>`` tags.
+
+    Each entry is a dict with ``href`` (required) and optional ``rel``,
+    ``type``, and ``sizes`` keys.  A plain string is treated as a
+    shorthand for ``{"href": value, "rel": "icon"}``.
+    """
+    if not icons:
+        return []
+    if not isinstance(icons, (list, tuple)):
+        icons = [icons]
+    tags = []
+    for entry in icons:
+        if isinstance(entry, str):
+            entry = {"href": entry, "rel": "icon"}
+        if not isinstance(entry, dict) or "href" not in entry:
+            continue
+        href = html.escape(entry["href"], quote=True)
+        rel = html.escape(entry.get("rel", "icon"), quote=True)
+        attrs = f'rel="{rel}" href="{href}"'
+        if "type" in entry:
+            attrs += f' type="{html.escape(entry["type"], quote=True)}"'
+        if "sizes" in entry:
+            attrs += f' sizes="{html.escape(entry["sizes"], quote=True)}"'
+        tags.append(f'<link {attrs} data-sprag-head="true">')
+    return tags
+
+
 def _metadata_content(value) -> str:
     if isinstance(value, (list, tuple, set)):
         return ", ".join(str(item) for item in value if item is not None and item != "")
@@ -654,6 +686,9 @@ def _serializable_metadata(metadata, *, title: str | None = None) -> dict:
         return serializable
     for key, value in metadata.items():
         if key == "title":
+            continue
+        if key == "icons":
+            serializable["icons"] = value
             continue
         content = _metadata_content(value)
         if value is None or content == "":

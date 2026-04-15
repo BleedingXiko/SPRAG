@@ -100,19 +100,10 @@ a:hover {
   text-decoration: none;
 }
 
-.brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.brand-logo {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #10b981, #059669);
-  color: white;
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.3);
+  border-radius: 6px;
 }
 
 .brand-text {
@@ -1238,7 +1229,18 @@ details[open] > .sidebar-section-header::after {
   }
 
   .nav-toggle {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 10px;
+    right: 16px;
+    z-index: 60;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border-radius: 8px;
   }
 
   .header-inner {

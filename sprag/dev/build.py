@@ -100,7 +100,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             )
             hydration = []
             render_error = None
-            page_meta = _resolved_surface_metadata(page.metadata, data)
+            page_meta = _resolved_surface_metadata(page.metadata, data, app_metadata=getattr(app, "metadata", None))
             shell_assets = None
             if redirect is None and status == 200:
                 body_html, hydration, render_error = render_screen(page, data)
@@ -217,7 +217,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
         )
         if data_error:
             build_errors.append({"path": mt.path, "stage": "mount_load", "error": data_error})
-        mount_meta = _resolved_surface_metadata(mt.metadata, data)
+        mount_meta = _resolved_surface_metadata(mt.metadata, data, app_metadata=getattr(app, "metadata", None))
         shell_assets = None
         if redirect is None and status == 200:
             body_html, shell_assets = apply_shell(
@@ -438,8 +438,9 @@ def _resolved_page_title(page, data, fallback_path: str) -> str:
     return metadata.get("title") or page.name or fallback_path
 
 
-def _resolved_surface_metadata(static_metadata, data) -> dict:
-    metadata = dict(static_metadata or {})
+def _resolved_surface_metadata(static_metadata, data, *, app_metadata=None) -> dict:
+    metadata = dict(app_metadata or {})
+    metadata.update(static_metadata or {})
     if isinstance(data, dict):
         dynamic = data.get("__sprag_meta__")
         if isinstance(dynamic, dict):

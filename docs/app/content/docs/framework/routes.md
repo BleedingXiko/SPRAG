@@ -52,6 +52,84 @@ my_page = page(
 | `static_paths` | No | Function returning path params for static builds |
 | `metadata` | No | Dict of metadata (title, description, etc.) |
 
+### Metadata
+
+The `metadata` dict controls what goes into the page `<head>`. You can set it statically on the page manifest, or dynamically from `load()` via the `__sprag_meta__` key.
+
+**Standard keys:**
+
+| Key | Output |
+|---|---|
+| `title` | `<title>` tag |
+| `description` | `<meta name="description">` |
+| `canonical` | `<link rel="canonical">` |
+| `og:*` | `<meta property="og:...">` (Open Graph) |
+| `icons` | `<link rel="icon/apple-touch-icon">` tags |
+
+**Static metadata** on the page manifest:
+
+```python
+my_page = page(
+    path="/about",
+    controller=AboutController,
+    screen=AboutScreen,
+    metadata={"title": "About", "description": "About us"},
+)
+```
+
+**Dynamic metadata** from the controller's `load()`:
+
+```python
+class BlogController(Controller):
+    route = "/blog/:slug"
+
+    def load(self):
+        post = get_post(self.request.params["slug"])
+        return {
+            "__sprag_meta__": {
+                "title": post.title,
+                "description": post.summary,
+                "og:image": post.cover_url,
+            },
+            "post": post,
+        }
+```
+
+Dynamic metadata merges on top of static metadata, which merges on top of app-level metadata (see below).
+
+**Icons** take a list of dicts with `href` (required) and optional `rel`, `type`, and `sizes`:
+
+```python
+metadata={
+    "icons": [
+        {"href": "/static/images/favicon.ico", "rel": "icon", "sizes": "48x48"},
+        {"href": "/static/images/icon.png", "rel": "icon", "type": "image/png", "sizes": "192x192"},
+        {"href": "/static/images/apple-touch-icon.png", "rel": "apple-touch-icon", "sizes": "180x180"},
+    ],
+}
+```
+
+### App-level metadata
+
+Set `metadata` on the `App` to apply defaults across all pages. Per-page metadata overrides app-level values for the same keys:
+
+```python
+from sprag import App, shell
+
+app = App(
+    routes="app.routes",
+    shell=shell(template="app/shell.html", css=["app/shell.css"]),
+    metadata={
+        "description": "My SPRAG app",
+        "icons": [
+            {"href": "/static/images/favicon.ico", "rel": "icon"},
+        ],
+    },
+)
+```
+
+Merge order: **app metadata → page metadata → `__sprag_meta__`** (last wins).
+
 ## Route modes
 
 - **`document`** — Pure SSR. The server renders HTML and sends it. No JavaScript is loaded. Best for content pages, marketing pages, and anything that doesn't need interactivity.

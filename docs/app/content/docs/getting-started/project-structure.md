@@ -50,6 +50,32 @@ Set the mode in `page.py`:
 
 `app/shell.html` wraps every page. It contains the outer HTML structure (header, nav, footer) with a `{{ sprag_slot }}` placeholder where the page content goes.
 
+## Static assets
+
+Put images, fonts, and other static files in `app/static/`. SPRAG discovers them automatically and serves them at `/static/...`:
+
+```
+app/
+├── static/
+│   └── images/
+│       ├── favicon.ico
+│       ├── logo.png
+│       └── hero.jpg
+```
+
+Reference them in components, shell templates, or CSS:
+
+```python
+ui.img(src="/static/images/logo.png", alt="Logo")
+```
+
+```html
+<!-- in shell.html -->
+<img src="/static/images/logo.png" alt="Logo">
+```
+
+To add favicon and icon `<link>` tags to the document `<head>`, use the `icons` metadata key on `App` or on individual pages — see the [Routes](/docs/framework/routes) docs.
+
 ## App declaration
 
 `app/__init__.py` wires everything together:

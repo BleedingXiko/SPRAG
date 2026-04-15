@@ -30,6 +30,7 @@ class App:
     project_root: Optional[str] = None
     shell: object = None
     modules: dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     server_mode: str = "auto"
     session_policy: SessionPolicy = field(default_factory=SessionPolicy)
     upload_chunk_size: int = 2 * 1024 * 1024
