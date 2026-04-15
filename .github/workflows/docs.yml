@@ -40,7 +40,7 @@ jobs:
         run: cd docs && ../.venv/bin/python -m sprag.dev.cli build static
 
       - name: Pack docs for production
-        run: cd docs && ../.venv/bin/python -m sprag.dev.cli pack --dist dist --skip-bytecode --skip-images
+        run: cd docs && ../.venv/bin/python -m sprag.dev.cli pack --dist dist --skip-bytecode --skip-images --skip-gzip
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
