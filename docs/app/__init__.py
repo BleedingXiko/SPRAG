@@ -9,7 +9,7 @@ app = App(
     shell=app_shell,
     metadata={
         "icons": [
-            {"href": "/static/images/favicon.ico", "rel": "icon", "sizes": "48x48"},
+            {"href": "/static/images/favicon.ico", "rel": "icon", "type": "image/x-icon", "sizes": "48x48"},
             {"href": "/static/images/favicon-32x32.png", "rel": "icon", "type": "image/png", "sizes": "32x32"},
             {"href": "/static/images/apple-touch-icon.png", "rel": "apple-touch-icon", "sizes": "180x180"},
             {"href": "/static/images/icon-192x192.png", "rel": "icon", "type": "image/png", "sizes": "192x192"},
