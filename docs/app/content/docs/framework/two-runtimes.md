@@ -59,4 +59,5 @@ Use the SPRAG surface for 90% of your work. Drop to the raw runtime when you nee
 ---
 
 Both runtimes are open source under the Apache 2.0 license:
-[Specter](https://github.com/BleedingXiko/SPECTER) — the Python server runtime &nbsp;·&nbsp; [Ragot](https://github.com/BleedingXiko/RAGOT) — the browser runtime
+- [Specter](https://github.com/BleedingXiko/SPECTER) — the Python server runtime
+- [Ragot](https://github.com/BleedingXiko/RAGOT) — the browser runtime
