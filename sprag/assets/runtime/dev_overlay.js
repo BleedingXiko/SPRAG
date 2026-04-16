@@ -6,59 +6,112 @@
  * console just to discover something broke.
  *
  * Only active when the surface payload includes `dev_reload: true` (i.e.,
- * `sprag dev` is running).
+ * `sprag dev` is running). Errors are surfaced via a Ragot `Module` whose
+ * lifecycle owns the overlay DOM node and the Escape-key listener. The
+ * page-level error / unhandledrejection listeners are installed once per
+ * page (they need to catch errors that fire before any Module has started)
+ * and they route through the active overlay via the module-level
+ * `pushError(...)` indirection below.
  */
+
+import { Module, createElement, attr, append, remove } from '../vendor/ragot.esm.min.js';
 
 const OVERLAY_ID = '__sprag_dev_overlay__';
 const MAX_ERRORS = 50;
 
-let _overlayEl = null;
-let _errors = [];
-let _dismissed = false;
+let _activeOverlay = null;
+let _pendingErrors = [];
+let _globalListenersInstalled = false;
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Push an error into the overlay and (re-)render it. */
+/** Create a DevOverlayModule. Callers should `.start()` then `.adopt()` it. */
+export function createDevOverlay() {
+    return new DevOverlayModule();
+}
+
+/**
+ * Install page-level error / unhandledrejection listeners.
+ *
+ * These cannot be owned by a Module because they need to be alive before any
+ * Module has started (to catch early boot errors). They're installed once per
+ * page load; dev reloads do a full `location.reload()` so there's no accrual
+ * concern. Errors flow through `pushError(...)` which routes to the active
+ * DevOverlayModule or buffers until one starts.
+ */
+export function installGlobalCatchers() {
+    if (_globalListenersInstalled || typeof window === 'undefined') {
+        return;
+    }
+    _globalListenersInstalled = true;
+
+    window.addEventListener('error', (event) => {
+        if (!_isDevMode()) {
+            return;
+        }
+        const error = event.error;
+        pushError({
+            kind: 'runtime',
+            title: 'Uncaught error',
+            message: error && error.message ? error.message : event.message || 'Unknown error',
+            stack: error && error.stack ? error.stack : '',
+            source: event.filename
+                ? `${event.filename}:${event.lineno}:${event.colno}`
+                : null,
+        });
+    });
+
+    window.addEventListener('unhandledrejection', (event) => {
+        if (!_isDevMode()) {
+            return;
+        }
+        const reason = event.reason;
+        pushError({
+            kind: 'runtime',
+            title: 'Unhandled promise rejection',
+            message: reason && reason.message ? reason.message : String(reason || 'Unknown rejection'),
+            stack: reason && reason.stack ? reason.stack : '',
+        });
+    });
+}
+
+/** Push an error into the active overlay (or buffer if none yet). */
 export function pushError(entry) {
     if (!_isDevMode()) {
         return;
     }
-    _errors.push({
-        timestamp: Date.now(),
-        kind: entry.kind || 'runtime',
-        title: entry.title || 'Error',
-        message: entry.message || '',
-        stack: entry.stack || '',
-        source: entry.source || null,
-    });
-    if (_errors.length > MAX_ERRORS) {
-        _errors = _errors.slice(-MAX_ERRORS);
+    if (_activeOverlay) {
+        _activeOverlay.pushError(entry);
+    } else {
+        _pendingErrors.push(entry);
+        if (_pendingErrors.length > MAX_ERRORS) {
+            _pendingErrors = _pendingErrors.slice(-MAX_ERRORS);
+        }
     }
-    _dismissed = false;
-    _render();
 }
 
 /** Clear all errors and hide the overlay. */
 export function clearErrors() {
-    _errors = [];
-    _dismissed = false;
-    _hide();
+    _pendingErrors = [];
+    if (_activeOverlay) {
+        _activeOverlay.clearErrors();
+    }
 }
 
 /** Return a shallow copy of the current error list. */
 export function getErrors() {
-    return _errors.slice();
+    return _activeOverlay ? _activeOverlay.getErrors() : _pendingErrors.slice();
 }
 
 /** Whether the overlay is currently visible. */
 export function isVisible() {
-    return _overlayEl !== null && _overlayEl.style.display !== 'none';
+    return _activeOverlay ? _activeOverlay.isVisible() : false;
 }
 
 // ---------------------------------------------------------------------------
-// Error-boundary wrapper for component/module lifecycle
+// Error-boundary wrappers for component/module lifecycle
 // ---------------------------------------------------------------------------
 
 /**
@@ -101,45 +154,127 @@ export function guardClass(cls, label) {
 }
 
 // ---------------------------------------------------------------------------
-// Unhandled error / rejection catcher
+// DevOverlayModule — owns the overlay DOM node and Escape-key listener
 // ---------------------------------------------------------------------------
 
-let _globalListenersInstalled = false;
-
-export function installGlobalCatchers() {
-    if (_globalListenersInstalled || typeof window === 'undefined') {
-        return;
+class DevOverlayModule extends Module {
+    constructor() {
+        super();
+        this._label = 'sprag.dev_overlay';
+        this.errors = [];
+        this.dismissed = false;
+        this.overlayEl = null;
     }
-    _globalListenersInstalled = true;
 
-    window.addEventListener('error', (event) => {
-        if (!_isDevMode()) {
+    onStart() {
+        _activeOverlay = this;
+
+        // Escape-to-dismiss is lifecycle-owned: registered via Module.on
+        // so it's torn down automatically on stop().
+        this.on(document, 'keydown', (event) => {
+            if (event.key === 'Escape' && this.isVisible()) {
+                this.dismissed = true;
+                this._hide();
+            }
+        });
+
+        // Flush anything that fired before the overlay was started.
+        if (_pendingErrors.length > 0) {
+            const pending = _pendingErrors;
+            _pendingErrors = [];
+            for (const entry of pending) {
+                this.pushError(entry);
+            }
+        }
+    }
+
+    onStop() {
+        if (_activeOverlay === this) {
+            _activeOverlay = null;
+        }
+        if (this.overlayEl) {
+            remove(this.overlayEl);
+            this.overlayEl = null;
+        }
+        this.errors = [];
+        this.dismissed = false;
+    }
+
+    pushError(entry) {
+        this.errors.push({
+            timestamp: Date.now(),
+            kind: entry.kind || 'runtime',
+            title: entry.title || 'Error',
+            message: entry.message || '',
+            stack: entry.stack || '',
+            source: entry.source || null,
+        });
+        if (this.errors.length > MAX_ERRORS) {
+            this.errors = this.errors.slice(-MAX_ERRORS);
+        }
+        this.dismissed = false;
+        this._render();
+    }
+
+    clearErrors() {
+        this.errors = [];
+        this.dismissed = false;
+        this._hide();
+    }
+
+    getErrors() {
+        return this.errors.slice();
+    }
+
+    isVisible() {
+        return this.overlayEl !== null && this.overlayEl.style.display !== 'none';
+    }
+
+    _render() {
+        if (!this.errors.length || this.dismissed) {
+            this._hide();
             return;
         }
-        const error = event.error;
-        pushError({
-            kind: 'runtime',
-            title: 'Uncaught error',
-            message: error && error.message ? error.message : event.message || 'Unknown error',
-            stack: error && error.stack ? error.stack : '',
-            source: event.filename
-                ? `${event.filename}:${event.lineno}:${event.colno}`
-                : null,
-        });
-    });
+        this._ensureOverlay();
+        this.overlayEl.innerHTML = _buildHTML(this.errors);
+        this.overlayEl.style.display = 'block';
+        const btn = this.overlayEl.querySelector('#__sprag_overlay_dismiss__');
+        if (btn) {
+            btn.onclick = () => {
+                this.dismissed = true;
+                this._hide();
+            };
+        }
+    }
 
-    window.addEventListener('unhandledrejection', (event) => {
-        if (!_isDevMode()) {
+    _hide() {
+        if (this.overlayEl) {
+            this.overlayEl.style.display = 'none';
+        }
+    }
+
+    _ensureOverlay() {
+        if (this.overlayEl && document.body.contains(this.overlayEl)) {
             return;
         }
-        const reason = event.reason;
-        pushError({
-            kind: 'runtime',
-            title: 'Unhandled promise rejection',
-            message: reason && reason.message ? reason.message : String(reason || 'Unknown rejection'),
-            stack: reason && reason.stack ? reason.stack : '',
+        this.overlayEl = createElement('div');
+        attr(this.overlayEl, {
+            id: OVERLAY_ID,
+            style: [
+                'position: fixed',
+                'inset: 0',
+                'z-index: 2147483647',
+                'background: rgba(0, 0, 0, 0.75)',
+                'overflow-y: auto',
+                'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                'font-size: 13px',
+                'color: #e8e8e8',
+                'padding: 0',
+                'margin: 0',
+            ].join('; '),
         });
-    });
+        append(document.body, this.overlayEl);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -164,48 +299,10 @@ function _isDevMode() {
 // Rendering
 // ---------------------------------------------------------------------------
 
-function _render() {
-    if (!_errors.length || _dismissed) {
-        _hide();
-        return;
-    }
-    _ensureOverlay();
-    _overlayEl.innerHTML = _buildHTML();
-    _overlayEl.style.display = 'block';
-    _attachListeners();
-}
-
-function _hide() {
-    if (_overlayEl) {
-        _overlayEl.style.display = 'none';
-    }
-}
-
-function _ensureOverlay() {
-    if (_overlayEl && document.body.contains(_overlayEl)) {
-        return;
-    }
-    _overlayEl = document.createElement('div');
-    _overlayEl.id = OVERLAY_ID;
-    _overlayEl.setAttribute('style', [
-        'position: fixed',
-        'inset: 0',
-        'z-index: 2147483647',
-        'background: rgba(0, 0, 0, 0.75)',
-        'overflow-y: auto',
-        'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-        'font-size: 13px',
-        'color: #e8e8e8',
-        'padding: 0',
-        'margin: 0',
-    ].join('; '));
-    document.body.appendChild(_overlayEl);
-}
-
-function _buildHTML() {
-    const count = _errors.length;
+function _buildHTML(errors) {
+    const count = errors.length;
     const plural = count === 1 ? '' : 's';
-    const latestKind = _errors[_errors.length - 1].kind;
+    const latestKind = errors[errors.length - 1].kind;
     const kindLabel = latestKind === 'build' ? 'Build' : latestKind === 'boot' ? 'Boot' : 'Runtime';
 
     let html = `
@@ -221,8 +318,8 @@ function _buildHTML() {
     ">Dismiss</button>
   </div>`;
 
-    for (let i = _errors.length - 1; i >= 0; i -= 1) {
-        const err = _errors[i];
+    for (let i = errors.length - 1; i >= 0; i -= 1) {
+        const err = errors[i];
         const time = new Date(err.timestamp).toLocaleTimeString();
         const kindBadge = err.kind === 'build'
             ? '<span style="background: #b35900; padding: 1px 6px; border-radius: 3px; font-size: 11px;">BUILD</span>'
@@ -262,26 +359,6 @@ function _buildHTML() {
 </div>`;
 
     return html;
-}
-
-function _attachListeners() {
-    const btn = _overlayEl && _overlayEl.querySelector('#__sprag_overlay_dismiss__');
-    if (btn) {
-        btn.onclick = () => {
-            _dismissed = true;
-            _hide();
-        };
-    }
-    // Support Escape key to dismiss
-    if (!_overlayEl._escHandler) {
-        _overlayEl._escHandler = (event) => {
-            if (event.key === 'Escape' && isVisible()) {
-                _dismissed = true;
-                _hide();
-            }
-        };
-        document.addEventListener('keydown', _overlayEl._escHandler);
-    }
 }
 
 function _escapeHTML(text) {

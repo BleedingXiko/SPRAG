@@ -1,7 +1,7 @@
 import { Module } from '../vendor/ragot.esm.min.js';
 import { actionErrorMessageSprag, createActionClient } from './actions.js';
 import { registerDevReloadListener } from './dev_reload.js';
-import { pushError, clearErrors, getErrors, installGlobalCatchers, guardClass } from './dev_overlay.js';
+import { createDevOverlay, pushError, clearErrors, getErrors, installGlobalCatchers, guardClass } from './dev_overlay.js';
 import { resolveSurfaceImports, renderBootError } from './hydration.js';
 import { MetadataManager } from './metadata.js';
 import { createNavigationRuntime } from './navigation.js';
@@ -37,6 +37,7 @@ class BootModule extends Module {
         this._moduleRegistry = moduleRegistry;
         this._surfaceRef = surfaceRef;
         this._activeRoot = null;
+        this._devOverlay = null;
     }
 
     onStart() {
@@ -105,6 +106,11 @@ class BootModule extends Module {
             await resolveSurfaceImports(surface, navigation.resolveJSImportSrc);
 
             if (surface.dev_reload) {
+                if (!this._devOverlay) {
+                    this._devOverlay = createDevOverlay();
+                    this._devOverlay.start();
+                    this.adopt(this._devOverlay);
+                }
                 for (const [name, cls] of Object.entries(this._componentRegistry)) {
                     guardClass(cls, name);
                 }

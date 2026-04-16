@@ -43,7 +43,7 @@ CLR_RED = "\033[31m"
 CLR_BLUE = "\033[34m"
 
 COMPRESSIBLE_SUFFIXES = {
-    ".html", ".css", ".js", ".mjs", ".json", ".svg", ".xml", ".txt", ".map",
+    ".html", ".css", ".js", ".mjs", ".json", ".svg", ".xml", ".txt",
 }
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff"}
@@ -250,12 +250,10 @@ def _minify_js_fallback(js: str) -> str:
         stripped = line.strip()
         if not stripped:
             continue
-        # Remove single-line comments but not URLs (://)
-        if (
-            stripped.startswith("//")
-            and not stripped.startswith("//!")
-            and not stripped.startswith("//# sourceMappingURL=")
-        ):
+        # Remove single-line comments but not URLs (://); banner comments (//!)
+        # are preserved. sourceMappingURL trailers are dropped unconditionally
+        # — production dist never ships maps (see _phase_strip_sourcemaps).
+        if stripped.startswith("//") and not stripped.startswith("//!"):
             continue
         lines.append(stripped)
     return "\n".join(lines) + "\n"
@@ -599,6 +597,7 @@ class SpragPack:
         if self.is_static:
             self.log("static dist detected — skipping bytecode and server validation")
 
+        self._phase_strip_sourcemaps()
         if not self.skip_minify:
             self._phase_minify()
         if not self.skip_images:
@@ -615,6 +614,47 @@ class SpragPack:
             self._phase_package()
         self._report()
 
+    def _phase_strip_sourcemaps(self):
+        """Delete ``.js.map`` files and strip ``sourceMappingURL`` trailers.
+
+        Source maps are a dev-time affordance for ``sprag build`` / ``sprag dev``
+        (e.g. ``sprag inspect`` reads them as its source-location index). A packed
+        dist is a production artifact and must not leak the original authoring
+        sources, so we strip both the maps and the comment that points at them.
+        """
+        self.phase("Stripping Source Maps")
+        public_dir = self.assets_dir
+        if not public_dir.exists():
+            self.log("No assets directory, skipping source-map strip")
+            return
+
+        removed_maps = 0
+        for pattern in ("*.js.map", "*.mjs.map"):
+            for map_path in public_dir.rglob(pattern):
+                if not self.dry_run:
+                    map_path.unlink()
+                removed_maps += 1
+
+        stripped_comments = 0
+        trailer_re = re.compile(r"(?m)^[ \t]*//[#@]\s*sourceMappingURL=.*$\n?")
+        for pattern in ("*.js", "*.mjs"):
+            for js_path in public_dir.rglob(pattern):
+                try:
+                    content = js_path.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                if "sourceMappingURL" not in content:
+                    continue
+                new_content = trailer_re.sub("", content)
+                if new_content != content and not self.dry_run:
+                    js_path.write_text(new_content, encoding="utf-8")
+                    stripped_comments += 1
+
+        self.success(
+            f"Removed {removed_maps} .map files, "
+            f"stripped sourceMappingURL from {stripped_comments} JS files"
+        )
+
     def _phase_minify(self):
         self.phase("Minifying Assets")
         public_dir = self.assets_dir
@@ -630,7 +670,6 @@ class SpragPack:
             if not p.name.endswith(".min.js")
             and not p.name.endswith(".min.mjs")
             and "vendor" not in p.relative_to(public_dir).parts
-            and not (p.parent / f"{p.name}.map").exists()
         ]
 
         if not css_files and not js_files:
