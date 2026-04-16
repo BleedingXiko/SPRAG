@@ -21,7 +21,7 @@ increment_schema = Schema("increment", {
 ## Field options
 
 ```python
-Field(type, required=False, default=None, min=None, max=None, choices=None)
+Field(type, required=False, default=None, choices=None)
 ```
 
 | Parameter | Description |
@@ -29,15 +29,13 @@ Field(type, required=False, default=None, min=None, max=None, choices=None)
 | `type` | Python type: `int`, `str`, `float`, `bool`, `list`, `dict` |
 | `required` | Whether the field must be present |
 | `default` | Default value if not provided |
-| `min` | Minimum value (numeric) or minimum length (string/list) |
-| `max` | Maximum value (numeric) or maximum length (string/list) |
 | `choices` | List of allowed values |
 
 ## Usage with actions
 
 ```python
 @action(schema=Schema("create_post", {
-    "title": Field(str, required=True, min=1, max=200),
+    "title": Field(str, required=True),
     "body": Field(str, required=True),
     "tags": Field(list, default=[]),
     "status": Field(str, default="draft", choices=["draft", "published"]),
@@ -76,7 +74,7 @@ def build_routes(self, router):
     def create_item():
         schema = Schema("item", {
             "name": Field(str, required=True),
-            "quantity": Field(int, default=1, min=0),
+            "quantity": Field(int, default=1),
         })
         data, errors = schema.validate(request.json)
         if errors:

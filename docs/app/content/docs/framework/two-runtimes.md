@@ -44,7 +44,7 @@ Each runtime owns its boundary:
 
 - **DOM** — browser only. Components render `ui.*` trees; the server never touches the DOM.
 - **Sockets** — the server *sends* socket events, the browser *receives* them. The Module has `on_socket()`; the Controller has `emit_socket()`.
-- **HTTP** — the server handles requests. The browser calls `dispatch()` or `call_action()` to invoke server actions over HTTP.
+- **HTTP** — the server handles requests. The browser calls `call_action()` to invoke server actions over HTTP.
 - **File system** — server only. The browser has no access.
 
 ## Escape hatches
@@ -55,3 +55,8 @@ SPRAG wraps Specter (server) and Ragot (browser), but both are fully available:
 - **Raw Ragot**: `module(src, export=...)` with `imports.*` in your Module for third-party JS interop; `browser.*` for `globalThis.*` access.
 
 Use the SPRAG surface for 90% of your work. Drop to the raw runtime when you need something specific.
+
+---
+
+Both runtimes are open source under the Apache 2.0 license:
+[Specter](https://github.com/BleedingXiko/SPECTER) — the Python server runtime &nbsp;·&nbsp; [Ragot](https://github.com/BleedingXiko/RAGOT) — the browser runtime

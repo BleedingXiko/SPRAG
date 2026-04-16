@@ -113,7 +113,7 @@ class UploadModule(Module):
 ```python
 @action(schema=Schema("cancel_job", {"job_id": Field(str, required=True)}))
 def cancel_job(self, job_id):
-    self.cancel_job("image_processing", job_id)
+    self.request_job_cancel("image_processing", job_id)
     return {"cancelled": True}
 ```
 

@@ -1,6 +1,6 @@
 """Public SPRAG framework surface."""
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 from .runtime import dom
 from .runtime.app import App
@@ -66,6 +66,8 @@ from .runtime.browser import (
     Screen,
     animate,
     browser,
+    createSelector,
+    createStateStore,
     debounce,
     hydrate,
     infinite_scroll,
@@ -120,6 +122,8 @@ __all__ = [
     # Client-side decorators (justified — see sprag/browser.py)
     "animate",
     "browser",
+    "createSelector",
+    "createStateStore",
     "debounce",
     "infinite_scroll",
     "imports",

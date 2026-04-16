@@ -62,7 +62,7 @@ class ExportModule(Module):
 
     def on_export(self, event, target):
         event.prevent_default()
-        self.dispatch("start_export", {"query": self.state["query"]})
+        self.call_action("start_export", {"query": self.state["query"]})
 
     def _on_job(self, data):
         if data.get("job_id") == self.state.get("job_id"):
@@ -103,7 +103,7 @@ def on_cancel(self, event, target):
 ```python
 @action(schema=Schema("cancel_job", {"job_id": Field(str, required=True)}))
 def cancel_job(self, job_id):
-    self.cancel_job("exports", job_id)
+    self.request_job_cancel("exports", job_id)
     return {"cancelled": True}
 ```
 

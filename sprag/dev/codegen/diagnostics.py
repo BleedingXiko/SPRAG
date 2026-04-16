@@ -9,8 +9,16 @@ from .mappings import JSCodegenError
 
 _STATEMENT_HINTS = {
     ast.AnnAssign: "Use a plain assignment inside browser methods; keep type annotations on signatures or class fields.",
-    ast.With: "Use explicit setup/cleanup and try/finally in browser code.",
-    ast.AsyncWith: "Use explicit async setup/cleanup and try/finally in browser code.",
+    ast.With: (
+        "Python `with` statements cannot be compiled to JavaScript. "
+        "Acquire the resource in on_start() and release it in on_stop() or via self.add_cleanup(fn), "
+        "or use try/finally for inline scope."
+    ),
+    ast.AsyncWith: (
+        "Python `async with` statements cannot be compiled to JavaScript. "
+        "Acquire the resource in on_start() and release it in on_stop() or via self.add_cleanup(fn), "
+        "or use try/finally for inline scope."
+    ),
     ast.Delete: "Assign a replacement value explicitly, or use a store/path helper such as store.delete(...).",
     ast.Assert: "Use an explicit if check and handle the failure path directly.",
     ast.Import: "Move imports to module scope.",

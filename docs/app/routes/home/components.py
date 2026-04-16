@@ -157,7 +157,7 @@ class HomePage(Component):
                             "\n"
                             "    def _add(self, event, target):\n"
                             '        inp = dom.query("[data-role=input]")\n'
-                            '        self.dispatch("add", {"text": inp.value})',
+                            '        self.call_action("add", {"text": inp.value})',
                         )),
                         class_="landing-code",
                     ),

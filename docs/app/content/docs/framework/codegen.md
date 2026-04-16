@@ -39,18 +39,19 @@ Component `render()` methods are more restricted — only these statements are a
 
 - Variable assignments: `x = expression`
 - Attribute assignments: `self.foo = value`
+- `if`/`elif`/`else` blocks
 - Return statements: `return ui.div(...)`
 
-No `if`, `for`, `while`, or `try` blocks. Use ternary expressions and `ui.For()` instead:
+No `for`, `while`, or `try` blocks. Use `ui.For()` for iteration. `if`/`elif`/`else` blocks and ternary expressions both work:
 
 ```python
-# Wrong — if statement in render()
+# If statements work — useful for conditional returns
 def render(self, props=None):
     if self.state.get("loading"):
         return ui.div("Loading...")
     return ui.div("Content")
 
-# Right — ternary expression
+# Ternaries work too — terser for single-expression cases
 def render(self, props=None):
     return ui.div("Loading...") if self.state.get("loading") else ui.div("Content")
 ```

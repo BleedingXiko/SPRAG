@@ -6,7 +6,9 @@ order: 34
 
 # State Stores
 
-Use a state store when you need to share mutable state across multiple independent modules or components. While local `Module` state is perfect for feature-local orchestration, `createStateStore` provides a robust primitive for app-wide synchronization.
+Use a state store when you need to share mutable state across multiple independent modules or components. While local `Module` state is perfect for feature-local orchestration, `createStateStore` provides a robust primitive for app-wide synchronisation.
+
+> **`store()` vs `createStateStore`**: `store()` is the cross-runtime bridge — one declaration works on both server and browser. `createStateStore` is the browser-only Ragot primitive for SPA/mount use cases where no server-side state exists.
 
 ## Creating a Store
 
@@ -20,30 +22,37 @@ player_store = createStateStore({
 }, {"name": "player"})
 ```
 
+The second argument is an options dict. `name` is used in log/error messages.
+
 ## Reading and Writing
 
-You can read the entire state or specific paths:
-
 ```python
+# Full state (returns a proxy — mutations are tracked automatically)
 state = player_store.get_state()
+
+# Dot-path read with optional fallback
 volume = player_store.get("volume")
+name = player_store.get("user.name", "Anonymous")
 ```
 
-Writes support shallow merging, path-based setting, and atomic batches:
+Writes support shallow merging, dot-path setting, atomic batches, and conditional set:
 
 ```python
-# Shallow merge
+# Shallow merge (alias: patch)
 player_store.set_state({"is_playing": True})
 
-# Path-based set
+# Dot-path set
 player_store.set("volume", 1.0)
 
-# Atomic batch mutation
-def update_player(draft):
-    draft["is_playing"] = True
-    draft["volume"] = 0.5
+# Atomic batch — all mutations fire exactly one subscriber notification
+def update_player(state, store):
+    state["is_playing"] = True
+    state["volume"] = 0.5
 
 player_store.batch(update_player)
+
+# Conditional set — only writes if current value matches expected
+player_store.compare_and_set("volume", 0.5, 0.8)
 ```
 
 ## Actions
@@ -60,21 +69,34 @@ player_store.register_actions({
 # Dispatch from anywhere
 player_store.dispatch("play")
 player_store.dispatch("seek", 120.5)
+
+# Direct access to bound action functions
+player_store.actions.increment()
 ```
 
 ## Subscriptions and Selectors
 
-Subscribe to changes to react in your modules. Use **selectors** to avoid unnecessary re-renders — the callback only fires when the selected slice changes.
+Subscribe to changes to react in your modules. Use **selectors** to avoid unnecessary work — the callback only fires when the selected slice changes.
 
 ```python
-class VolumeIndicator(Component):
+class PlayerModule(Module):
     def on_start(self):
-        # Only fires when volume changes
-        self.unsub = player_store.subscribe(
-            lambda volume, meta, store, prev: self.set_state({"v": volume}),
-            selector=lambda s: s["volume"]
+        # Full state subscription
+        unsub = player_store.subscribe(self._on_change)
+        self.add_cleanup(unsub)
+
+        # Selector subscription — only fires when volume changes
+        unsub2 = player_store.subscribe(
+            self._on_volume,
+            {"selector": lambda s: s["volume"]}
         )
-        self.add_cleanup(self.unsub)
+        self.add_cleanup(unsub2)
+
+    def _on_change(self, state, meta, store):
+        self.set_state({"player": state})
+
+    def _on_volume(self, volume, meta, store, prev_volume):
+        self.component.set_state({"v": volume})
 ```
 
 ### Subscriber Signatures
@@ -84,33 +106,45 @@ class VolumeIndicator(Component):
 | No selector | `(state_proxy, change_meta, store)` |
 | With selector | `(slice, change_meta, store, prev_slice)` |
 
-## Composition with Registry
+### Subscribe Options
 
-For app-wide visibility, provide your store in the registry:
+| Option | Default | Description |
+|---|---|---|
+| `selector` | `None` | Function `(state) -> slice`. Callback only fires when slice changes. |
+| `equals` | `Object.is` | Custom equality function for the selected slice. |
+| `immediate` | `False` | If true, fires the subscriber immediately with current state. |
 
-```python
-# Startup code
-ragot_registry.provide("player", player_store, root_module)
+## Memoised Selectors
 
-# Usage in a far-away module
-class MiniPlayer(Module):
-    def on_start(self):
-        player = ragot_registry.require("player")
-        player.subscribe(...)
-```
-
-## Memoized Selectors
-
-Use `create_selector` to compute derived state with memoization:
+Use `createSelector` to compute derived state with memoisation. Recomputes only when an input selector's output changes.
 
 ```python
-from sprag import create_selector
+from sprag import createSelector
 
-select_visible_items = create_selector(
+select_visible = createSelector(
     [lambda s: s["items"], lambda s: s["filter"]],
     lambda items, filter_val: [i for i in items if filter_val == "all" or i["type"] == filter_val]
 )
 
-# Use in subscription
-player_store.subscribe(on_change, selector=select_visible_items)
+# Use as a subscribe selector
+player_store.subscribe(on_change, {"selector": select_visible})
 ```
+
+## Full Store API
+
+| Method | Description |
+|---|---|
+| `get_state()` | Returns the proxied mutable state |
+| `get(path, fallback)` | Dot-path read |
+| `set(path, value)` | Dot-path write |
+| `set_state(partial)` | Shallow merge (alias: `patch`) |
+| `batch(mutator)` | Grouped mutations, one notification |
+| `compare_and_set(path, expected, next)` | Conditional write — only if current equals expected |
+| `subscribe(listener, options)` | Subscribe to changes; returns unsubscribe function |
+| `register_actions(definitions)` | Register named action functions |
+| `dispatch(name, *args)` | Call a registered action by name |
+| `actions` | Direct access to bound action functions |
+| `list_actions()` | Returns list of registered action names |
+| `create_selector(inputs, fn)` | Create a memoised selector scoped to this store |
+| `get_version()` | Current change version counter |
+| `get_last_change()` | Last change metadata |

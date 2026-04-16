@@ -33,18 +33,14 @@ Integrating "unmanaged" libraries (like D3.js, Three.js, or Google Maps) require
 
 ```python
 class ChartComponent(Component):
+    canvas_dir = ref(".chart-container")
+
     def render(self):
-        return ui.div(ref=self.ref("canvas_dir"), class_="chart-container")
+        return ui.div(class_="chart-container")
 
     def on_start(self):
         # Initialize the external library
-        self.chart = imports.ChartLib.init(self.refs.canvas_dir)
-        
-        # Sync Ragot state -> External library
-        self.subscribe(
-            lambda val, *: self.chart.update(val),
-            selector=lambda s: s["data"]
-        )
+        self.chart = imports.ChartLib.init(self.canvas_dir)
 
     def on_stop(self):
         # Critical: Cleanup the external library to prevent leaks
@@ -86,10 +82,9 @@ class ListModule(Module):
         # Handle clicks on any .item-btn inside self.element
         self.delegate(self.element, "click", ".item-btn", self._on_item_click)
 
-    def _on_item_click(self, e):
-        # Access the specific target that was clicked
-        target = e.delegateTarget
-        item_id = target.dataset.id
+    def _on_item_click(self, event, matched_target):
+        # matched_target is the element that matched ".item-btn"
+        item_id = matched_target.dataset.id
         print(f"Clicked item {item_id}")
 
 ## Custom Observation & Lazy Loads

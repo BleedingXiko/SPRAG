@@ -40,7 +40,7 @@ class ContactForm(Component):
 Use `form_data()` to snapshot form inputs at submit time:
 
 ```python
-from sprag import Module, form_data
+from sprag import Module
 
 class ContactModule(Module):
     def on_start(self):
@@ -48,11 +48,11 @@ class ContactModule(Module):
 
     def on_submit(self, event, target):
         event.prevent_default()
-        data = form_data(event)  # {"name": "...", "email": "...", "message": "..."}
-        self.dispatch("send_message", data)
+        data = self.form_data(event)  # {"name": "...", "email": "...", "message": "..."}
+        self.call_action("send_message", data)
 ```
 
-`form_data(event)` reads all named inputs from the form and returns a plain dict.
+`self.form_data(event)` reads all named inputs from the form and returns a plain dict.
 
 ## Validation errors
 
@@ -82,15 +82,15 @@ The Module receives the state update with `errors`, and the Component re-renders
 Use `action_error_message()` to handle network and server errors consistently:
 
 ```python
-from sprag import Module, action_error_message
+from sprag import Module
 
 class ContactModule(Module):
     def on_submit(self, event, target):
         event.prevent_default()
         try:
-            result = self.call_action("send_message", form_data(event))
+            result = self.call_action("send_message", self.form_data(event))
         except Exception as e:
-            self.set_state({"error": action_error_message(e)})
+            self.set_state({"error": self.action_error_message(e)})
 ```
 
 ## Debounced autosave
@@ -110,7 +110,7 @@ class DraftModule(Module):
     @debounce(1.0)
     def _save_draft(self):
         data = self._collect_form_data()
-        self.dispatch("save_draft", data)
+        self.call_action("save_draft", data)
 ```
 
 The `@debounce(1.0)` decorator coalesces rapid keystrokes into a single save call after 1 second of inactivity.

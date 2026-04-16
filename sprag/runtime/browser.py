@@ -274,6 +274,28 @@ browser = _JSNamespaceStub("browser")
 imports = _JSNamespaceStub("imports")
 
 
+def createStateStore(initial_state=None, options=None):
+    """Create a proxy-tracked mutable state store (Ragot ``createStateStore``).
+
+    Browser-only stub. In compiled JS this creates a Ragot state store with
+    proxy-based change detection and microtask-batched subscriber notifications.
+
+    Returns a store object with: ``get_state``, ``get``, ``set``, ``set_state``,
+    ``patch``, ``batch``, ``compare_and_set``, ``subscribe``,
+    ``register_actions``, ``dispatch``, ``create_selector``.
+    """
+    _browser_only("createStateStore")
+
+
+def createSelector(input_selectors, result_func):
+    """Create a memoised derived selector (Ragot ``createSelector``).
+
+    Browser-only stub. In compiled JS this creates a selector that recomputes
+    only when one of the input selector outputs changes by ``Object.is``.
+    """
+    _browser_only("createSelector")
+
+
 @dataclass
 class Module:
     """Browser-side Module — Python mirror of Ragot ``Module``.

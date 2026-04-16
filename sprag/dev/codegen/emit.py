@@ -344,7 +344,8 @@ def emit_stores_shim(output_dir: Path, stores: list[StoreBridge]) -> None:
         lines.append(
             f"export const {bridge.name} = createStoreBridge("
             f"{name_js}, "
-            f"_hydrated[{name_js}] !== undefined ? _hydrated[{name_js}] : {initial_js}"
+            f"_hydrated[{name_js}] !== undefined "
+            f"? {{ ...{initial_js}, ..._hydrated[{name_js}] }} : {initial_js}"
             f");"
         )
     lines.append("")

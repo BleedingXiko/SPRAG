@@ -318,6 +318,17 @@ class SpragSocketBridge:
         delivered = False
         for connection in self._matching_connections(target):
             delivered = self._send(connection, envelope) or delivered
+        if not delivered:
+            parts = [f"event={event_name!r}"]
+            if target.route:
+                parts.append(f"route={target.route!r}")
+            if target.client_id:
+                parts.append(f"client_id={target.client_id!r}")
+            if target.session_id:
+                parts.append(f"session_id={target.session_id!r}")
+            if target.topic:
+                parts.append(f"topic={target.topic!r}")
+            logger.warning("[SPRAG] socket emit delivered to 0 connections (%s)", ", ".join(parts))
         return delivered
 
     def close(self):

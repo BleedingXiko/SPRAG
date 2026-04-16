@@ -54,6 +54,21 @@ def render(self, props=None):
     )
 ```
 
+`render()` compiles to JavaScript — it supports variable assignments, `if`/`elif`/`else` blocks, and a `return` statement. Full control flow (loops, try/except) belongs in helper methods or `on_start()`.
+
+```python
+# If statements work — useful for conditional returns
+def render(self, props=None):
+    if self.state.get("loading"):
+        return ui.div("Loading...")
+    return ui.div("Ready")
+
+# Inline ternaries work too
+def render(self, props=None):
+    label = "Loading..." if self.state.get("loading") else "Ready"
+    return ui.div(label)
+```
+
 Updates use morphDOM diffing — only changed DOM nodes are touched.
 
 ## State updates

@@ -50,7 +50,7 @@ def load(self):
 
 ## Actions
 
-Actions are named server mutations that the browser can call via `dispatch()` or `call_action()`.
+Actions are named server mutations that the browser can call via `call_action()`.
 
 ```python
 @action(schema=Schema("update", {
@@ -173,4 +173,4 @@ def submit(self, **data):
     return self.redirect("/success")
 ```
 
-The browser follows redirects automatically when using `dispatch()`.
+The browser follows redirects automatically when using `call_action()`.

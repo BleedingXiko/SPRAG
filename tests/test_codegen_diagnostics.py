@@ -258,7 +258,7 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("Unsupported statement in browser codegen: With.", message)
         self.assertIn("UnsupportedWithModule.on_start", message)
         self.assertIn("with open(", message)
-        self.assertIn("Hint: Use explicit setup/cleanup and try/finally in browser code.", message)
+        self.assertIn("Python `with` statements cannot be compiled to JavaScript.", message)
 
     def test_component_diagnostic_includes_context_and_hint(self):
         with self.assertRaises(JSCodegenError) as ctx:

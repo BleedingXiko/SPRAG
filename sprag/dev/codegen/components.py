@@ -47,7 +47,7 @@ from .source_maps import (
     count_lines,
     mappings_for_text,
 )
-from .statements import _compile_statements_with_mappings
+from .statements import _compile_if, _compile_statements_with_mappings
 from .stores_scan import collect_store_refs_for_class
 
 
@@ -133,6 +133,18 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
                     name="render",
                 )
             )
+            continue
+        if isinstance(stmt, ast.If):
+            if_text, if_mappings = _compile_if(
+                stmt,
+                render_env,
+                method_names=set(),
+                indent=8,
+                source_line_offset=render_start_line - 1,
+                source_name="render",
+            )
+            body_lines.append(if_text)
+            render_line_mappings.extend(if_mappings)
             continue
         raise JSCodegenError(
             f"Unsupported component statement in {component_class.__name__}.render: {ast.dump(stmt)}",

@@ -21,12 +21,28 @@ class TodoModule(Module):
     def on_submit(self, event, target):
         event.prevent_default()
         text = self.element.querySelector("[name='text']").value
-        self.dispatch("add_item", {"text": text})
+        self.call_action("add_item", {"text": text})
 
     def on_add(self, event, target):
         event.prevent_default()
         self.set_state({"adding": True})
 ```
+
+## Constructor
+
+`__init__` supports field assignments, conditionals, local variables, and method calls. The only restriction is that `self.state` and `self.screen` are owned by the runtime and cannot be assigned directly.
+
+```python
+class GameModule(Module):
+    def __init__(self):
+        super().__init__()
+        self.timer_id = None
+        self.config = {"difficulty": "normal", "rounds": 5}
+        if some_condition:
+            self.mode = "advanced"
+```
+
+Heavy setup (DOM access, event listeners, server calls) belongs in `on_start()`.
 
 ## Lifecycle
 
@@ -50,25 +66,23 @@ self.watch_state(lambda state: print("state changed:", state))
 
 ## Server calls
 
-### `dispatch(action, payload)`
+### `call_action(action, payload)`
 
 Calls a server `@action` and applies the returned state:
 
 ```python
 def on_increment(self, event, target):
-    self.dispatch("increment", {"count": self.state["count"]})
+    self.call_action("increment", {"count": self.state["count"]})
 ```
 
 The response from the server replaces the Module's state, which triggers a re-render.
 
-### `call_action(action, payload)`
-
-Same as `dispatch()` but returns a Promise — use when you need to handle the response:
+Returns a Promise when you need to handle the response:
 
 ```python
 def on_save(self, event, target):
     result = self.call_action("save", {"text": self.state["text"]})
-    # result is the server response
+    result.then(self._on_saved)
 ```
 
 ## DOM access

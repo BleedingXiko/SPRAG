@@ -637,26 +637,25 @@ def _compile_constructor_extras(module_class, *, method_names, env) -> tuple[str
             continue
         if isinstance(stmt, ast.Pass):
             continue
+        # Block direct assignment to fields owned by the framework.
         if (
             isinstance(stmt, ast.Assign)
             and len(stmt.targets) == 1
             and isinstance(stmt.targets[0], ast.Attribute)
             and isinstance(stmt.targets[0].value, ast.Name)
             and stmt.targets[0].value.id == "self"
-            and stmt.targets[0].attr not in {"state", "screen"}
+            and stmt.targets[0].attr in {"state", "screen"}
         ):
-            statements.append(stmt)
-            continue
-        raise JSCodegenError(
-            f"Unsupported __init__ statement in browser Module {module_class.__name__}: "
-            f"{ast.dump(stmt)}. Generated Module constructors support field assignments "
-            "like `self.child = None`; put lifecycle work in on_start().",
-            source_file=source_file,
-            class_name=module_class.__name__,
-            method_name="__init__",
-            line=source_start_line + getattr(stmt, "lineno", 1) - 1,
-            source_line=source.splitlines()[getattr(stmt, "lineno", 1) - 1] if source.splitlines() else None,
-        )
+            raise JSCodegenError(
+                f"Cannot assign self.{stmt.targets[0].attr} in __init__ — "
+                f"this field is owned by the SPRAG runtime.",
+                source_file=source_file,
+                class_name=module_class.__name__,
+                method_name="__init__",
+                line=source_start_line + getattr(stmt, "lineno", 1) - 1,
+                source_line=source.splitlines()[getattr(stmt, "lineno", 1) - 1] if source.splitlines() else None,
+            )
+        statements.append(stmt)
     if not statements:
         return "", []
     constructor_env = dict(env)

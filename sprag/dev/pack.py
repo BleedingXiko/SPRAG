@@ -414,6 +414,50 @@ def _rewrite_html_refs(
     return content
 
 
+_CSS_URL_RE = re.compile(
+    r"""url\(\s*(['"]?)([^'")]+)\1\s*\)""",
+)
+
+
+def _rewrite_css_urls(
+    content: str,
+    css_path: Path,
+    hash_map: Dict[str, str],
+    public_dir: Path,
+) -> str:
+    """Rewrite ``url(...)`` references in CSS files to use hashed filenames."""
+    css_dir = css_path.parent
+
+    def _replace(match):
+        quote = match.group(1)
+        raw_url = match.group(2)
+        # Skip data URIs, absolute URLs, and protocol-relative URLs.
+        if raw_url.startswith(("data:", "http://", "https://", "//")):
+            return match.group(0)
+        # Resolve the referenced asset relative to this CSS file.
+        if raw_url.startswith("/"):
+            # Root-relative: strip leading slash to get public-dir-relative path.
+            asset_rel = raw_url.lstrip("/")
+        else:
+            # Relative: resolve from CSS file's directory.
+            asset_abs = posixpath.normpath(
+                posixpath.join(css_dir.relative_to(public_dir).as_posix(), raw_url)
+            )
+            asset_rel = asset_abs
+        hashed_rel = hash_map.get(asset_rel)
+        if hashed_rel is None:
+            return match.group(0)
+        # Rewrite back to the same form (root-relative or relative).
+        if raw_url.startswith("/"):
+            new_url = "/" + hashed_rel
+        else:
+            hashed_abs = public_dir / hashed_rel
+            new_url = posixpath.relpath(hashed_abs.as_posix(), css_dir.as_posix())
+        return f"url({quote}{new_url}{quote})"
+
+    return _CSS_URL_RE.sub(_replace, content)
+
+
 def _rewrite_json_assets(
     content: str,
     hash_map: Dict[str, str],
@@ -829,6 +873,15 @@ class SpragPack:
             content = file_path.read_text(encoding="utf-8")
             rewritten = _rewrite_js_imports(content, file_path, hash_map, public_dir)
             rewritten = _rewrite_json_assets(rewritten, hash_map)
+            if rewritten != content and not self.dry_run:
+                file_path.write_text(rewritten, encoding="utf-8")
+
+        # CSS — rewrite url(...) references to fingerprinted assets.
+        for file_path in all_targets:
+            if file_path.suffix.lower() != ".css":
+                continue
+            content = file_path.read_text(encoding="utf-8")
+            rewritten = _rewrite_css_urls(content, file_path, hash_map, public_dir)
             if rewritten != content and not self.dry_run:
                 file_path.write_text(rewritten, encoding="utf-8")
 

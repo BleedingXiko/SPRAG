@@ -37,7 +37,7 @@ class CounterController(Controller):
 ```
 
 - `load()` returns the initial data for the page. This runs on the server during SSR and is sent to the browser as the boot payload.
-- `@action` declares a named mutation. The browser can call it with `dispatch("increment", {count: N})`.
+- `@action` declares a named mutation. The browser can call it with `call_action("increment", {count: N})`.
 
 ### The browser module: `app/routes/counter/modules.py`
 
@@ -50,11 +50,11 @@ class CounterModule(Module):
 
     def on_increment(self, event, target):
         event.prevent_default()
-        self.dispatch("increment", {"count": self.state["count"]})
+        self.call_action("increment", {"count": self.state["count"]})
 ```
 
 - `Module` owns non-visual lifecycle — event listeners, server calls, state.
-- `self.dispatch("increment", payload)` calls the server `@action` and applies the returned state.
+- `self.call_action("increment", payload)` calls the server `@action` and applies the returned state.
 - This Python compiles to Ragot ESM JavaScript at build time.
 
 ### The browser component: `app/routes/counter/components.py`
