@@ -45,7 +45,7 @@ my_page = page(
 | `path` | Yes | URL path for this route |
 | `controller` | Yes | Controller class that handles data and actions |
 | `screen` | Yes | Screen class that renders the page |
-| `mode` | No | `"document"`, `"hybrid"` (default), or `"spa"` |
+| `mode` | No | `"document"`, `"hybrid"` (default), or `"mount"` |
 | `shell` | No | Override the app-level shell for this route |
 | `css` | No | Route-specific CSS files |
 | `modules` | No | JS import aliases: `{"alias": "path/to/module.js"}` |
