@@ -69,6 +69,8 @@ Your Module can display these inline using the error dict.
 Schemas work outside of `@action` too — use them to validate data in custom HTTP routes:
 
 ```python
+import json
+
 def build_routes(self, router):
     @router.route("/api/items", methods=["POST"])
     def create_item():
@@ -76,8 +78,8 @@ def build_routes(self, router):
             "name": Field(str, required=True),
             "quantity": Field(int, default=1),
         })
-        data, errors = schema.validate(request.json)
-        if errors:
-            return {"errors": errors}, 400
-        return {"item": save_item(data)}
+        outcome = schema.validate(json.loads(self.request.body or "{}"))
+        if not outcome.ok:
+            return {"errors": outcome.meta.get("errors", {})}, 400
+        return {"item": save_item(outcome.value)}
 ```

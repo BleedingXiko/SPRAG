@@ -20,15 +20,15 @@ class ExportQueue(QueueService):
     worker_count = 2
 
     def handle_item(self, item):
-        self.report_progress(percent=10, message="Starting export...")
+        self.report_progress(current=1, total=3, message="Starting export...")
 
         data = fetch_data(item["query"])
         self.check_cancelled()
 
-        self.report_progress(percent=50, message="Writing CSV...")
+        self.report_progress(current=2, total=3, message="Writing CSV...")
         path = write_csv(data)
 
-        self.complete_job(result={"download_url": f"/downloads/{path}"})
+        return {"download_url": f"/downloads/{path}"}
 ```
 
 ### 2. Register with the app
@@ -49,7 +49,7 @@ app = App(
 }))
 def start_export(self, query):
     result = self.enqueue("exports", {"query": query})
-    return {"job_id": result["job_id"]}
+    return result
 ```
 
 ### 4. Track from the browser
@@ -62,11 +62,18 @@ class ExportModule(Module):
 
     def on_export(self, event, target):
         event.prevent_default()
-        self.call_action("start_export", {"query": self.state["query"]})
+        self.call_action("start_export", {"query": self.state["query"]}).then(self._on_started)
+
+    def _on_started(self, result):
+        job = (result.value or {}).get("job") or {}
+        self.set_state({"job_id": job.get("id")})
 
     def _on_job(self, data):
         if data.get("job_id") == self.state.get("job_id"):
-            self.call_action("job_status", {"job_id": data["job_id"]})
+            self.call_action("job_status", {"job_id": data["job_id"]}).then(self._on_status)
+
+    def _on_status(self, result):
+        self.set_state(result.value or {})
 ```
 
 ## Progress reporting
@@ -80,10 +87,11 @@ def handle_item(self, item):
         self.check_cancelled()
         process_file(file)
         self.report_progress(
-            percent=int((i + 1) / total * 100),
+            current=i + 1,
+            total=total,
             message=f"Processing {file['name']}..."
         )
-    self.complete_job(result={"processed": total})
+    return {"processed": total}
 ```
 
 Each `report_progress()` emits a `sprag:queue.job.changed` socket signal, so the browser can show live updates.
@@ -103,8 +111,7 @@ def on_cancel(self, event, target):
 ```python
 @action(schema=Schema("cancel_job", {"job_id": Field(str, required=True)}))
 def cancel_job(self, job_id):
-    self.request_job_cancel("exports", job_id)
-    return {"cancelled": True}
+    return self.request_job_cancel("exports", job_id)
 ```
 
 ### Worker side

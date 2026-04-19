@@ -50,11 +50,14 @@ class CounterModule(Module):
 
     def on_increment(self, event, target):
         event.prevent_default()
-        self.call_action("increment", {"count": self.state["count"]})
+        self.call_action("increment", {"count": self.state["count"]}).then(self.on_result)
+
+    def on_result(self, result):
+        self.set_state(result.value)
 ```
 
 - `Module` owns non-visual lifecycle — event listeners, server calls, state.
-- `self.call_action("increment", payload)` calls the server `@action` and applies the returned state.
+- `self.call_action("increment", payload)` calls the server `@action` and returns a Promise-like result; update local state in the success handler.
 - This Python compiles to Ragot ESM JavaScript at build time.
 
 ### The browser component: `app/routes/counter/components.py`

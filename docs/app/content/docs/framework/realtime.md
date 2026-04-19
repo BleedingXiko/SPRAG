@@ -14,7 +14,7 @@ Instead of pushing full state snapshots over the socket, the server emits a ligh
 
 ```
 Server: emit_socket("items_changed", {})
-Browser: on_socket("items_changed") → call_action("get_items", {})
+Browser: on_socket("items_changed") → call_action("get_items", {}).then(...)
 ```
 
 This keeps the socket channel thin and ensures the browser always has validated, authoritative state.
@@ -49,7 +49,10 @@ class ChatModule(Module):
 
     def _on_message(self, data):
         # Refetch authoritative state from server
-        self.call_action("get_messages", {})
+        self.call_action("get_messages", {}).then(self._on_messages)
+
+    def _on_messages(self, result):
+        self.set_state(result.value or {})
 ```
 
 ## Topics (rooms)
@@ -89,7 +92,7 @@ On the server side, there's a matching shortcut:
 
 ```python
 # Emit the signal and include the refetch hint in one call
-self.emit_socket_refetch("items_changed", action="get_items")
+self.emit_socket_refetch("get_items", event="items_changed")
 ```
 
 ## Session targeting
@@ -111,4 +114,4 @@ Store the `session_id` when you need to push from a background job or service la
 sprag routes
 ```
 
-Controllers that use the socket bridge are tagged with `[socket]` in the output.
+Use this to confirm the route exists and to inspect the action names and schemas your browser code is expected to call.

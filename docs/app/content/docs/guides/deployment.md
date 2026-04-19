@@ -73,23 +73,15 @@ Serve `dist/` (from `sprag build static`) or `dist/public/` (from `sprag build`)
 
 No server process needed. Every page is pre-rendered HTML.
 
-## WSGI hosting
+## Server hosting
 
-For apps that need server-side actions, sockets, or dynamic data:
-
-```python
-# wsgi.py
-from app import app
-
-app.boot()
-application = app.serve()
-```
-
-Run with Gunicorn and the gevent worker:
+For apps that need server-side actions or dynamic data, ship the output of `sprag build` and run the generated server entrypoint:
 
 ```bash
-gunicorn wsgi:application -k gevent -w 4
+python3 server.py --port 8000
 ```
+
+`sprag build` writes that runnable entrypoint to `dist/server.py` alongside `dist/public/`, `dist/app/`, and `dist/sprag/`.
 
 ## WebSocket mode
 
@@ -98,7 +90,6 @@ For real-time features, enable WebSocket mode:
 ```python
 app = App(
     routes="app.routes",
-    shell=app_shell,
     server_mode="websocket",
 )
 ```

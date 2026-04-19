@@ -1,121 +1,101 @@
 ---
 title: Advanced DOM & Interop
-description: Hydration, static adoption, third-party interop, and the fine details of morphDOM reconciliation.
+description: DOM helpers, third-party interop, and lifecycle-safe manual DOM operations.
 order: 35
 ---
 
 # Advanced DOM & Interop
 
-While SPRAG components handle most rendering automatically via the `render()` method, advanced applications often need to cross the boundary between managed components and manual DOM control.
+SPRAG components should own most rendering through `render()`. This page covers the supported `dom.*` helper surface when you need direct DOM work.
 
-## Static Adoption (Hydration)
+## Query and visibility
 
-Sometimes you have a DOM node rendered by the server (e.g., via a standard template or another service) that you want to "upgrade" to a Ragot component without destroying existing state or causing a flicker.
+Use the query helpers and visibility helpers for lightweight DOM control:
 
 ```python
-class HydratedComponent(Component):
+from sprag import Module, dom
+
+class PanelModule(Module):
     def on_start(self):
-        # Manually take ownership of an existing node
-        self.element = browser.document.getElementById("existing-node")
-        
-        # Manually find refs that weren't created by render()
-        self.refs.button = self.element.querySelector("button")
-        
-        # Now you can use normal Component features
-        self.on(self.refs.button, "click", self._on_click)
+        btn = dom.query("[data-role='toggle']", self.element)
+        panel = dom.query(".panel", self.element)
+        self.on(btn, "click", lambda event: dom.toggle(panel))
 ```
 
-**Note**: When adopting static nodes, avoid calling `.mount()`. Set `self.element` directly and call `.start()` manually if necessary.
+Available helpers:
 
-## Third-Party Library Integration
+- `dom.query(selector, parent=None)`
+- `dom.query_all(selector, parent=None)`
+- `dom.show(element)`
+- `dom.hide(element)`
+- `dom.toggle(element)`
 
-Integrating "unmanaged" libraries (like D3.js, Three.js, or Google Maps) requires careful lifecycle handling. Use `refs` to get the container, and perform your own cleanup.
+## Styling and attributes
 
 ```python
-class ChartComponent(Component):
-    canvas_dir = ref(".chart-container")
+dom.css(panel, {"display": "grid", "gap": "8px"})
+dom.attr(panel, {"data-state": "open", "aria-hidden": "false"})
+```
 
-    def render(self):
-        return ui.div(class_="chart-container")
+Available helpers:
 
+- `dom.css(element, styles)`
+- `dom.attr(element, attrs)`
+- `dom.clear(element)`
+
+## DOM mutation
+
+```python
+item = dom.query(".item", self.element)
+list_el = dom.query(".list", self.element)
+
+dom.append(list_el, item)
+dom.prepend(list_el, item)
+dom.insert_before(list_el, item, dom.query(".sentinel", list_el))
+dom.remove(item)
+dom.batch_append(list_el, [item])
+dom.clear_pool("messages")
+```
+
+Available helpers:
+
+- `dom.append(parent, child)`
+- `dom.prepend(parent, child)`
+- `dom.insert_before(parent, child, reference)`
+- `dom.remove(element)`
+- `dom.batch_append(parent, children)`
+- `dom.clear_pool(key=None)`
+
+## Animations and icons
+
+```python
+icon = dom.create_icon("<svg>...</svg>", class_name="icon")
+dom.animate_in(icon, duration=200)
+dom.animate_out(icon, duration=150)
+```
+
+Available helpers:
+
+- `dom.create_icon(svg_string, class_name="icon")`
+- `dom.animate_in(element, **options)`
+- `dom.animate_out(element, **options)`
+
+## Third-party interop
+
+Integrate third-party libraries in lifecycle hooks and always clean up in `on_stop()`:
+
+```python
+from sprag import Module, imports
+
+class ChartModule(Module):
     def on_start(self):
-        # Initialize the external library
-        self.chart = imports.ChartLib.init(self.canvas_dir)
+        self.chart = imports.ChartLib.create(self.element)
 
     def on_stop(self):
-        # Critical: Cleanup the external library to prevent leaks
-        self.chart.destroy()
+        if self.chart:
+            self.chart.destroy()
 ```
 
-## The MorphDOM Guarantee
+## Lower-level Ragot helpers
 
-Ragot uses `morphDOM` to patch the DOM. Understanding its guarantees is key to high-performance UI:
-
-### Stateful Element Preservation
-`morphDOM` preserves the internal state of elements like `<input>`, `<video>`, `<audio>`, and `<iframe>` as long as their identity (tag name + index/key) remains constant. This means if you re-render a list of inputs, focus and cursor position are preserved.
-
-### Keyed vs. Unkeyed Siblings
-**Never mix** keyed and unkeyed siblings in the same parent. 
-- If one child has `data-ragot-key`, all should have it. 
-- Mixing them causes the diffing algorithm to lose track of the DOM structure, leading to full element destruction instead of patching.
-
-## Manual Reconciliation with `setStateSync`
-
-By default, `setState` is batched via `requestAnimationFrame`. If you need a DOM update to happen **immediately** (e.g., to measure an element's size before the next frame), use `set_state_sync`:
-
-```python
-def expand_and_measure(self):
-    self.set_state_sync({"expanded": True})
-    
-    # The DOM is now updated. Measure safely.
-    height = self.element.offsetHeight
-    self.set_state({"intrinsicHeight": height})
-```
-
-## Event Delegation
-
-For performance-critical lists (thousands of items), avoid adding one listener per child. Use `delegate` in a `Module` to handle events at the parent level:
-
-```python
-class ListModule(Module):
-    def on_start(self):
-        # Handle clicks on any .item-btn inside self.element
-        self.delegate(self.element, "click", ".item-btn", self._on_item_click)
-
-    def _on_item_click(self, event, matched_target):
-        # matched_target is the element that matched ".item-btn"
-        item_id = matched_target.dataset.id
-        print(f"Clicked item {item_id}")
-
-## Custom Observation & Lazy Loads
-
-While `ui.LazyImage` covers most cases, `create_lazy_loader` and `create_infinite_scroll` give you direct control over the `IntersectionObserver` and the performance queue.
-
-### Advanced Lazy Loading
-Control the concurrency and lifecycle of complex assets (e.g. videos or high-res textures):
-
-```python
-self.loader = create_lazy_loader({
-    "selector": ".lazy-asset",
-    "root_margin": "500px",
-    "concurrency": 2, # Strict limit to prevent bandwidth saturation
-    "on_load": lambda el: self._init_heavy_asset(el),
-    "on_error": lambda el, retry: self._handle_retry(el, retry)
-})
-```
-
-### Manual Infinite Scroll Control
-Use `create_infinite_scroll` to implement custom windowing logic where elements are both added **and** evicted to keep DOM size constant:
-
-```python
-self.scroller = create_infinite_scroll({
-    "sentinel": self.refs.footer,
-    "top_sentinel": self.refs.header,
-    "on_load_more": self._fetch_forward,
-    "on_evict_chunk": lambda i: self._evict_dom_nodes(i), # Manual DOM cleanup
-    "visible_chunks": 3 
-})
-```
-
-This allows you to build custom virtual lists without relying on a pre-built component, giving you full control over transition animations and DOM structure during shifts.
-```
+If you need to drop below the `dom.*` helper surface, the shipped Ragot runtime also includes lower-level primitives such as `createLazyLoader(...)` and `createInfiniteScroll(...)`. SPRAG's normal authoring path usually reaches those through `ui.LazyImage`, `@infinite_scroll`, and virtual-scroll integration, but they are part of the underlying runtime.

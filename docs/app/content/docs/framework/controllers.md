@@ -17,13 +17,14 @@ class TodoController(Controller):
     route = "/todos"
 
     def load(self):
-        return {"items": [], "filter": "all"}
+        todos = self.service("todos")
+        return {"items": todos.list_items(), "filter": "all"}
 
     @action(schema=Schema("add_item", {"text": Field(str, required=True)}))
     def add_item(self, text):
-        items = self.request.data.get("items", [])
-        items.append({"text": text, "done": False})
-        return {"items": items}
+        todos = self.service("todos")
+        todos.add_item(text)
+        return {"items": todos.list_items()}
 ```
 
 ## `load()`
@@ -85,10 +86,10 @@ Inside any controller method, `self.request` gives you the current request:
 |---|---|
 | `self.request.params` | URL params (`slug`, `segments`, etc.) |
 | `self.request.query` | Query string as a dict |
-| `self.request.data` | Current page state (from load or previous action) |
-| `self.request.session` | Session dict |
+| `self.request.session` | `RequestSession` helper |
 | `self.request.session_id` | Session ID string |
 | `self.request.user` | Authenticated user (or `None`) |
+| `self.request.active_profile` | Active auth profile (or `None`) |
 | `self.request.cookies` | Request cookies |
 | `self.request.file(name)` | Uploaded file by field name |
 | `self.request.files_list(name)` | List of uploaded files |
@@ -126,7 +127,7 @@ def build_routes(self, router):
 
     @router.route("/api/items", methods=["POST"])
     def create_item():
-        data = request.json
+        data = self.request.body
         return {"created": True}
 ```
 

@@ -144,4 +144,4 @@ class MyScreen(Screen):
         return hydrate(MyComponent, module=module)
 ```
 
-The Module handles `dispatch()`, socket events, and state management. The Component handles rendering.
+The Module handles server calls, socket events, and state flow. The Component handles rendering.

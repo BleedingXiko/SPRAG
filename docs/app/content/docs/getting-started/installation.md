@@ -8,9 +8,8 @@ order: 1
 
 ## Prerequisites
 
-- **Python 3.11+** — SPRAG uses modern Python features throughout
+- **Python 3.9+**
 - **pip** — or any Python package manager (uv, poetry, etc.)
-- **gevent** — the server runtime uses gevent for cooperative concurrency
 
 ## Install SPRAG
 

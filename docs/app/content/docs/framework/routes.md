@@ -16,7 +16,7 @@ app/routes/
 ├── counter/    → /counter
 ├── about/      → /about
 └── blog/
-    └── [slug]/ → /blog/:slug
+    └── [slug]/ → /blog/[slug]
 ```
 
 Route directories are discovered automatically. No manual registration.
@@ -45,9 +45,10 @@ my_page = page(
 | `path` | Yes | URL path for this route |
 | `controller` | Yes | Controller class that handles data and actions |
 | `screen` | Yes | Screen class that renders the page |
-| `mode` | No | `"document"`, `"hybrid"` (default), or `"mount"` |
+| `mode` | No | `"document"` or `"hybrid"` (default) |
 | `shell` | No | Override the app-level shell for this route |
 | `css` | No | Route-specific CSS files |
+| `js` | No | Extra classic scripts to include for this route |
 | `modules` | No | JS import aliases: `{"alias": "path/to/module.js"}` |
 | `static_paths` | No | Function returning path params for static builds |
 | `metadata` | No | Dict of metadata (title, description, etc.) |
@@ -81,7 +82,7 @@ my_page = page(
 
 ```python
 class BlogController(Controller):
-    route = "/blog/:slug"
+    route = "/blog/[slug]"
 
     def load(self):
         post = get_post(self.request.params["slug"])
@@ -132,11 +133,11 @@ Merge order: **app metadata → page metadata → `__sprag_meta__`** (last wins)
 
 ## Route modes
 
-- **`document`** — Pure SSR. The server renders HTML and sends it. No JavaScript is loaded. Best for content pages, marketing pages, and anything that doesn't need interactivity.
+- **`document`** — Server-first rendering for content-heavy pages. The route still ships the standard SPRAG boot payload, but you typically avoid browser-owned Module logic here.
 
 - **`hybrid`** — SSR first, then hydrate. The server renders the initial HTML for a fast first paint, then the browser loads JavaScript to make it interactive. This is the default and the right choice for most pages.
 
-- **`mount`** — No SSR body. The server sends a shell, and the browser mounts everything. Use when the page content is entirely dynamic (dashboards, editors, etc.).
+If you want a browser-owned client app instead of a page route, use `mount(...)` under `app/mounts/`. Mounts are separate from page modes.
 
 ## Dynamic routes
 
@@ -155,7 +156,7 @@ from .web import BlogScreen
 from app.content import blog_static_paths
 
 blog_page = page(
-    path="/blog/:slug",
+    path="/blog/[slug]",
     controller=BlogController,
     screen=BlogScreen,
     mode="document",
@@ -186,4 +187,4 @@ sprag add route about --mode document
 sprag routes
 ```
 
-This prints all discovered routes, their modes, and tags like `[socket]` for controllers that use the socket bridge.
+This prints discovered routes, mounts, actions, and any schema fields declared on those actions.

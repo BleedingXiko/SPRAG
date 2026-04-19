@@ -73,7 +73,7 @@ Pair with CSS:
 
 ## `@virtual_scroll(chunk=N, ...)`
 
-Wraps a Component in a Ragot `VirtualScroller`. Only renders the visible portion of a large list, plus a buffer. Items are rendered in chunks of `N`.
+Wraps a Component in a Ragot `VirtualScroller`. The decorated component must provide chunk-based rendering methods instead of rendering the full list directly.
 
 ```python
 from sprag import Component, ui, virtual_scroll
@@ -81,12 +81,20 @@ from sprag import Component, ui, virtual_scroll
 @virtual_scroll(chunk=50)
 class LargeList(Component):
     def render(self, props=None):
+        return ui.div(class_="large-list")
+
+    def total(self):
+        return len(self.state.get("items", []))
+
+    def chunk(self, i):
         items = self.state.get("items", [])
+        start = i * 50
+        stop = min(start + 50, len(items))
         return ui.div(
             ui.For(
-                items,
-                key=lambda i: i["id"],
-                render=lambda i: ui.div(i["text"], class_="list-item"),
+                items[start:stop],
+                key=lambda item: item["id"],
+                render=lambda item: ui.div(item["text"], class_="list-item"),
             )
         )
 ```
@@ -118,12 +126,11 @@ The scroller handle is available at `self.virtual_scroll` in Python (emitted as 
 
 ## `@infinite_scroll(at="selector", ...)`
 
-Wires a `createInfiniteScroll` observer on a sentinel element. When the sentinel scrolls into view, the component's `load_more()` method is called.
+`@infinite_scroll` is a method decorator. It wires a `createInfiniteScroll` observer and uses the decorated method as the load-more callback.
 
 ```python
 from sprag import Component, ui, infinite_scroll
 
-@infinite_scroll(at=".sentinel")
 class Feed(Component):
     def render(self, props=None):
         items = self.state.get("items", [])
@@ -136,8 +143,8 @@ class Feed(Component):
             ui.div(class_="sentinel"),  # Trigger element
         )
 
+    @infinite_scroll(at=".sentinel")
     def load_more(self):
-        # Called when sentinel becomes visible
         self.emit("load_more", {"offset": len(self.state.get("items", []))})
 ```
 
@@ -150,7 +157,6 @@ class Feed(Component):
 | `root_margin` | `"600px"` | IntersectionObserver rootMargin |
 | `top_at` | `None` | CSS selector for a top sentinel — enables bidirectional scrolling |
 | `visible_chunks` | `None` | Explicit visible-chunks set for DOM eviction control |
-```
 
 ## When to use decorators
 

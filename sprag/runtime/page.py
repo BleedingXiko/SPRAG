@@ -22,9 +22,9 @@ class Page:
     def __post_init__(self):
         if not self.path.startswith("/"):
             raise ValueError(f"SPRAG page path must start with '/': {self.path!r}")
-        if self.mode not in {"document", "hybrid", "spa"}:
+        if self.mode not in {"document", "hybrid"}:
             raise ValueError(
-                f"SPRAG page mode must be one of document|hybrid|spa: {self.mode!r}"
+                f"SPRAG page mode must be one of document|hybrid: {self.mode!r}"
             )
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
         object.__setattr__(self, "modules", normalize_module_imports(self.modules))

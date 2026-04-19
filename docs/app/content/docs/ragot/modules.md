@@ -21,7 +21,7 @@ class TodoModule(Module):
     def on_submit(self, event, target):
         event.prevent_default()
         text = self.element.querySelector("[name='text']").value
-        self.call_action("add_item", {"text": text})
+        self.call_action("add_item", {"text": text}).then(self.on_added)
 
     def on_add(self, event, target):
         event.prevent_default()
@@ -68,14 +68,17 @@ self.watch_state(lambda state: print("state changed:", state))
 
 ### `call_action(action, payload)`
 
-Calls a server `@action` and applies the returned state:
+Calls a server `@action` and returns a Promise-like result:
 
 ```python
 def on_increment(self, event, target):
-    self.call_action("increment", {"count": self.state["count"]})
+    self.call_action("increment", {"count": self.state["count"]}).then(self.on_result)
+
+def on_result(self, result):
+    self.set_state(result.value)
 ```
 
-The response from the server replaces the Module's state, which triggers a re-render.
+Use `result.value` to read the action payload and update Module state explicitly.
 
 Returns a Promise when you need to handle the response:
 
@@ -91,13 +94,20 @@ def on_save(self, event, target):
 
 ## Child Components
 
-Adopt Components to tie their lifecycle to yours:
+Most interactive pages should let `hydrate(...)` wire Module/Component ownership for you:
 
 ```python
-def on_start(self):
-    sidebar = SidebarComponent(self.element.querySelector(".sidebar"))
-    self.adopt_component(sidebar)
+# web.py
+class MyScreen(Screen):
+    modules = [SidebarModule]
+
+    def render(self, data):
+        module = self.module(SidebarModule)
+        module.set_state(data)
+        return hydrate(SidebarComponent, module=module)
 ```
+
+For advanced ownership patterns, `adopt_component(...)` is also real on the underlying Ragot/SPRAG Module surface, but `hydrate(...)` is still the default and safest authoring path.
 
 ## Sockets
 
@@ -116,7 +126,10 @@ def on_stop(self):
     self.leave_topic("room:lobby")
 
 def _on_items(self, data):
-    self.call_action("get_items", {})
+    self.call_action("get_items", {}).then(self._on_items_refetched)
+
+def _on_items_refetched(self, result):
+    self.set_state(result.value or {})
 ```
 
 ### Refetch shorthand
@@ -174,7 +187,7 @@ class MyModule(Module):
     def on_start(self):
         self.subscribe(counter_store, self._on_store)
 
-    def _on_store(self, state, meta, s):
+    def _on_store(self, state, meta, store):
         self.set_state({"count": state["count"]})
 ```
 

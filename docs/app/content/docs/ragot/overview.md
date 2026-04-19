@@ -24,7 +24,7 @@ You don't interact with any of these directly. They're the compilation targets f
 
 ## When to reach for raw Ragot
 
-Occasionally you need to interop with third-party JavaScript. SPRAG provides escape hatches:
+Occasionally you need a browser-only escape hatch. SPRAG exposes those through Python authoring stubs:
 
 ### Module imports
 
@@ -32,10 +32,10 @@ Declare JS dependencies on the page manifest and use them in your Module:
 
 ```python
 # page.py
-playground = page(
-    path="/playground",
-    controller=PlaygroundController,
-    screen=PlaygroundScreen,
+analytics_page = page(
+    path="/analytics",
+    controller=AnalyticsController,
+    screen=AnalyticsScreen,
     mode="hybrid",
     modules={"chart": "/vendor/chart.esm.js"},
 )

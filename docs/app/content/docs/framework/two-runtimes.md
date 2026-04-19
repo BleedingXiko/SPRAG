@@ -43,7 +43,7 @@ These patterns are intentionally identical across runtimes:
 Each runtime owns its boundary:
 
 - **DOM** — browser only. Components render `ui.*` trees; the server never touches the DOM.
-- **Sockets** — the server *sends* socket events, the browser *receives* them. The Module has `on_socket()`; the Controller has `emit_socket()`.
+- **Sockets** — both runtimes can participate through the shared socket bridge. Controllers can emit and handle socket traffic; Modules can subscribe with `on_socket()` and emit with `emit_socket()`.
 - **HTTP** — the server handles requests. The browser calls `call_action()` to invoke server actions over HTTP.
 - **File system** — server only. The browser has no access.
 

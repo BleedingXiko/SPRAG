@@ -127,8 +127,8 @@ Compiles to an arrow function: `(item) => item["id"]`.
 ### Walrus operator
 
 ```python
-if (result := self.call_action("check", {})):
-    self.set_state({"result": result})
+if (count := self.state.get("count", 0)) > 10:
+    self.set_state({"is_large": True})
 ```
 
 Works in statements. Not supported inside comprehensions or lambdas.
@@ -223,17 +223,19 @@ self.on(el, "click", self.handle)  # → this.on(el, "click", (...args) => this.
 
 ## `__init__` (Module only)
 
-Module `__init__` supports field assignments only:
+Module `__init__` can contain normal compilable statements. The main restriction is that `self.state` and `self.screen` are runtime-owned:
 
 ```python
 class MyModule(Module):
     def __init__(self, screen=None, state=None):
         super().__init__(screen=screen, state=state or {})
         self.draft = None
-        self.child = ChildModule()
+        self.config = {"mode": "compact"}
+        if state and state.get("expanded"):
+            self.open = True
 ```
 
-`super().__init__()` calls are stripped. Other statements raise an error.
+`super().__init__()` calls are stripped. Direct assignment to `self.state` or `self.screen` raises an error.
 
 ## `env()` — environment variables
 

@@ -21,18 +21,18 @@ class ImageQueue(QueueService):
         file_path = item["file_path"]
         resize_to = item.get("resize_to", (800, 600))
 
-        self.report_progress(percent=10, message="Loading image...")
+        self.report_progress(current=1, total=3, message="Loading image...")
         image = load_image(file_path)
 
         self.check_cancelled()  # Raises if cancelled
 
-        self.report_progress(percent=50, message="Resizing...")
+        self.report_progress(current=2, total=3, message="Resizing...")
         resized = resize(image, resize_to)
 
-        self.report_progress(percent=90, message="Saving...")
+        self.report_progress(current=3, total=3, message="Saving...")
         output_path = save(resized)
 
-        self.complete_job(result={"output": output_path})
+        return {"output": output_path}
 ```
 
 ## Register with the app
@@ -58,7 +58,7 @@ def upload_image(self, file_path):
         "file_path": file_path,
         "resize_to": (1200, 800),
     })
-    return {"job_id": result["job_id"], "accepted": result["accepted"]}
+    return result
 ```
 
 ## Progress and status
@@ -66,10 +66,9 @@ def upload_image(self, file_path):
 ### From the server
 
 ```python
-@action(schema=Schema("job_status", {"job_id": Field(str, required=True)}))
-def job_status(self, job_id):
-    status = self.job_status("image_processing", job_id)
-    return {"job": status}
+@action(name="job_status", schema=Schema("job_status", {"job_id": Field(str, required=True)}))
+def queue_status(self, job_id):
+    return self.job_status("image_processing", job_id)
 ```
 
 ### From the browser
@@ -83,17 +82,20 @@ class UploadModule(Module):
 
     def _on_job_update(self, data):
         if data.get("job_id") == self.state.get("job_id"):
-            self.call_action("job_status", {"job_id": data["job_id"]})
+            self.call_action("job_status", {"job_id": data["job_id"]}).then(self._on_status)
+
+    def _on_status(self, result):
+        self.set_state(result.value or {})
 ```
 
-The `sprag:queue.job.changed` signal fires automatically on every state transition (queued → running → complete/failed).
+The `sprag:queue.job.changed` signal fires automatically on state transitions such as `queued`, `running`, `cancelling`, `completed`, `failed`, and `cancelled`.
 
 ## Progress reporting
 
 Inside `handle_item()`:
 
 ```python
-self.report_progress(percent=50, message="Halfway there...")
+self.report_progress(current=5, total=10, message="Halfway there...")
 ```
 
 This updates the job's status and emits the `sprag:queue.job.changed` socket signal, so the browser can show live progress.
@@ -113,8 +115,7 @@ class UploadModule(Module):
 ```python
 @action(schema=Schema("cancel_job", {"job_id": Field(str, required=True)}))
 def cancel_job(self, job_id):
-    self.request_job_cancel("image_processing", job_id)
-    return {"cancelled": True}
+    return self.request_job_cancel("image_processing", job_id)
 ```
 
 ### Worker checks for cancellation
@@ -123,8 +124,8 @@ def cancel_job(self, job_id):
 def handle_item(self, item):
     for chunk in process_chunks(item):
         self.check_cancelled()  # Raises if cancel was requested
-        self.report_progress(percent=chunk.percent)
-    self.complete_job(result=chunk.result)
+        self.report_progress(current=chunk.index, total=chunk.total)
+    return chunk.result
 ```
 
 ## Queues vs deferred actions

@@ -49,7 +49,10 @@ class ContactModule(Module):
     def on_submit(self, event, target):
         event.prevent_default()
         data = self.form_data(event)  # {"name": "...", "email": "...", "message": "..."}
-        self.call_action("send_message", data)
+        self.call_action("send_message", data).then(self._on_submit_result)
+
+    def _on_submit_result(self, result):
+        self.set_state(result.value or {})
 ```
 
 `self.form_data(event)` reads all named inputs from the form and returns a plain dict.
@@ -75,7 +78,7 @@ def send_message(self, name, email, message):
     return {"sent": True, "errors": {}}
 ```
 
-The Module receives the state update with `errors`, and the Component re-renders to show them inline.
+The action result can carry `errors`, and the Module should copy `result.value` into local state so the Component can re-render with those messages.
 
 ## Error normalisation
 
@@ -87,10 +90,17 @@ from sprag import Module
 class ContactModule(Module):
     def on_submit(self, event, target):
         event.prevent_default()
-        try:
-            result = self.call_action("send_message", self.form_data(event))
-        except Exception as e:
-            self.set_state({"error": self.action_error_message(e)})
+        (
+            self.call_action("send_message", self.form_data(event))
+            .then(self._on_submit_result)
+            .catch(self._on_submit_error)
+        )
+
+    def _on_submit_result(self, result):
+        self.set_state(result.value or {})
+
+    def _on_submit_error(self, error):
+        self.set_state({"error": self.action_error_message(error)})
 ```
 
 ## Debounced autosave

@@ -18,7 +18,7 @@ counter_store = store("counter", initial={"count": 0})
 
 This single declaration works in both runtimes:
 
-- **Server**: backed by a Specter `Model` — persistent, shared across requests
+- **Server**: backed by a Specter `Model`
 - **Browser**: compiled to a Ragot `createStateStore` shim via `stores.js` — reactive, local to the tab
 
 ## API
@@ -27,20 +27,27 @@ The full store API is identical on both sides:
 
 ```python
 # Read
-value = counter_store.get("count")       # Single key
-state = counter_store.get_state()         # Full state dict
+value = counter_store.get("count")      # Single path/key
+state = counter_store.get_state()       # Full state snapshot
+snap = counter_store.snapshot()         # Deep snapshot
 
 # Write
-counter_store.set("count", 42)            # Set single key
-counter_store.patch({"count": 99})        # Merge partial state
-counter_store.update("count", lambda v: v + 1)  # Transform a value
-counter_store.delete("count")             # Remove a key
+counter_store.set("count", 42)           # Set a path/key
+counter_store.patch({"count": 99})       # Root-level merge
+counter_store.delete("count")            # Remove a path/key
+
+def bump(state):
+    state["count"] = state.get("count", 0) + 1
+
+counter_store.update(bump)               # Atomic mutator
+counter_store.reset()                    # Reset to declared initial state
 
 # Subscribe to changes
-counter_store.subscribe(lambda state, meta, store: print(state))
+counter_store.subscribe(lambda state: print(state), immediate=True)
+counter_store.listen("count", lambda value: print(value))
 
 # Select a derived value
-counter_store.select("count", lambda count: count * 2)
+double = counter_store.select(lambda s: s.get("count", 0) * 2, default=0)
 ```
 
 ## Server-side usage
@@ -56,7 +63,7 @@ class CounterService(Service):
     def on_start(self):
         counter_store.subscribe(self._on_change)
 
-    def _on_change(self, state, meta, s):
+    def _on_change(self, state):
         if state["count"] > 100:
             self.emit("counter:overflow", state)
 ```
@@ -74,7 +81,7 @@ class CounterModule(Module):
     def on_start(self):
         self.subscribe(counter_store, self._on_store)
 
-    def _on_store(self, state, meta, s):
+    def _on_store(self, state):
         self.set_state({"count": state["count"]})
 ```
 
@@ -82,7 +89,7 @@ class CounterModule(Module):
 
 ## When to use stores
 
-**Use `store()`** for state that needs to be shared across routes or between multiple components/modules in the same page. Stores persist across navigations on the server and are reactive on the browser.
+**Use `store()`** for state that needs to be shared across routes or between multiple components/modules in the same page. It gives you one authoring surface backed by Specter on the server and a generated store shim in the browser.
 
 **Use controller state** (the dict from `load()`) for per-page state that lives within a single route. This is simpler and covers most cases.
 

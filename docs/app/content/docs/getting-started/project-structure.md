@@ -38,15 +38,16 @@ Each route lives in its own directory under `app/routes/`. The directory name be
 | `components.py` | Browser | Component classes — own DOM subtrees, produce `ui.*` trees |
 | `modules.py` | Browser | Module classes — own logic, events, sockets, server calls |
 
-Not every file is required. A `document` mode route doesn't need `components.py` or `modules.py` since there's no browser hydration. A simple page might not need a Module.
+Not every file is required. A `document` mode route can still render fine without browser-owned Components/Modules. A simple page might not need a Module.
 
 ## Route modes
 
 Set the mode in `page.py`:
 
-- **`document`** — Pure server-side rendering. No JavaScript sent. Use for content pages that don't need interactivity.
+- **`document`** — Server-first rendering. Use for content pages that don't need browser-owned Module logic.
 - **`hybrid`** — SSR for the first paint, then the browser hydrates with JavaScript. The best of both worlds — fast initial load with full interactivity. This is the default.
-- **`spa`** — Full single-page app mount. No SSR body. Use when the page is entirely browser-driven.
+
+For a browser-owned client app, use `mount(...)` under `app/mounts/` instead of a page route.
 
 ## The shell
 
@@ -114,5 +115,5 @@ app = App(routes="app.routes", shell=app_shell)
 | `sprag inspect /path` | Show compiled JS output for a route |
 | `sprag doctor` | Structural diagnostics |
 | `sprag add route <name>` | Scaffold a new route |
-| `sprag add mount <name>` | Scaffold a new SPA mount |
+| `sprag add mount <name>` | Scaffold a new mount |
 | `sprag add content <name>` | Scaffold a new content collection |

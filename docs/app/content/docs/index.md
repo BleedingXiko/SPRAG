@@ -10,7 +10,7 @@ SPRAG is a full-stack Python web framework. You write Python for everything — 
 
 ## The pitch
 
-1. **One language.** Define server controllers and browser components in the same Python file. No context switching, no separate build chain.
+1. **One language.** Define server controllers, browser components, modules, and shared stores in one Python codebase. No context switching, no separate frontend stack.
 2. **Two runtimes.** Server classes run as Python under Specter. Browser classes (`Component`, `Module`) compile to Ragot ESM JavaScript at `sprag build` time.
 3. **Zero JS to write.** UI factories (`ui.div`, `ui.button`, ...), event handling, state management, sockets, uploads — all authored in Python and compiled for you.
 

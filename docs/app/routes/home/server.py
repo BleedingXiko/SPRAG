@@ -41,7 +41,7 @@ class HomeController(Controller):
                 {
                     "icon": "06",
                     "title": "SSR + Hydration Modes",
-                    "description": "Choose document mode for pure SSR, hybrid for SSR plus hydration, or spa for full client rendering per route.",
+                    "description": "Choose document mode for pure SSR or hybrid for SSR plus hydration. Use mounts for browser-owned client apps.",
                 },
             ],
             "sections": slim_nav_sections(sections),

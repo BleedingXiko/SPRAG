@@ -83,7 +83,7 @@ Some fields have no place in a browser payload regardless of size:
 
 ## `document` mode pages
 
-In `document` mode there is no JavaScript hydration — the payload is not consumed by the browser at all. Despite this, SPRAG still emits it (for consistency with hybrid mode and for potential client-side navigation). Keeping it lean still matters for page weight, but you can be confident none of it runs in the browser.
+`document` routes still emit the standard `window.__SPRAG_PAYLOAD__` and boot script tags. In practice these pages are usually server-first and avoid browser-owned Module logic, but payload size still matters for HTML weight and transfer time.
 
 ## General rules
 

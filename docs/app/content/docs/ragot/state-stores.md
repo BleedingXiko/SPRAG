@@ -1,14 +1,14 @@
 ---
 title: State Stores
-description: Deep dive into createStateStore — selectors, actions, and cross-component shared state.
+description: Deep dive into createStateStore — browser-side shared state and selectors.
 order: 34
 ---
 
 # State Stores
 
-Use a state store when you need to share mutable state across multiple independent modules or components. While local `Module` state is perfect for feature-local orchestration, `createStateStore` provides a robust primitive for app-wide synchronisation.
+Use a state store when you need to share mutable state across multiple independent modules or components. While local `Module` state is perfect for feature-local orchestration, `createStateStore` provides a browser-side primitive for app-wide synchronization.
 
-> **`store()` vs `createStateStore`**: `store()` is the cross-runtime bridge — one declaration works on both server and browser. `createStateStore` is the browser-only Ragot primitive for SPA/mount use cases where no server-side state exists.
+> **`store()` vs `createStateStore`**: `store()` is the cross-runtime SPRAG bridge (server + browser). `createStateStore` is browser-only.
 
 ## Creating a Store
 
@@ -35,7 +35,7 @@ volume = player_store.get("volume")
 name = player_store.get("user.name", "Anonymous")
 ```
 
-Writes support shallow merging, dot-path setting, atomic batches, and conditional set:
+Writes support shallow merging, path setting, atomic batches, and conditional set:
 
 ```python
 # Shallow merge (alias: patch)
@@ -45,7 +45,7 @@ player_store.set_state({"is_playing": True})
 player_store.set("volume", 1.0)
 
 # Atomic batch — all mutations fire exactly one subscriber notification
-def update_player(state, store):
+def update_player(state):
     state["is_playing"] = True
     state["volume"] = 0.5
 
@@ -57,7 +57,7 @@ player_store.compare_and_set("volume", 0.5, 0.8)
 
 ## Actions
 
-Encapsulate state transitions into named actions for better maintainability:
+Register named actions when you want reusable store-local transitions:
 
 ```python
 player_store.register_actions({
@@ -66,17 +66,13 @@ player_store.register_actions({
     "seek": lambda store, time: store.set("position", time),
 })
 
-# Dispatch from anywhere
 player_store.dispatch("play")
 player_store.dispatch("seek", 120.5)
-
-# Direct access to bound action functions
-player_store.actions.increment()
 ```
 
 ## Subscriptions and Selectors
 
-Subscribe to changes to react in your modules. Use **selectors** to avoid unnecessary work — the callback only fires when the selected slice changes.
+Subscribe to changes to react in your modules. Use selectors to narrow updates.
 
 ```python
 class PlayerModule(Module):
@@ -99,20 +95,15 @@ class PlayerModule(Module):
         self.component.set_state({"v": volume})
 ```
 
-### Subscriber Signatures
-
-| Subscription Mode | Callback Arguments |
-|---|---|
-| No selector | `(state_proxy, change_meta, store)` |
-| With selector | `(slice, change_meta, store, prev_slice)` |
+You can ignore trailing callback arguments if you do not need them.
 
 ### Subscribe Options
 
 | Option | Default | Description |
 |---|---|---|
-| `selector` | `None` | Function `(state) -> slice`. Callback only fires when slice changes. |
-| `equals` | `Object.is` | Custom equality function for the selected slice. |
-| `immediate` | `False` | If true, fires the subscriber immediately with current state. |
+| `selector` | `None` | Path/selector used to narrow updates |
+| `equals` | runtime default | Optional equality function for selector updates |
+| `immediate` | `False` | If true, fires the subscriber immediately |
 
 ## Memoised Selectors
 
@@ -134,17 +125,25 @@ player_store.subscribe(on_change, {"selector": select_visible})
 
 | Method | Description |
 |---|---|
-| `get_state()` | Returns the proxied mutable state |
-| `get(path, fallback)` | Dot-path read |
-| `set(path, value)` | Dot-path write |
-| `set_state(partial)` | Shallow merge (alias: `patch`) |
-| `batch(mutator)` | Grouped mutations, one notification |
-| `compare_and_set(path, expected, next)` | Conditional write — only if current equals expected |
-| `subscribe(listener, options)` | Subscribe to changes; returns unsubscribe function |
-| `register_actions(definitions)` | Register named action functions |
-| `dispatch(name, *args)` | Call a registered action by name |
-| `actions` | Direct access to bound action functions |
-| `list_actions()` | Returns list of registered action names |
-| `create_selector(inputs, fn)` | Create a memoised selector scoped to this store |
-| `get_version()` | Current change version counter |
-| `get_last_change()` | Last change metadata |
+| `get_state()` | Returns the current store state |
+| `get(path, fallback)` | Reads a path or key with an optional fallback |
+| `set(path, value)` | Writes a path or key |
+| `set_state(partial)` | Shallow merge of root state |
+| `patch(partial)` | Alias for `set_state(partial)` |
+| `batch(mutator)` | Groups multiple mutations into one notification cycle |
+| `compare_and_set(path, expected, next)` | Writes only if the current value matches `expected` |
+| `subscribe(listener, options)` | Subscribes to store changes and returns an unsubscribe function |
+| `register_actions(definitions)` | Registers named action functions on the store |
+| `dispatch(name, *args)` | Invokes a registered action by name |
+| `create_selector(inputs, fn)` | Builds a memoized selector from input selectors |
+
+## Raw Ragot extras
+
+The shipped Ragot runtime also exposes a few lower-level helpers beyond the SPRAG browser stub surface:
+
+| Method | Description |
+|---|---|
+| `actions` | Object containing the registered action callables |
+| `list_actions()` | Returns registered action names |
+| `get_version()` | Returns the current store version counter |
+| `get_last_change()` | Returns the last emitted change metadata |
