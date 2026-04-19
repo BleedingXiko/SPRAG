@@ -136,7 +136,7 @@ Merge order: **app metadata → page metadata → `__sprag_meta__`** (last wins)
 
 - **`hybrid`** — SSR first, then hydrate. The server renders the initial HTML for a fast first paint, then the browser loads JavaScript to make it interactive. This is the default and the right choice for most pages.
 
-- **`spa`** — No SSR body. The server sends a shell, and the browser mounts everything. Use when the page content is entirely dynamic (dashboards, editors, etc.).
+- **`mount`** — No SSR body. The server sends a shell, and the browser mounts everything. Use when the page content is entirely dynamic (dashboards, editors, etc.).
 
 ## Dynamic routes
 
