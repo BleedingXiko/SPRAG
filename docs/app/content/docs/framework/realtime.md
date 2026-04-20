@@ -8,6 +8,16 @@ order: 16
 
 SPRAG's realtime layer connects server events to browser handlers over WebSockets. The design follows a simple principle: **signal then refetch**.
 
+## Prerequisites
+
+WebSocket server mode requires `gevent-websocket`. If you installed SPRAG with `pip install spragkit`, install it manually:
+
+```bash
+pip install gevent-websocket
+```
+
+When `server_mode="websocket"` is detected, `sprag build` already adds `gevent-websocket` to `dist/requirements.txt` for production bundles.
+
 ## The pattern
 
 Instead of pushing full state snapshots over the socket, the server emits a lightweight signal. The browser receives it and calls a server action to fetch authoritative data:

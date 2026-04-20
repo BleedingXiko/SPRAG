@@ -122,6 +122,23 @@ class UnsupportedAnnotatedComponent(Component):
         return ui.div(str(count))
 
 
+class HelperMountPointComponent(Component):
+    def render(self, props=None):
+        return ui.div(self._items())
+
+    def _items(self):
+        return ui.For(
+            self.state.get("items", []),
+            key=lambda item: item["id"],
+            render=lambda item: ui.div(item["label"]),
+        )
+
+
+class SubscriptAssignmentModule(Module):
+    def on_start(self):
+        self.state["count"] = 1
+
+
 class CodegenDiagnosticsTests(unittest.TestCase):
     def test_compile_component_success_regression(self):
         compiled = compile_component_class(SupportedComponent)
@@ -268,6 +285,24 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("UnsupportedAnnotatedComponent.render", message)
         self.assertIn("count: int = 1", message)
         self.assertIn("Hint: Use a plain assignment inside browser methods", message)
+
+    def test_mount_point_diagnostic_includes_context_and_render_guidance(self):
+        with self.assertRaises(JSCodegenError) as ctx:
+            compile_component_class(HelperMountPointComponent)
+        message = str(ctx.exception)
+        self.assertIn("ui.For(...) is only valid inside a Component.render() body.", message)
+        self.assertIn("HelperMountPointComponent._items", message)
+        self.assertIn("return ui.For(", message)
+        self.assertIn("Move the ui.For(...) call directly into render().", message)
+
+    def test_subscript_assignment_diagnostic_includes_patch_guidance(self):
+        with self.assertRaises(JSCodegenError) as ctx:
+            compile_module_class(SubscriptAssignmentModule)
+        message = str(ctx.exception)
+        self.assertIn("Unsupported assignment target in browser codegen: Subscript.", message)
+        self.assertIn("SubscriptAssignmentModule.on_start", message)
+        self.assertIn('self.state["count"] = 1', message)
+        self.assertIn("Use self.set_state({...}) or self.patch({...}) instead.", message)
 
 _BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 

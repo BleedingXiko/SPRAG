@@ -347,6 +347,10 @@ def _lint_assign_target(node, *, source, source_file, class_name, method_name, l
         class_name=class_name,
         method_name=method_name,
         line_offset=line_offset,
+        suggestion=(
+            "Browser state is immutable from the component's perspective — subscript assignment does not trigger "
+            "re-render. Use self.set_state({...}) or self.patch({...}) instead."
+        ) if isinstance(node, ast.Subscript) else None,
     )
 
 

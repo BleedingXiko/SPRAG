@@ -265,6 +265,8 @@ These Python constructs will raise `JSCodegenError` at compile time:
 | Bitwise ops (except `\|`) | Not supported |
 | Multi-generator comprehensions | Use nested loops |
 | `isinstance()` checks | Not supported in browser code |
+| Subscript assignment: `self.state["k"] = v` | Use `self.set_state({...})` or `self.patch({...})` |
+| `ui.For()` / `ui.Grid()` / `ui.LazyImage()` outside `render()` | Move the call directly into `render()` — helper methods aren't scanned for mount-point wiring |
 
 Every error includes the source file, class name, line number, and a suggestion.
 

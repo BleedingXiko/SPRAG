@@ -171,6 +171,10 @@ def blog_static_paths():
     return [{"slug": "first-post"}, {"slug": "second-post"}]
 ```
 
+### When to use a content collection instead
+
+If the route is markdown-backed content that you want SPRAG to discover and expand into static paths automatically, use a content collection instead of hand-rolling a dynamic `[slug]` route. Content collections scaffold the route pair, markdown tree, and `static_paths` wiring for you. See [Content Collections](/docs/framework/content-collections).
+
 ## Scaffolding
 
 ```bash
@@ -179,7 +183,12 @@ sprag add route dashboard --mode hybrid
 
 # Add a document-mode route
 sprag add route about --mode document
+
+# Add a markdown-backed content collection
+sprag add content guides
 ```
+
+`sprag add content <name>` scaffolds a document-mode collection index, a catch-all article route, starter markdown content, and shared `content_static_paths()` helpers.
 
 ## Listing routes
 

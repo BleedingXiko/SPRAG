@@ -82,6 +82,7 @@ def _build_parser():
             )
         if name == "dev":
             sub.add_argument("--port", type=int, default=8000)
+            sub.add_argument("--host", default="127.0.0.1")
             sub.add_argument("--interval", type=float, default=1.0)
             sub.add_argument(
                 "--server-mode",
@@ -341,8 +342,8 @@ def _print_payload_warnings(payload_warnings):
 
 def cmd_build(args):
     app_target, app = _load_cli_app(args)
-    project_root = Path(args.project_root)
-    output_dir = Path(args.output)
+    project_root = Path(args.project_root).resolve()
+    output_dir = _resolve_cli_path(args.output, project_root)
 
     if getattr(args, "mode", None) == "static":
         result = build_static_site(
@@ -372,15 +373,16 @@ def cmd_dev(args):
     _configure_runtime_logging()
     app_target, app = _load_cli_app(args)
     setattr(app, "_sprag_dev_reload", True)
-    output_dir = Path(args.output)
+    project_root = Path(args.project_root).resolve()
+    output_dir = _resolve_cli_path(args.output, project_root)
     _build_once(app, output_dir)
     resolved_server_mode = resolve_server_mode(app, args.server_mode)
-    base_url = f"http://127.0.0.1:{args.port}"
+    base_url = f"http://{args.host}:{args.port}"
 
     stop_event = threading.Event()
     watcher = threading.Thread(
         target=_watch_loop,
-        args=(app, output_dir, Path(args.project_root), args.interval, stop_event),
+        args=(app, output_dir, project_root, args.interval, stop_event),
         daemon=True,
     )
     watcher.start()
@@ -416,7 +418,7 @@ def cmd_dev(args):
         serve_sprag_app(
             app,
             output_dir,
-            host="127.0.0.1",
+            host=args.host,
             port=args.port,
             banner=banner,
             server_mode=args.server_mode,
@@ -709,7 +711,7 @@ def cmd_inspect(args):
     from ..runtime.routing import match_page_route, normalize_route_path
 
     app_target, app = _load_cli_app(args)
-    output_dir = Path(args.output)
+    output_dir = _resolve_cli_path(args.output, Path(args.project_root).resolve())
     manifest_path = output_dir / "manifest.json"
     built_fresh = False
 
@@ -781,6 +783,13 @@ def _load_cli_app(args):
         sys.path.insert(0, project_root)
     app_target, app = load_app(args.app_target)
     return app_target, app
+
+
+def _resolve_cli_path(path_value, project_root: Path) -> Path:
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return project_root / path
 
 
 def _build_once(app, output_dir):

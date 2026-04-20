@@ -105,15 +105,4 @@ app = App(routes="app.routes", shell=app_shell)
 
 ## CLI commands
 
-| Command | What it does |
-|---|---|
-| `sprag dev` | Dev server with file watching and hot rebuild |
-| `sprag build` | Build full dist bundle into `dist/` (server + assets) |
-| `sprag build static` | Build a pure SSG static site into `dist/` (no server code) |
-| `sprag pack` | Production optimization of `dist/` |
-| `sprag routes` | List all discovered routes and actions |
-| `sprag inspect /path` | Show compiled JS output for a route |
-| `sprag doctor` | Structural diagnostics |
-| `sprag add route <name>` | Scaffold a new route |
-| `sprag add mount <name>` | Scaffold a new mount |
-| `sprag add content <name>` | Scaffold a new content collection |
+For the full command surface, flags, and examples, see the [CLI Reference](/docs/reference/cli).

@@ -166,8 +166,14 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
     env_helper_refs = collect_env_helper_refs_for_class(module_class)
     declared_import_aliases = set(declared_import_aliases or ())
 
-    def _seed_env() -> dict:
-        env = {}
+    def _seed_env(*, source=None, source_file=None, method_name=None, line_offset=0) -> dict:
+        env = {
+            "__sprag_source": source or "",
+            "__sprag_source_file": source_file,
+            "__sprag_class_name": module_class.__name__,
+            "__sprag_method_name": method_name,
+            "__sprag_line_offset": line_offset,
+        }
         if store_refs:
             env["__sprag_stores__"] = store_refs
         if browser_class_refs:
@@ -232,7 +238,12 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
             body, body_mappings = _compile_statements_with_mappings(
                 function_def.body,
                 method_names=method_names,
-                env=_seed_env(),
+                env=_seed_env(
+                    source=source,
+                    source_file=source_file,
+                    method_name=name,
+                    line_offset=source_start_line,
+                ),
                 source_line_offset=source_start_line - 1,
                 source_name=name,
             )
@@ -660,6 +671,15 @@ def _compile_constructor_extras(module_class, *, method_names, env) -> tuple[str
         return "", []
     constructor_env = dict(env)
     constructor_env.setdefault("state", "initialState")
+    constructor_env.update(
+        {
+            "__sprag_source": source,
+            "__sprag_source_file": source_file,
+            "__sprag_class_name": module_class.__name__,
+            "__sprag_method_name": "__init__",
+            "__sprag_line_offset": source_start_line,
+        }
+    )
     return _compile_statements_with_mappings(
         statements,
         method_names=method_names,

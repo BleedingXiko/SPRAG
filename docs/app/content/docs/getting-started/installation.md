@@ -17,6 +17,16 @@ order: 1
 pip install spragkit
 ```
 
+### Optional: websocket mode
+
+If you plan to use SPRAG's realtime layer in development, also install:
+
+```bash
+pip install gevent-websocket
+```
+
+Production `sprag build` bundles handle this dependency for you when the app runs in websocket mode.
+
 Or install from source during pre-alpha:
 
 ```bash

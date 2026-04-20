@@ -12,6 +12,7 @@ import json
 
 from ...runtime.attrs import normalize_attr_key
 from ...runtime.stores import STORE_METHOD_JS, STORE_METHODS_OPTIONS_KWARGS
+from .diagnostics import _raise
 from .mappings import (
     JSCodegenError,
     _DOM_METHOD_MAP,
@@ -524,8 +525,18 @@ def _compile_ui_call(node, env, *, method_names=None):
     if tag in _PRIMITIVE_TAGS:
         ctx = env.get("__sprag_mounts__")
         if ctx is None:
-            raise JSCodegenError(
-                f"ui.{tag}(...) is only valid inside a Component.render() body."
+            _raise(
+                f"ui.{tag}(...) is only valid inside a Component.render() body.",
+                node,
+                source=env.get("__sprag_source", ""),
+                source_file=env.get("__sprag_source_file"),
+                class_name=env.get("__sprag_class_name"),
+                method_name=env.get("__sprag_method_name"),
+                line_offset=env.get("__sprag_line_offset", 0),
+                suggestion=(
+                    f"Move the ui.{tag}(...) call directly into render(). It declares a Ragot mount point "
+                    "and must appear in the render tree — helper methods aren't scanned for mount-point wiring."
+                ),
             )
         mount_index = len(ctx)
         # Store the raw AST nodes -- compile_component_class will re-compile

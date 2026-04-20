@@ -85,7 +85,15 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
     # an entry to the list and returns a placeholder createElement. After
     # render() compiles, this list drives the synthesised onStart prologue.
     mounts: list[dict] = []
-    render_env: dict = {"props": "props", "__sprag_mounts__": mounts}
+    render_env: dict = {
+        "props": "props",
+        "__sprag_mounts__": mounts,
+        "__sprag_source": render_source,
+        "__sprag_source_file": render_file,
+        "__sprag_class_name": component_class.__name__,
+        "__sprag_method_name": "render",
+        "__sprag_line_offset": render_start_line,
+    }
     if store_refs:
         render_env["__sprag_stores__"] = store_refs
     if browser_class_refs:
@@ -95,8 +103,14 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
     if env_helper_refs:
         render_env["__sprag_env_helpers__"] = env_helper_refs
 
-    def _seed_env() -> dict:
-        env = {}
+    def _seed_env(*, source=None, source_file=None, method_name=None, line_offset=0) -> dict:
+        env = {
+            "__sprag_source": source or "",
+            "__sprag_source_file": source_file,
+            "__sprag_class_name": component_class.__name__,
+            "__sprag_method_name": method_name,
+            "__sprag_line_offset": line_offset,
+        }
         if store_refs:
             env["__sprag_stores__"] = store_refs
         if browser_class_refs:
@@ -221,11 +235,16 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
             try:
                 body, body_mappings = _compile_statements_with_mappings(
                     fn_ast.body,
-                    method_names=method_names,
-                    env=_seed_env(),
-                    source_line_offset=source_start_line - 1,
-                    source_name=py_name,
-                )
+                method_names=method_names,
+                env=_seed_env(
+                    source=source,
+                    source_file=source_file,
+                    method_name=py_name,
+                    line_offset=source_start_line,
+                ),
+                source_line_offset=source_start_line - 1,
+                source_name=py_name,
+            )
             except JSCodegenError as exc:
                 raise exc.with_context(
                     source_file=source_file,
@@ -292,7 +311,12 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
             body, body_mappings = _compile_statements_with_mappings(
                 fn_ast.body,
                 method_names=method_names,
-                env=_seed_env(),
+                env=_seed_env(
+                    source=source,
+                    source_file=source_file,
+                    method_name=name,
+                    line_offset=source_start_line,
+                ),
                 source_line_offset=source_start_line - 1,
                 source_name=name,
             )
