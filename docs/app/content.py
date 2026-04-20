@@ -6,11 +6,12 @@ from sprag import load_markdown_tree
 
 CONTENT_ROOT = Path(__file__).resolve().parent / "content"
 
-SECTION_ORDER = ["", "getting-started", "framework", "specter", "ragot", "guides"]
+SECTION_ORDER = ["", "getting-started", "framework", "reference", "specter", "ragot", "guides"]
 SECTION_LABELS = {
     "": "Overview",
     "getting-started": "Getting Started",
     "framework": "Framework",
+    "reference": "Reference",
     "specter": "Specter",
     "ragot": "Ragot",
     "guides": "Guides",

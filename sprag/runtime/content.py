@@ -32,9 +32,9 @@ class ContentDocument:
     def order(self) -> int:
         value = self.metadata.get("order", 9999)
         try:
-            return int(value)
+            return float(value)
         except (TypeError, ValueError):
-            return 9999
+            return 9999.0
 
 
 def load_markdown_document(path, *, url_path=None, slug=None, path_parts=None) -> ContentDocument:
@@ -106,6 +106,10 @@ def render_markdown(markdown_text: str) -> str:
             blocks.append(
                 f"<pre><code{class_attr}>{html.escape(chr(10).join(code_lines))}</code></pre>"
             )
+            continue
+        if _is_table_start(lines, index):
+            table_html, index = _render_table(lines, index)
+            blocks.append(table_html)
             continue
         if stripped.startswith("#"):
             level = min(len(stripped) - len(stripped.lstrip("#")), 6)
@@ -187,7 +191,51 @@ def _parse_frontmatter_value(raw_value: str):
         return int(raw_value)
     except ValueError:
         pass
+    try:
+        return float(raw_value)
+    except ValueError:
+        pass
     return raw_value
+
+
+def _is_table_start(lines: list[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    header = lines[index].strip()
+    separator = lines[index + 1].strip()
+    if "|" not in header or "|" not in separator:
+        return False
+    separator_cells = [cell.strip() for cell in separator.strip("|").split("|")]
+    if not separator_cells or any(not cell for cell in separator_cells):
+        return False
+    return all(re.fullmatch(r":?-{3,}:?", cell) for cell in separator_cells)
+
+
+def _render_table(lines: list[str], index: int) -> tuple[str, int]:
+    header_cells = _split_table_row(lines[index])
+    index += 2  # header + separator
+    body_rows = []
+    while index < len(lines):
+        current = lines[index].strip()
+        if not current or "|" not in current:
+            break
+        body_rows.append(_split_table_row(lines[index]))
+        index += 1
+
+    header_html = "".join(f"<th>{_render_inline(cell)}</th>" for cell in header_cells)
+    body_html = "".join(
+        "<tr>" + "".join(f"<td>{_render_inline(cell)}</td>" for cell in row) + "</tr>"
+        for row in body_rows
+    )
+    table = f"<table><thead><tr>{header_html}</tr></thead>"
+    if body_rows:
+        table += f"<tbody>{body_html}</tbody>"
+    table += "</table>"
+    return table, index
+
+
+def _split_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
 def _extract_excerpt(markdown_text: str) -> str:
