@@ -1,0 +1,8 @@
+from sprag import Controller
+
+
+class ProviderDemoController(Controller):
+    route = "/provider-demo"
+
+    def load(self):
+        return {"message": "Waiting for provider"}

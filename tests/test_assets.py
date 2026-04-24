@@ -5,15 +5,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sprag import Component, Controller, Screen, module, mount, page, script, ui
-from sprag.dev.codegen import build_browser_entry
+import sprag
+from sprag import Component, Module, Screen, module, mount, page, script, ui
+from sprag.dev.codegen import build_browser_entry, compile_module_class
 from sprag.dev.codegen.emit import emit_stores_shim
 from sprag.dev.build import build_web_preview
 from sprag.runtime.rendering import render_mount
 from sprag.runtime.stores import StoreBridge
 
 
-class AssetController(Controller):
+class AssetController(sprag.Controller):
     route = "/docs/nested"
 
     def load(self):
@@ -28,6 +29,11 @@ class AssetScreen(Screen):
 class AssetRootComponent(Component):
     def render(self, props=None):
         return ui.div("Mount asset test")
+
+
+class AssetProviderConsumer(Module):
+    def on_start(self):
+        self.surface_provider = self.provider("surfaceProvider")
 
 
 class DummyApp:
@@ -339,6 +345,13 @@ class AssetContractTests(unittest.TestCase):
         self.assertIn("startSurfaceBoot({", browser_entry)
         self.assertNotIn("async function resolveSurfaceImports", browser_entry)
         self.assertNotIn("data-sprag-boot-error", browser_entry)
+
+    def test_compile_module_emits_browser_provider_helper(self):
+        compiled = compile_module_class(AssetProviderConsumer)
+        self.assertIn("Module, ragotRegistry", compiled)
+        self.assertIn("provider(name)", compiled)
+        self.assertIn("return ragotRegistry.require(name);", compiled)
+        self.assertIn('this.surfaceProvider = this.provider("surfaceProvider");', compiled)
 
 
 if __name__ == "__main__":

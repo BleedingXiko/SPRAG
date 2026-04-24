@@ -417,6 +417,10 @@ class Module:
         """Build a memoised derived value over store dependencies."""
         _browser_only("Module.create_selector")
 
+    def provider(self, name):
+        """Resolve a named page/mount browser provider from Ragot's registry."""
+        _browser_only("Module.provider")
+
     # -- Server push --------------------------------------------------------
     def on_socket(self, event, fn):
         """Subscribe to a socket event from the server."""

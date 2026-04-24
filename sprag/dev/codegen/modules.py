@@ -326,7 +326,7 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
     method_code = [chunk for chunk, _, _, _ in method_chunks]
     methods_block = "\n\n".join(method_code) if method_code else "    onStart() {}\n"
     extra_imports = _detect_ragot_imports(methods_block)
-    base_imports = "Module"
+    base_imports = "Module, ragotRegistry"
     if extra_imports:
         base_imports += ", " + ", ".join(sorted(extra_imports))
 
@@ -468,6 +468,9 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
         "            return false;\n"
         "        }\n"
         "        return socket.leaveTopic(topic);\n"
+        "    }\n\n"
+        "    provider(name) {\n"
+        "        return ragotRegistry.require(name);\n"
         "    }\n\n"
         "    callAction(name, payload = {}) {\n"
         "        if (!this.actions || typeof this.actions.call !== 'function') {\n"

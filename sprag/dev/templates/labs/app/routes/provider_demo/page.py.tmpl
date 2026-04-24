@@ -1,0 +1,15 @@
+from sprag import page
+
+from .modules import LabRuntimeProvider
+from .server import ProviderDemoController
+from .web import ProviderDemoScreen
+
+
+provider_demo = page(
+    path="/provider-demo",
+    controller=ProviderDemoController,
+    screen=ProviderDemoScreen,
+    mode="hybrid",
+    metadata={"title": "Provider Demo — SPRAG Labs"},
+    providers={"labRuntime": LabRuntimeProvider},
+)

@@ -1,0 +1,24 @@
+from sprag import Screen, hydrate, ui
+
+from .components import ProviderDemoCard
+from .modules import ProviderDemoModule
+
+
+class ProviderDemoScreen(Screen):
+    modules = [ProviderDemoModule]
+
+    def render(self, data):
+        module = self.module(ProviderDemoModule)
+        module.set_state({"message": data["message"]})
+        return ui.div(
+            ui.section(
+                ui.span("page.providers", class_="badge"),
+                ui.h1("Provider Demo"),
+                ui.p(
+                    "A page-scoped browser provider is started before "
+                    "hydration, then resolved by the hydrated Module."
+                ),
+                class_="hero",
+            ),
+            hydrate(ProviderDemoCard, module=module),
+        )

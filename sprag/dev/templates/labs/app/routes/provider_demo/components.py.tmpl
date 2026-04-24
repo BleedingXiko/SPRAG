@@ -1,0 +1,19 @@
+from sprag import Component, ui
+
+
+class ProviderDemoCard(Component):
+    def render(self, props=None):
+        message = self.state.get("message", "Waiting for provider")
+        return ui.div(
+            ui.h2("Browser Provider"),
+            ui.p(
+                "The page starts a provider Module, then this hydrated Module "
+                "resolves it with self.provider(...)."
+            ),
+            ui.div(message, class_="demo-display"),
+            ui.div(
+                ui.button("Read provider", type="button", class_="btn", data_role="read-provider"),
+                style="text-align:center;",
+            ),
+            class_="demo-card",
+        )
