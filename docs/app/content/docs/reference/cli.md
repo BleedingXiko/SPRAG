@@ -37,11 +37,12 @@ Build a local preview, watch the project for changes, and start the dev server.
 **Usage**
 
 ```bash
-sprag dev [--port 8000] [--host 127.0.0.1] [--interval 1.0] [--server-mode wsgi|websocket]
+sprag dev [static] [--port 8000] [--host 127.0.0.1] [--interval 1.0] [--server-mode wsgi|websocket]
 ```
 
 **Flags**
 
+- `static` — optional mode that builds and serves a pure static site preview
 - `--port` — port to bind
 - `--host` — host/interface to bind
 - `--interval` — file-watch polling interval in seconds
@@ -54,9 +55,12 @@ sprag dev [--port 8000] [--host 127.0.0.1] [--interval 1.0] [--server-mode wsgi|
 
 ```bash
 sprag dev --host 0.0.0.0 --port 9000 --server-mode websocket
+sprag dev static --port 9000
 ```
 
 If you use websocket mode from a `spragkit` install, also install `gevent-websocket`.
+
+`sprag dev static` serves only the generated static files, matching hosts such as GitHub Pages. It does not expose SPRAG action, websocket, or dev reload endpoints.
 
 ## `sprag build`
 

@@ -34,6 +34,7 @@ class DummyApp:
     def __init__(self, project_root):
         self.project_root = str(project_root)
         self._sprag_dev_reload = False
+        self._sprag_static_build = False
         self.server_mode = "auto"
 
 
@@ -298,6 +299,38 @@ class AssetContractTests(unittest.TestCase):
             self.assertIn("type: 'topic'", socket_runtime)
             self.assertIn("encodeTopicMessage('join', topic)", socket_runtime)
             self.assertIn("encodeTopicMessage('leave', normalized)", socket_runtime)
+
+            surface_root_runtime = (root / "dist" / "runtime" / "surface_root.js").read_text(encoding="utf-8")
+            self.assertIn("!this.surface.static", surface_root_runtime)
+            self.assertIn("this.surface.dev_reload", surface_root_runtime)
+            self.assertIn("typeof window.EventSource === 'function'", surface_root_runtime)
+
+    def test_static_build_marks_surfaces_static_and_disables_socket_bridge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = DummyApp(root)
+            app._sprag_static_build = True
+
+            build_web_preview(
+                [
+                    (
+                        "app.routes.docs.page",
+                        page(
+                            path="/docs",
+                            controller=AssetController,
+                            screen=AssetScreen,
+                            mode="document",
+                        ),
+                    )
+                ],
+                root / "dist",
+                app=app,
+                mounts=[],
+            )
+
+            html = (root / "dist" / "docs" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('"static": true', html)
+            self.assertIn('"socket_bridge": false', html)
 
     def test_browser_entry_stays_thin_when_built_directly(self):
         browser_entry = build_browser_entry({"routes": [], "mounts": [], "errors": []})

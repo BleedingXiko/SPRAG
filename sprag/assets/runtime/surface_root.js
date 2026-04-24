@@ -56,7 +56,7 @@ export class SurfaceRoot extends Module {
         provideOwned('sprag.route', this.surface, this);
         provideOwned('sprag.actions', this.actionClient, this);
 
-        if (this.surface && this.surface.socket_bridge && typeof window.WebSocket === 'function') {
+        if (this.surface && !this.surface.static && this.surface.socket_bridge && typeof window.WebSocket === 'function') {
             this.socket = createSurfaceSocketClient({
                 surface: this.surface,
                 withSpragBase: this.navigation.withSpragBase,
@@ -92,12 +92,14 @@ export class SurfaceRoot extends Module {
             mountHydrationEntries(this);
         }
 
-        this.eventSource = createEventSourceBridge({
-            surface: this.surface,
-            withSpragBase: this.navigation.withSpragBase,
-        });
-        window.__SPRAG_EVENT_SOURCE__ = this.eventSource;
-        this.adopt(this.eventSource);
+        if (this.surface && this.surface.dev_reload && typeof window.EventSource === 'function') {
+            this.eventSource = createEventSourceBridge({
+                surface: this.surface,
+                withSpragBase: this.navigation.withSpragBase,
+            });
+            window.__SPRAG_EVENT_SOURCE__ = this.eventSource;
+            this.adopt(this.eventSource);
+        }
     }
 
     currentHydrationSnapshots() {

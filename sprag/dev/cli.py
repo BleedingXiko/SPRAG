@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import logging
 import os
@@ -11,6 +12,8 @@ import tempfile
 import threading
 import time
 import traceback
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .. import __version__
@@ -81,6 +84,13 @@ def _build_parser():
                 help="'static' emits a pure SSG site (HTML/JS/CSS + public/) with no server code",
             )
         if name == "dev":
+            sub.add_argument(
+                "mode",
+                nargs="?",
+                choices=["static"],
+                default=None,
+                help="'static' builds and serves a pure static site preview",
+            )
             sub.add_argument("--port", type=int, default=8000)
             sub.add_argument("--host", default="127.0.0.1")
             sub.add_argument("--interval", type=float, default=1.0)
@@ -372,9 +382,14 @@ def cmd_build(args):
 def cmd_dev(args):
     _configure_runtime_logging()
     app_target, app = _load_cli_app(args)
-    setattr(app, "_sprag_dev_reload", True)
     project_root = Path(args.project_root).resolve()
     output_dir = _resolve_cli_path(args.output, project_root)
+
+    if getattr(args, "mode", None) == "static":
+        _cmd_dev_static(args, app_target, app, project_root, output_dir)
+        return
+
+    setattr(app, "_sprag_dev_reload", True)
     _build_once(app, output_dir)
     resolved_server_mode = resolve_server_mode(app, args.server_mode)
     base_url = f"http://{args.host}:{args.port}"
@@ -425,6 +440,44 @@ def cmd_dev(args):
         )
     except KeyboardInterrupt:
         print("\n[SPRAG] stopping dev server")
+    finally:
+        stop_event.set()
+
+
+def _cmd_dev_static(args, app_target, app, project_root: Path, output_dir: Path):
+    if args.server_mode is not None:
+        raise SystemExit("[SPRAG] dev static serves files only; --server-mode is not supported.")
+
+    _build_static_once(app_target, app, output_dir, project_root)
+    base_url = f"http://{args.host}:{args.port}"
+
+    stop_event = threading.Event()
+    watcher = threading.Thread(
+        target=_watch_loop,
+        args=(app, output_dir, project_root, args.interval, stop_event),
+        kwargs={
+            "rebuild": lambda current_app: _build_static_once(
+                app_target,
+                current_app,
+                output_dir,
+                project_root,
+            ),
+            "emit_events": False,
+        },
+        daemon=True,
+    )
+    watcher.start()
+
+    banner = [
+        f"[SPRAG] app: {app_target}",
+        f"[SPRAG] static dev server running at {base_url}/",
+        f"[SPRAG] serving static files from {output_dir}",
+        "[SPRAG] static mode serves no SPRAG server endpoints; refresh the browser after rebuilds",
+    ]
+    try:
+        _serve_static_dir(output_dir, host=args.host, port=args.port, banner=banner)
+    except KeyboardInterrupt:
+        print("\n[SPRAG] stopping static dev server")
     finally:
         stop_event.set()
 
@@ -805,9 +858,62 @@ def _build_once(app, output_dir):
     return manifest
 
 
-def _watch_loop(app, output_dir, project_root, interval, stop_event):
+def _build_static_once(app_target, app, output_dir, project_root):
+    start = time.monotonic()
+    result = build_static_site(
+        app_target,
+        app,
+        output_dir=output_dir,
+        project_root=project_root,
+    )
+    elapsed = time.monotonic() - start
+    print(
+        f"[SPRAG] built static site with {len(result['routes'])} route(s), "
+        f"{len(result.get('mounts', []))} mount(s)"
+        f" and {len(result['errors'])} error(s) into {output_dir}"
+        f" ({elapsed:.2f}s)"
+    )
+    _print_payload_warnings(result.get("payload_warnings", []))
+    return result
+
+
+def _serve_static_dir(directory: Path, *, host: str, port: int, banner=None):
+    handler = partial(SimpleHTTPRequestHandler, directory=str(directory))
+    server = ThreadingHTTPServer((host, port), handler)
+    if banner:
+        for line in banner:
+            print(line)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+DEV_WATCH_SUFFIXES = {
+    ".avif",
+    ".css",
+    ".gif",
+    ".html",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".json",
+    ".md",
+    ".mjs",
+    ".png",
+    ".py",
+    ".svg",
+    ".toml",
+    ".txt",
+    ".webp",
+}
+
+
+def _watch_loop(app, output_dir, project_root, interval, stop_event, *, rebuild=None, emit_events=True):
     import traceback
 
+    rebuild = rebuild or (lambda current_app: _build_once(current_app, output_dir))
     last_mtimes = _collect_mtimes(project_root)
     build_id = 0
     while not stop_event.is_set():
@@ -820,35 +926,75 @@ def _watch_loop(app, output_dir, project_root, interval, stop_event):
         for path in changed:
             print(f"[SPRAG] changed: {path}")
         try:
+            importlib.invalidate_caches()
+            _purge_project_modules(project_root)
             app.invalidate_pages()
-            _build_once(app, output_dir)
+            rebuild(app)
             build_id += 1
-            _emit_dev_rebuild_event(
-                ok=True,
-                build_id=build_id,
-                changed=changed,
-            )
+            if emit_events:
+                _emit_dev_rebuild_event(
+                    ok=True,
+                    build_id=build_id,
+                    changed=changed,
+                )
         except Exception as exc:  # pragma: no cover - dev loop resilience
             print(f"[SPRAG] rebuild failed: {exc.__class__.__name__}: {exc}")
-            _emit_dev_rebuild_event(
-                ok=False,
-                build_id=build_id,
-                changed=changed,
-                error=f"{exc.__class__.__name__}: {exc}",
-            )
+            if emit_events:
+                _emit_dev_rebuild_event(
+                    ok=False,
+                    build_id=build_id,
+                    changed=changed,
+                    error=f"{exc.__class__.__name__}: {exc}",
+                )
             traceback.print_exc()
 
 
 def _collect_mtimes(project_root):
     mtimes = {}
-    for path in project_root.rglob("*.py"):
-        if ".sprag" in path.parts or "__pycache__" in path.parts:
+    for path in project_root.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix not in DEV_WATCH_SUFFIXES:
+            continue
+        if _is_ignored_dev_watch_path(path):
             continue
         try:
             mtimes[str(path.relative_to(project_root))] = path.stat().st_mtime
         except OSError:
             continue
     return mtimes
+
+
+def _is_ignored_dev_watch_path(path: Path) -> bool:
+    ignored_parts = {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".sprag",
+        "__pycache__",
+        "node_modules",
+        "dist",
+    }
+    return any(part in ignored_parts for part in path.parts)
+
+
+def _purge_project_modules(project_root: Path) -> None:
+    """Drop imported app modules so dev rebuilds compile the current files."""
+    root = project_root.resolve()
+    framework_root = Path(__file__).resolve().parents[1]
+    for name, module in list(sys.modules.items()):
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        try:
+            path = Path(module_file).resolve()
+            if path.is_relative_to(framework_root):
+                continue
+            if path.is_relative_to(root):
+                del sys.modules[name]
+        except (OSError, ValueError):
+            continue
 
 
 def _diff_mtimes(old, new):

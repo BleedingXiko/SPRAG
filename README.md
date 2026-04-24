@@ -513,6 +513,7 @@ sprag new myapp --template=labs      # full framework showcase
 ```bash
 sprag dev                            # dev server with hot reload
 sprag dev --port 3000
+sprag dev static                     # serve the pure static build locally
 sprag routes                         # list all routes, mounts, and actions
 ```
 
@@ -529,6 +530,7 @@ sprag add content guides             # markdown collection + routes
 
 ```bash
 sprag build                          # compile to dist/
+sprag build static                   # compile a pure static site
 sprag pack                           # optimize dist for production
 sprag pack --zip                     # optimize + archive
 ```
