@@ -67,7 +67,7 @@ class SearchModule(Module):
             li = doc.createElement("li")
             li.className = "search-result"
             a = doc.createElement("a")
-            a.href = item["url"]
+            a.href = self._with_base(item["url"])
             a.className = "search-result-link"
             section = doc.createElement("div")
             section.className = "search-result-section"
@@ -194,6 +194,12 @@ class SearchModule(Module):
                 "body_lc": d["body"].lower(),
             })
         return prepared
+
+    def _with_base(self, url):
+        base = browser.__SPRAG_BASE__ or ""
+        if base and url and url.slice(0, 1) == "/":
+            return base + url
+        return url
 
     def _read_query_param(self):
         raw = browser.location.search
