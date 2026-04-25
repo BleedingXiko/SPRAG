@@ -1,4 +1,4 @@
-from sprag import Component, ui
+from sprag import Component, join_url, ui
 
 
 class Landing(Component):
@@ -20,7 +20,7 @@ class Landing(Component):
                         "switching, and permission-aware guard failures."
                     ),
                     ui.span("hybrid · auth · profiles", class_="tag"),
-                    href="/auth-demo/protected",
+                    href=join_url("/auth-demo/protected"),
                     class_="card",
                 ),
                 ui.a(
@@ -30,7 +30,7 @@ class Landing(Component):
                         "authoring loop in one route."
                     ),
                     ui.span("hybrid", class_="tag"),
-                    href="/counter",
+                    href=join_url("/counter"),
                     class_="card",
                 ),
                 ui.a(
@@ -41,7 +41,7 @@ class Landing(Component):
                         "bridge."
                     ),
                     ui.span("hybrid · @virtual_scroll", class_="tag"),
-                    href="/virtual-scroll",
+                    href=join_url("/virtual-scroll"),
                     class_="card",
                 ),
                 ui.a(
@@ -52,7 +52,7 @@ class Landing(Component):
                         "same Python object, both runtimes."
                     ),
                     ui.span("hybrid · store()", class_="tag"),
-                    href="/store-demo",
+                    href=join_url("/store-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -63,7 +63,7 @@ class Landing(Component):
                         "with self.provider(...)."
                     ),
                     ui.span("hybrid · page.providers", class_="tag"),
-                    href="/provider-demo",
+                    href=join_url("/provider-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -75,7 +75,7 @@ class Landing(Component):
                         "API for both flat and path-style state."
                     ),
                     ui.span("hybrid · store() · nested", class_="tag"),
-                    href="/nested-store-demo",
+                    href=join_url("/nested-store-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -86,7 +86,7 @@ class Landing(Component):
                         "targeted socket invalidation plus action refetch."
                     ),
                     ui.span("hybrid · QueueService", class_="tag"),
-                    href="/queue-demo",
+                    href=join_url("/queue-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -98,7 +98,7 @@ class Landing(Component):
                         "subscribes to it locally."
                     ),
                     ui.span("hybrid · QueueService · store()", class_="tag"),
-                    href="/cross-wired-demo",
+                    href=join_url("/cross-wired-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -108,7 +108,7 @@ class Landing(Component):
                         "streams observations to a hydrated Module."
                     ),
                     ui.span("hybrid · Watcher", class_="tag"),
-                    href="/watcher-demo",
+                    href=join_url("/watcher-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -118,7 +118,7 @@ class Landing(Component):
                         "including the OperationError failure path."
                     ),
                     ui.span("hybrid · Operation", class_="tag"),
-                    href="/operation-demo",
+                    href=join_url("/operation-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -129,7 +129,7 @@ class Landing(Component):
                         "redirect. The intended form workflow in one route."
                     ),
                     ui.span("hybrid · forms · redirect", class_="tag"),
-                    href="/form-demo",
+                    href=join_url("/form-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -140,7 +140,7 @@ class Landing(Component):
                         "updates without navigating."
                     ),
                     ui.span("hybrid · metadata · head", class_="tag"),
-                    href="/metadata-demo",
+                    href=join_url("/metadata-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -151,7 +151,7 @@ class Landing(Component):
                         "authoritative status refetch on the controller."
                     ),
                     ui.span("hybrid · uploads · multipart", class_="tag"),
-                    href="/upload-demo",
+                    href=join_url("/upload-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -161,7 +161,7 @@ class Landing(Component):
                         "sprag.dom calls Ragot's animation helpers directly."
                     ),
                     ui.span("hybrid · @animate", class_="tag"),
-                    href="/animation-demo",
+                    href=join_url("/animation-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -172,7 +172,7 @@ class Landing(Component):
                         "instance in Module.on_stop()."
                     ),
                     ui.span("hybrid · browser.*", class_="tag"),
-                    href="/js-global-demo",
+                    href=join_url("/js-global-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -183,7 +183,7 @@ class Landing(Component):
                         "returned handle in the normal lifecycle."
                     ),
                     ui.span("hybrid · imports.*", class_="tag"),
-                    href="/js-module-demo",
+                    href=join_url("/js-module-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -194,7 +194,7 @@ class Landing(Component):
                         "and Controller.emit_socket_refetch(...)."
                     ),
                     ui.span("hybrid · SocketIngress", class_="tag"),
-                    href="/socket-demo",
+                    href=join_url("/socket-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -205,7 +205,7 @@ class Landing(Component):
                         "on the socket. Lighter than a full QueueService."
                     ),
                     ui.span("hybrid · @action(defer=True)", class_="tag"),
-                    href="/defer-demo",
+                    href=join_url("/defer-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -216,7 +216,7 @@ class Landing(Component):
                         "keys and focus management."
                     ),
                     ui.span("hybrid · aria_* · keyboard", class_="tag"),
-                    href="/a11y-demo",
+                    href=join_url("/a11y-demo"),
                     class_="card",
                 ),
                 ui.a(
@@ -226,7 +226,7 @@ class Landing(Component):
                         "DOM slots, and explicit child view teardown."
                     ),
                     ui.span("mount · Module lifecycle", class_="tag"),
-                    href="/lifecycle-mount",
+                    href=join_url("/lifecycle-mount"),
                     class_="card",
                 ),
                 class_="cards",

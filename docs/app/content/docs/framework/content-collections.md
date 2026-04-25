@@ -64,6 +64,23 @@ def posts_static_paths():
 
 That helper walks `app/content/posts/`, turns each markdown document into a URL path, and feeds those params into the catch-all route's `static_paths=...`.
 
+## Base URLs
+
+`base_url` is the route prefix for the collection inside your app. Use it when the markdown folder name and the public route do not match, or when you want to keep the prefix in one shared constant.
+
+```python
+from sprag import join_url, load_markdown_tree
+
+POSTS_BASE_URL = join_url("/", "posts")
+
+def posts_collection():
+    return load_markdown_tree(CONTENT_ROOT / "posts", base_url=POSTS_BASE_URL)
+```
+
+`join_url()` is the first-class helper for composing route prefixes and URL segments. It normalizes slashes, so `join_url("/posts", "hello-world")` returns `/posts/hello-world`.
+
+For static deployments under a host path such as GitHub Pages, keep author-facing links root-relative (`/posts`, `/static/...`). SPRAG rewrites rendered internal `href`, `src`, and `action` attributes to relative URLs during the static build so the generated HTML works from nested pages and path-prefixed hosts.
+
 The generated article controller also exposes a ready-to-render payload:
 
 - `doc` for the current markdown document

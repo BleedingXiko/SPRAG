@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from sprag import join_url
+
 from app.content import SECTION_LABELS, SECTION_ORDER, docs_by_section, docs_collection
 
 
@@ -29,7 +31,7 @@ def write_llms_txt(public_dir: Path, *, site_url: str | None = None) -> None:
     public_dir = Path(public_dir)
     public_dir.mkdir(parents=True, exist_ok=True)
 
-    base = (site_url or "").rstrip("/")
+    base = site_url or ""
     (public_dir / "llms.txt").write_text(_render_index(base), encoding="utf-8")
     (public_dir / "llms-full.txt").write_text(_render_full(base), encoding="utf-8")
 
@@ -50,7 +52,7 @@ def _render_index(base: str) -> str:
         for doc in section["items"]:
             desc = (doc.description or "").strip().replace("\n", " ")
             suffix = f": {desc}" if desc else ""
-            url = f"{base}{doc.url_path}"
+            url = join_url(base, doc.url_path) if base else doc.url_path
             lines.append(f"- [{doc.title}]({url}){suffix}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -80,7 +82,8 @@ def _render_full(base: str) -> str:
         parts.append("")
         for doc in items:
             parts.append(f"## {doc.title}")
-            parts.append(f"<!-- source: {base}{doc.url_path} -->")
+            source = join_url(base, doc.url_path) if base else doc.url_path
+            parts.append(f"<!-- source: {source} -->")
             parts.append("")
             parts.append(_clean_body(doc.body))
             parts.append("")

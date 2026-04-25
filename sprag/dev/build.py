@@ -42,6 +42,7 @@ from ..runtime.rendering import (
 from ..runtime.socket_bridge import surface_socket_enabled
 from ..runtime.shell import apply_shell, resolve_effective_surface_modules
 from ..runtime.stores import declared_stores
+from ..runtime.urls import relativize_html_urls
 
 
 _PAYLOAD_WARN_BYTES = 50 * 1024  # 50 KB
@@ -118,6 +119,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             shell_assets = None
             if redirect is None and status == 200:
                 body_html, hydration, render_error = render_screen(page, data)
+                body_html = relativize_html_urls(body_html, actual_path)
                 body_html, shell_assets = apply_shell(
                     body_html,
                     app=app,

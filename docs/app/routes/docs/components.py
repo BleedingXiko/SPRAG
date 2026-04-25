@@ -1,6 +1,7 @@
 from sprag import Component, ui
 
 from app.site import card, docs_shell
+from app.urls import DOCS_BASE_URL
 
 
 class DocsIndexPage(Component):
@@ -14,7 +15,7 @@ class DocsIndexPage(Component):
         ]
         return docs_shell(
             sections=sections,
-            current_path="/docs",
+            current_path=DOCS_BASE_URL,
             kicker="Documentation",
             title="SPRAG Documentation",
             description="Learn how to build full-stack Python web apps with SPRAG.",

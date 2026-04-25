@@ -23,7 +23,11 @@ class AssetController(sprag.Controller):
 
 class AssetScreen(Screen):
     def render(self, data=None):
-        return ui.main(data.get("message", "missing"))
+        return ui.main(
+            data.get("message", "missing"),
+            ui.a("Docs", href="/docs"),
+            ui.img(src="/static/images/logo.svg", alt="Logo"),
+        )
 
 
 class AssetRootComponent(Component):
@@ -160,6 +164,8 @@ class AssetContractTests(unittest.TestCase):
             )
 
             html = (root / "dist" / "docs" / "nested" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('href=".."', html)
+            self.assertIn('src="../../static/images/logo.svg"', html)
             self.assertIn('href="../../assets/app/shell.css"', html)
             self.assertIn('src="../../static/vendor/widget.js"', html)
             self.assertIn('type="module" src="../../assets/app/routes/docs/module-helper.mjs"', html)

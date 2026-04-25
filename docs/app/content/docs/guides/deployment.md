@@ -73,6 +73,26 @@ Serve `dist/` (from `sprag build static`) or `dist/public/` (from `sprag build`)
 
 No server process needed. Every page is pre-rendered HTML.
 
+### Path-prefixed hosts and base URLs
+
+If your static site is served below a path prefix, such as `https://user.github.io/project/`, keep links in your app root-relative:
+
+```python
+from sprag import join_url
+
+DOCS_BASE_URL = join_url("/", "docs")
+ui.a("Install", href=join_url(DOCS_BASE_URL, "getting-started", "installation"))
+```
+
+Two systems handle path-prefixed hosting for you:
+
+1. **Static build (HTML).** `sprag build static` rewrites rendered internal `href`, `src`, and `action` attributes on every generated page to relative URLs. `/docs` and `/static/images/logo.png` resolve correctly from any page depth.
+2. **Browser runtime (JS).** At boot, SPRAG derives the deployment prefix from `window.location.pathname` and exposes it as `window.__SPRAG_BASE__`. `join_url()` in compiled browser code prepends it automatically, so dynamically rendered links (search results, hydrated state changes, programmatic `navigate(...)` calls) all point at the correct URL.
+
+Use `base_url` on content collections for the **app route prefix** (`/docs`, `/blog`, etc.), not the deployment host prefix. The deployment prefix is the runtime's job.
+
+`join_url()` is the same import on both sides — call it from server code, from `Component.render()`, from `Module` methods. The Python implementation composes the path; the browser implementation composes and prefixes.
+
 ## Server hosting
 
 For apps that need server-side actions or dynamic data, ship the output of `sprag build` and run the generated server entrypoint:

@@ -247,6 +247,20 @@ debug = env("SPRAG_PUBLIC_DEBUG", "false", cast=bool)
 all_env = public_env()
 ```
 
+## `join_url()` — URL composition
+
+`join_url()` is the single URL helper for both runtimes. Import it from `sprag` and call it the same way in server code and in browser code:
+
+```python
+from sprag import join_url
+
+href = join_url("/docs", "getting-started", "installation")
+```
+
+On the server it returns the composed path. In compiled browser code it calls a runtime helper that *also* prepends `window.__SPRAG_BASE__` — the deployment prefix derived at boot. That way one call site produces the right URL whether the app is hosted at the host root or under a path prefix like `https://example.com/project/`.
+
+Use it for any internal `href`, `src`, redirect target, or `navigate(...)` argument that is not a static literal owned by the static-build HTML rewriter.
+
 ## What's NOT supported
 
 These Python constructs will raise `JSCodegenError` at compile time:

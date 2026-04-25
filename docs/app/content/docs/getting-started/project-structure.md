@@ -69,13 +69,17 @@ app/
 Reference them in components, shell templates, or CSS:
 
 ```python
-ui.img(src="/static/images/logo.png", alt="Logo")
+from sprag import join_url
+
+ui.img(src=join_url("/static", "images", "logo.png"), alt="Logo")
 ```
 
 ```html
 <!-- in shell.html -->
 <img src="/static/images/logo.png" alt="Logo">
 ```
+
+Hard-coded root-relative paths are fine, but `join_url()` is useful when you have a shared route or asset base and want to avoid manual slash handling.
 
 To add favicon and icon `<link>` tags to the document `<head>`, use the `icons` metadata key on `App` or on individual pages — see the [Routes](/docs/framework/routes) docs.
 

@@ -33,6 +33,8 @@ def _compile_expr(node, env, method_names=None):
             return "globalThis"
         if node.id == "imports":
             return "(globalThis.__SPRAG_IMPORTS__ || {})"
+        if node.id == "join_url":
+            return "joinUrl"
         # Store references resolve to their JS store name (the same name
         # the generated stores.js shim exports). This is what makes
         # ``self.subscribe(counter, fn)`` compile cleanly: the ``counter``

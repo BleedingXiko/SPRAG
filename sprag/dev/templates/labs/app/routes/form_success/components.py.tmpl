@@ -1,4 +1,4 @@
-from sprag import Component, ui
+from sprag import Component, join_url, ui
 
 
 class FormSuccessCard(Component):
@@ -17,6 +17,6 @@ class FormSuccessCard(Component):
                 ui.strong(props["slug"]),
                 class_="metric",
             ),
-            ui.a("Back to the form demo", href="/form-demo", class_="btn back-link"),
+            ui.a("Back to the form demo", href=join_url("/form-demo"), class_="btn back-link"),
             class_="demo-card success-card",
         )

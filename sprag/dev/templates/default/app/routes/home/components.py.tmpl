@@ -1,4 +1,4 @@
-from sprag import Component, ui
+from sprag import Component, join_url, ui
 
 
 class Landing(Component):
@@ -22,19 +22,19 @@ class Landing(Component):
                 ui.a(
                     ui.h3("Counter →"),
                     ui.p("An interactive demo. Module + Component + @action, all in Python."),
-                    href="/counter",
+                    href=join_url("/counter"),
                     class_="card",
                 ),
                 ui.a(
                     ui.h3("About →"),
                     ui.p("A pure SSR page describing the framework's two-runtime model."),
-                    href="/about",
+                    href=join_url("/about"),
                     class_="card",
                 ),
                 ui.a(
                     ui.h3("Add a route"),
                     ui.p("Run sprag add <name> to scaffold another route in seconds."),
-                    href="/",
+                    href=join_url("/"),
                     class_="card",
                 ),
                 class_="cards",

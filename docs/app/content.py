@@ -3,6 +3,8 @@ from pathlib import Path
 
 from sprag import load_markdown_tree
 
+from .urls import BLOG_BASE_URL, DOCS_BASE_URL
+
 
 CONTENT_ROOT = Path(__file__).resolve().parent / "content"
 
@@ -20,12 +22,12 @@ SECTION_LABELS = {
 
 @lru_cache(maxsize=1)
 def docs_collection():
-    return load_markdown_tree(CONTENT_ROOT / "docs", base_url="/docs")
+    return load_markdown_tree(CONTENT_ROOT / "docs", base_url=DOCS_BASE_URL)
 
 
 @lru_cache(maxsize=1)
 def blog_collection():
-    posts = load_markdown_tree(CONTENT_ROOT / "blog", base_url="/blog")
+    posts = load_markdown_tree(CONTENT_ROOT / "blog", base_url=BLOG_BASE_URL)
     return sorted(
         posts,
         key=lambda post: str(post.metadata.get("date", "")),

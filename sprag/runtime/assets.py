@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import html
 import importlib
-import posixpath
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
+
+from .urls import relative_url
 
 
 @dataclass(frozen=True)
@@ -347,13 +348,7 @@ def _asset_web_path(source_path: Path, project_root: Path) -> str:
 
 
 def _relative_asset_href(document_path: str | None, asset_path: str) -> str:
-    if not asset_path.startswith("/"):
-        return asset_path
-    if document_path is None:
-        return asset_path
-    if not document_path or document_path == "/":
-        return asset_path.lstrip("/")
-    return posixpath.relpath(asset_path.lstrip("/"), start=document_path.strip("/"))
+    return relative_url(document_path, asset_path)
 
 
 def _is_external_path(value: str) -> bool:

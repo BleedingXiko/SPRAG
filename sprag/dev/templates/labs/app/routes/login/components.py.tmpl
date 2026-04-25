@@ -1,4 +1,4 @@
-from sprag import Component, ui
+from sprag import Component, join_url, ui
 
 
 class LoginCard(Component):
@@ -47,7 +47,7 @@ class LoginCard(Component):
                     ),
                     ui.a(
                         "Jump straight to the protected route",
-                        href="/auth-demo/protected",
+                        href=join_url("/auth-demo/protected"),
                         class_="btn btn-ghost btn-inline",
                     ),
                     class_="form-actions",

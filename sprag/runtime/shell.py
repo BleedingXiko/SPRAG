@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .assets import (
     ModuleImport,
     ResolvedModuleImport,
-    _relative_asset_href,
     Script,
     SurfaceAssets,
     normalize_module_imports,
@@ -17,6 +15,7 @@ from .assets import (
     resolve_project_root,
     resolve_surface_assets,
 )
+from .urls import relativize_html_urls
 
 
 DEFAULT_SLOT = "{{ sprag_slot }}"
@@ -94,7 +93,7 @@ def apply_shell(
 
     wrapped_body = _render_shell_template(effective, body_html, root)
     if document_path:
-        wrapped_body = _relativize_shell_urls(wrapped_body, document_path)
+        wrapped_body = relativize_html_urls(wrapped_body, document_path)
     assets = resolve_surface_assets(project_root=root, css=effective.css, js=effective.js)
     return wrapped_body, assets
 
@@ -163,27 +162,6 @@ def _render_shell_template(shell_spec: Shell, body_html: str, project_root: Path
         f"SPRAG shell template {template_path} must include {slot!r} "
         f"or {ALT_SLOT!r}."
     )
-
-
-_SHELL_URL_RE = re.compile(r'((?:href|src|action)=")(/)([^"]*")')
-
-
-def _relativize_shell_urls(html: str, document_path: str) -> str:
-    """Rewrite absolute ``href``, ``src``, and ``action`` attributes in shell
-    HTML so they work at any page depth (same logic as CSS/JS asset links)."""
-    if not document_path:
-        return html
-
-    def _rewrite(m: re.Match) -> str:
-        attr_prefix = m.group(1)       # e.g. 'href="'
-        abs_path = "/" + m.group(3)[:-1]  # full absolute path
-        if abs_path == "/":
-            depth = document_path.strip("/").count("/") + 1 if document_path.strip("/") else 0
-            return f'{attr_prefix}{("../" * depth) or "./"}"'
-        relative = _relative_asset_href(document_path, abs_path)
-        return f'{attr_prefix}{relative}"'
-
-    return _SHELL_URL_RE.sub(_rewrite, html)
 
 
 def _resolve_path(project_root: Path, path: str | Path) -> Path:

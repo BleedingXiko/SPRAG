@@ -38,6 +38,7 @@ from .modules import (
     _emit_env_helper_prelude,
     _method_source,
     _method_source_info,
+    _references_joinUrl,
     collect_env_helper_refs_for_class,
 )
 from .source_maps import (
@@ -492,6 +493,9 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
     if used_stores:
         names = ", ".join(sorted(used_stores))
         store_import_line = f"import {{ {names} }} from '../stores.js';\n"
+    sprag_runtime_import_line = ""
+    if _references_joinUrl(all_code):
+        sprag_runtime_import_line = "import { joinUrl } from '../../runtime/urls.js';\n"
     class_import_lines = _browser_class_imports(
         all_code,
         browser_class_refs,
@@ -522,6 +526,7 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
         line_mappings.extend([mapping] * count_lines(text))
 
     _append(f"import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';\n")
+    _append(sprag_runtime_import_line)
     _append(store_import_line)
     _append("\n")
     _append(class_import_lines)

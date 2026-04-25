@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from sprag import load_markdown_tree
+from sprag import join_url, load_markdown_tree
 
 
 CONTENT_ROOT = Path(__file__).resolve().parent / "content"
@@ -17,7 +17,7 @@ def _collection_key(name):
 @lru_cache(maxsize=64)
 def content_collection(name, *, base_url=None, reverse=False):
     key = _collection_key(name)
-    docs = load_markdown_tree(CONTENT_ROOT / key, base_url=base_url or f"/{key}")
+    docs = load_markdown_tree(CONTENT_ROOT / key, base_url=base_url or join_url("/", key))
     return list(reversed(docs)) if reverse else docs
 
 

@@ -1,5 +1,7 @@
 from sprag import ui
 
+from .urls import BLOG_BASE_URL, DOCS_BASE_URL
+
 
 def card(title, href, description, meta=None):
     return ui.a(
@@ -24,8 +26,8 @@ def blog_card(title, href, description, meta=None):
 def docs_sidebar(sections, current_path, id_=None):
     # Nav links shown at top of sidebar on mobile (hidden on desktop via CSS)
     nav_links = ui.div(
-        ui.a("Docs", href="/docs", class_="sidebar-nav-link"),
-        ui.a("Blog", href="/blog", class_="sidebar-nav-link"),
+        ui.a("Docs", href=DOCS_BASE_URL, class_="sidebar-nav-link"),
+        ui.a("Blog", href=BLOG_BASE_URL, class_="sidebar-nav-link"),
         ui.a("GitHub", href="https://github.com/BleedingXiko/SPRAG",
              target="_blank", class_="sidebar-nav-link"),
         class_="sidebar-nav",

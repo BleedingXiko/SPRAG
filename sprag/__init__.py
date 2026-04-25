@@ -1,6 +1,6 @@
 """Public SPRAG framework surface."""
 
-__version__ = "0.1.12"
+__version__ = "0.1.13"
 
 from .runtime import dom
 from .runtime.app import App
@@ -60,6 +60,7 @@ from .runtime.server import (
 )
 from .runtime.stores import StoreBridge, declared_stores, store
 from .runtime.ui import ui
+from .runtime.urls import join_url
 from .runtime.browser import (
     Component,
     Module,
@@ -119,6 +120,7 @@ __all__ = [
     "module",
     "script",
     "slugify",
+    "join_url",
     # Client-side decorators (justified — see sprag/browser.py)
     "animate",
     "browser",

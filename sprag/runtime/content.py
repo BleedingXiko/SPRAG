@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .urls import join_url
+
 
 @dataclass(frozen=True)
 class ContentDocument:
@@ -70,7 +72,7 @@ def load_markdown_tree(root, *, base_url="/") -> list[ContentDocument]:
         docs.append(
             load_markdown_document(
                 source_path,
-                url_path=_join_url(base_url, *url_parts),
+                url_path=join_url(base_url, *url_parts),
                 slug=slug,
                 path_parts=url_parts,
             )
@@ -282,14 +284,6 @@ def _render_inline(text: str) -> str:
     for key, value in placeholders.items():
         escaped = escaped.replace(key, value)
     return escaped
-
-
-def _join_url(base_url: str, *parts: str) -> str:
-    clean_parts = [part.strip("/") for part in parts if part and part.strip("/")]
-    prefix = "/" if not base_url else "/" + base_url.strip("/")
-    if not clean_parts:
-        return prefix
-    return prefix.rstrip("/") + "/" + "/".join(clean_parts)
 
 
 def _normalize_url_path(path: str) -> str:

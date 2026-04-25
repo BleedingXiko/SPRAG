@@ -20,6 +20,7 @@ from .. import __version__
 from ..runtime.http import SERVER_MODES, resolve_server_mode, serve_sprag_app
 from ..runtime.loader import load_app
 from ..runtime.routing import is_dynamic_path
+from ..runtime.urls import join_url
 from .package import build_dist_bundle, build_static_site
 from .scaffold import (
     DEFAULT_ROUTE_MODE,
@@ -496,8 +497,7 @@ def _dev_surface_banner_line(base_url: str, path: str, *, label: str, width: int
 
 
 def _join_base_url(base_url: str, path: str) -> str:
-    normalized_path = "/" if path in {"", "/"} else "/" + str(path).strip("/")
-    return f"{base_url}{normalized_path}"
+    return join_url(base_url, path)
 
 
 def cmd_new(args):

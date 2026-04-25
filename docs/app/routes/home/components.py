@@ -1,6 +1,7 @@
-from sprag import Component, ui
+from sprag import Component, join_url, ui
 
 from app.site import card, blog_card
+from app.urls import BLOG_BASE_URL, DOCS_BASE_URL
 
 
 class HomePage(Component):
@@ -26,7 +27,7 @@ class HomePage(Component):
                     str(len(s["items"])) + " articles",
                     class_="section-card-count",
                 ),
-                href=s["items"][0]["url_path"] if s["items"] else "/docs",
+                href=s["items"][0]["url_path"] if s["items"] else DOCS_BASE_URL,
                 class_="section-card",
             )
             for s in sections
@@ -61,8 +62,8 @@ class HomePage(Component):
                         class_="landing-subtitle",
                     ),
                     ui.div(
-                        ui.a("Get Started", href="/docs/getting-started/installation", class_="btn btn-primary"),
-                        ui.a("Read the Docs", href="/docs", class_="btn"),
+                        ui.a("Get Started", href=join_url(DOCS_BASE_URL, "getting-started", "installation"), class_="btn btn-primary"),
+                        ui.a("Read the Docs", href=DOCS_BASE_URL, class_="btn"),
                         ui.a("GitHub", href="https://github.com/BleedingXiko/SPRAG", class_="btn", target="_blank"),
                         class_="landing-actions",
                     ),
@@ -92,7 +93,7 @@ class HomePage(Component):
                 ui.div(
                     ui.h2("All docs"),
                     ui.div(
-                        ui.a("View all docs", href="/docs", class_="section-link"),
+                        ui.a("View all docs", href=DOCS_BASE_URL, class_="section-link"),
                     ),
                     class_="section-title",
                 ),
@@ -103,7 +104,7 @@ class HomePage(Component):
                 ui.div(
                     ui.h2("Blog"),
                     ui.div(
-                        ui.a("View all posts", href="/blog", class_="section-link"),
+                        ui.a("View all posts", href=BLOG_BASE_URL, class_="section-link"),
                     ),
                     class_="section-title",
                 ),

@@ -335,6 +335,9 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
     if used_stores:
         names = ", ".join(sorted(used_stores))
         store_import_line = f"import {{ {names} }} from '../stores.js';\n"
+    sprag_runtime_import_line = ""
+    if _references_joinUrl(methods_block):
+        sprag_runtime_import_line = "import { joinUrl } from '../../runtime/urls.js';\n"
     class_import_lines = _browser_class_imports(
         methods_block,
         browser_class_refs,
@@ -365,6 +368,7 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
         line_mappings.extend([mapping] * count_lines(text))
 
     _append(f"import {{ {base_imports} }} from '../../vendor/ragot.esm.min.js';\n")
+    _append(sprag_runtime_import_line)
     _append(store_import_line)
     _append("\n")
     _append(class_import_lines)
@@ -848,6 +852,12 @@ def _reindent(body, *, extra):
     """Indent every non-empty line of ``body`` by ``extra`` additional spaces."""
     prefix = " " * extra
     return "\n".join(prefix + line if line.strip() else line for line in body.split("\n"))
+
+
+def _references_joinUrl(compiled_js: str) -> bool:
+    """Return True when compiled JS calls the SPRAG runtime ``joinUrl``."""
+    import re
+    return bool(re.search(r"(?<![\w$.])joinUrl\s*\(", compiled_js))
 
 
 def _detect_used_stores(compiled_js: str, store_refs: dict[str, str]) -> set[str]:
