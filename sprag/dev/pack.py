@@ -250,13 +250,19 @@ def _minify_js_fallback(js: str) -> str:
         stripped = line.strip()
         if not stripped:
             continue
-        # Remove single-line comments but not URLs (://); banner comments (//!)
-        # are preserved. sourceMappingURL trailers are dropped unconditionally
-        # — production dist never ships maps (see _phase_strip_sourcemaps).
-        if stripped.startswith("//") and not stripped.startswith("//!"):
+        # Remove single-line comments but not URLs (://). Banner comments (//!)
+        # and source map trailers are preserved when the fallback is called
+        # directly; full ``sprag pack`` strips source maps in an earlier phase.
+        if stripped.startswith("//") and not stripped.startswith(("//!", "//#", "//@")):
             continue
         lines.append(stripped)
     return "\n".join(lines) + "\n"
+
+
+def _has_adjacent_source_map(path: Path) -> bool:
+    if path.suffix.lower() not in {".js", ".mjs"}:
+        return False
+    return path.with_name(path.name + ".map").exists()
 
 
 # --- FINGERPRINTING HELPERS ---
@@ -670,6 +676,7 @@ class SpragPack:
             if not p.name.endswith(".min.js")
             and not p.name.endswith(".min.mjs")
             and "vendor" not in p.relative_to(public_dir).parts
+            and not _has_adjacent_source_map(p)
         ]
 
         if not css_files and not js_files:

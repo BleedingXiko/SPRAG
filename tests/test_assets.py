@@ -5,15 +5,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sprag import Component, Controller, Screen, module, mount, page, script, ui
-from sprag.dev.codegen import build_browser_entry
+import sprag
+from sprag import Component, Module, Screen, module, mount, page, script, ui
+from sprag.dev.codegen import build_browser_entry, compile_module_class
 from sprag.dev.codegen.emit import emit_stores_shim
 from sprag.dev.build import build_web_preview
 from sprag.runtime.rendering import render_mount
 from sprag.runtime.stores import StoreBridge
 
 
-class AssetController(Controller):
+class AssetController(sprag.Controller):
     route = "/docs/nested"
 
     def load(self):
@@ -30,10 +31,16 @@ class AssetRootComponent(Component):
         return ui.div("Mount asset test")
 
 
+class AssetProviderConsumer(Module):
+    def on_start(self):
+        self.surface_provider = self.provider("surfaceProvider")
+
+
 class DummyApp:
     def __init__(self, project_root):
         self.project_root = str(project_root)
         self._sprag_dev_reload = False
+        self._sprag_static_build = False
         self.server_mode = "auto"
 
 
@@ -299,6 +306,38 @@ class AssetContractTests(unittest.TestCase):
             self.assertIn("encodeTopicMessage('join', topic)", socket_runtime)
             self.assertIn("encodeTopicMessage('leave', normalized)", socket_runtime)
 
+            surface_root_runtime = (root / "dist" / "runtime" / "surface_root.js").read_text(encoding="utf-8")
+            self.assertIn("!this.surface.static", surface_root_runtime)
+            self.assertIn("this.surface.dev_reload", surface_root_runtime)
+            self.assertIn("typeof window.EventSource === 'function'", surface_root_runtime)
+
+    def test_static_build_marks_surfaces_static_and_disables_socket_bridge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = DummyApp(root)
+            app._sprag_static_build = True
+
+            build_web_preview(
+                [
+                    (
+                        "app.routes.docs.page",
+                        page(
+                            path="/docs",
+                            controller=AssetController,
+                            screen=AssetScreen,
+                            mode="document",
+                        ),
+                    )
+                ],
+                root / "dist",
+                app=app,
+                mounts=[],
+            )
+
+            html = (root / "dist" / "docs" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('"static": true', html)
+            self.assertIn('"socket_bridge": false', html)
+
     def test_browser_entry_stays_thin_when_built_directly(self):
         browser_entry = build_browser_entry({"routes": [], "mounts": [], "errors": []})
         self.assertIn("import { startSurfaceBoot } from './runtime/boot.js';", browser_entry)
@@ -306,6 +345,13 @@ class AssetContractTests(unittest.TestCase):
         self.assertIn("startSurfaceBoot({", browser_entry)
         self.assertNotIn("async function resolveSurfaceImports", browser_entry)
         self.assertNotIn("data-sprag-boot-error", browser_entry)
+
+    def test_compile_module_emits_browser_provider_helper(self):
+        compiled = compile_module_class(AssetProviderConsumer)
+        self.assertIn("Module, ragotRegistry", compiled)
+        self.assertIn("provider(name)", compiled)
+        self.assertIn("return ragotRegistry.require(name);", compiled)
+        self.assertIn('this.surfaceProvider = this.provider("surfaceProvider");', compiled)
 
 
 if __name__ == "__main__":

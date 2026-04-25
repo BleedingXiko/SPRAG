@@ -192,3 +192,33 @@ class MyModule(Module):
 ```
 
 Auto-cleaned on `on_stop()`.
+
+## Page and Mount Providers
+
+`page(..., providers={...})` and `mount(..., providers={...})` start browser provider Modules before the page hydrates or the mount starts. Resolve them from another browser Module with `self.provider(key)`.
+
+```python
+class ToastProvider(Module):
+    def on_start(self):
+        self.last_message = ""
+
+    def push(self, message):
+        self.last_message = message
+
+
+class InboxModule(Module):
+    def on_start(self):
+        toast = self.provider("toast")
+        toast.push("Inbox ready")
+```
+
+Declare the provider on the surface:
+
+```python
+inbox = page(
+    path="/inbox",
+    controller=InboxController,
+    screen=InboxScreen,
+    providers={"toast": ToastProvider},
+)
+```

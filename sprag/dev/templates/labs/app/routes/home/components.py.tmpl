@@ -56,6 +56,17 @@ class Landing(Component):
                     class_="card",
                 ),
                 ui.a(
+                    ui.h3("Provider Demo →"),
+                    ui.p(
+                        "A page-scoped browser provider Module is started "
+                        "before hydration, then resolved from another Module "
+                        "with self.provider(...)."
+                    ),
+                    ui.span("hybrid · page.providers", class_="tag"),
+                    href="/provider-demo",
+                    class_="card",
+                ),
+                ui.a(
                     ui.h3("Nested Store Demo →"),
                     ui.p(
                         "The same store(...) primitive, but with a nested "

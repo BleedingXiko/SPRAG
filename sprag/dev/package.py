@@ -21,12 +21,15 @@ def build_static_site(app_target, app, *, output_dir: Path, project_root: Path |
     app_package = _app_package_name(app)
     app_project_root = Path(project_root).resolve() if project_root else _project_root_for_package(app_package)
 
+    previous_static_build = getattr(app, "_sprag_static_build", False)
+    setattr(app, "_sprag_static_build", True)
     did_boot = not getattr(app, "_booted", False)
     if did_boot:
         app.boot()
     try:
         manifest = build_web_preview(app.pages(), output_dir, app=app, mounts=app.mounts())
     finally:
+        setattr(app, "_sprag_static_build", previous_static_build)
         if did_boot:
             app.shutdown()
 

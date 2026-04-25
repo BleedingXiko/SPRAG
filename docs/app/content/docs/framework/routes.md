@@ -52,6 +52,7 @@ my_page = page(
 | `modules` | No | JS import aliases: `{"alias": "path/to/module.js"}` |
 | `static_paths` | No | Function returning path params for static builds |
 | `metadata` | No | Dict of metadata (title, description, etc.) |
+| `providers` | No | Browser provider Modules for this page |
 
 ### Metadata
 
@@ -138,6 +139,38 @@ Merge order: **app metadata → page metadata → `__sprag_meta__`** (last wins)
 - **`hybrid`** — SSR first, then hydrate. The server renders the initial HTML for a fast first paint, then the browser loads JavaScript to make it interactive. This is the default and the right choice for most pages.
 
 If you want a browser-owned client app instead of a page route, use `mount(...)` under `app/mounts/`. Mounts are separate from page modes.
+
+## Browser providers
+
+Use `providers` when a page or mount needs a browser Module that starts before the hydrated or mounted Module code.
+
+```python
+from sprag import Module, page
+
+
+class ToastProvider(Module):
+    def on_start(self):
+        self.last_message = ""
+
+    def push(self, message):
+        self.last_message = message
+
+
+class InboxModule(Module):
+    def on_start(self):
+        toast = self.provider("toast")
+        toast.push("Inbox ready")
+
+
+inbox = page(
+    path="/inbox",
+    controller=InboxController,
+    screen=InboxScreen,
+    providers={"toast": ToastProvider},
+)
+```
+
+`App.providers` are server-side services resolved from controllers with `self.service(...)`. `page.providers` and `mount.providers` are browser-side Modules resolved from browser Modules with `self.provider(...)`.
 
 ## Dynamic routes
 

@@ -1,0 +1,25 @@
+from sprag import Module
+
+
+class LabRuntimeProvider(Module):
+    def on_start(self):
+        self.count = 0
+        self.label = "page provider ready"
+
+    def next_message(self):
+        self.count += 1
+        return f"{self.label} #{self.count}"
+
+
+class ProviderDemoModule(Module):
+    def __init__(self, screen=None, state=None):
+        super().__init__(screen=screen, state=state or {"message": "Waiting for provider"})
+
+    def on_start(self):
+        self.runtime = self.provider("labRuntime")
+        self.delegate(self.element, "click", "[data-role='read-provider']", self.on_read_provider)
+        self.set_state({"message": self.runtime.next_message()})
+
+    def on_read_provider(self, event):
+        event.prevent_default()
+        self.set_state({"message": self.runtime.next_message()})

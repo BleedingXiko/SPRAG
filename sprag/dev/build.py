@@ -144,6 +144,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                 declared_modules=page_modules,
                 browser_classes=route_browser_classes,
             )
+            static_build = bool(getattr(app, "_sprag_static_build", False))
 
             script_path = _relative_web_path(
                 page_dir,
@@ -172,12 +173,13 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                         "action_endpoint": "/__sprag__/actions",
                         "upload_endpoint": "/__sprag__/uploads",
                         "events_endpoint": "/__sprag__/events",
-                        "socket_bridge": surface_socket_enabled(
+                        "socket_bridge": (not static_build) and surface_socket_enabled(
                             app,
                             page.controller,
                             surface=page,
                         ),
                         "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                        "static": static_build,
                         "modules": page_modules,
                         "providers": {k: v.__name__ for k, v in page.providers.items()},
                     },
@@ -255,6 +257,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
             declared_modules=mount_modules,
             browser_classes=_mount_browser_classes(mt),
         )
+        static_build = bool(getattr(app, "_sprag_static_build", False))
 
         script_path = _relative_web_path(
             mount_dir,
@@ -282,12 +285,13 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
                     "action_endpoint": "/__sprag__/actions",
                     "upload_endpoint": "/__sprag__/uploads",
                     "events_endpoint": "/__sprag__/events",
-                    "socket_bridge": surface_socket_enabled(
+                    "socket_bridge": (not static_build) and surface_socket_enabled(
                         app,
                         mt.boot,
                         surface=mt,
                     ),
                     "dev_reload": bool(getattr(app, "_sprag_dev_reload", False)),
+                    "static": static_build,
                     "modules": mount_modules,
                     "providers": {k: v.__name__ for k, v in mt.providers.items()},
                 },
