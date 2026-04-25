@@ -8,6 +8,8 @@ order: 16
 
 SPRAG's realtime layer connects server events to browser handlers over WebSockets. The design follows a simple principle: **signal then refetch**.
 
+The built-in bridge uses the browser's native `WebSocket` API and SPRAG's server-side websocket endpoint. Socket.IO is not part of SPRAG's realtime runtime.
+
 ## Prerequisites
 
 WebSocket server mode requires `gevent-websocket`. If you installed SPRAG with `pip install spragkit`, install it manually:

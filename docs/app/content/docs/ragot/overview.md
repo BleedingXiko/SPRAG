@@ -16,7 +16,7 @@ Under the hood, your compiled code uses:
 - **Keyed list reconciliation** (`renderList`) for `ui.For()` loops
 - **Grid layout engine** (`renderGrid`) for `ui.Grid()` layouts
 - **Lazy loading** (`createLazyLoader`) for `ui.LazyImage()` images
-- **Socket.IO client** for real-time communication
+- **Lifecycle-safe socket binding** for real-time clients supplied by SPRAG or your own browser code
 - **Animation helpers** (`animateIn`/`animateOut`) for CSS transitions
 - **Virtual scrolling** for large lists
 
@@ -25,6 +25,14 @@ You don't interact with any of these directly. They're the compilation targets f
 ## When to reach for raw Ragot
 
 Occasionally you need a browser-only escape hatch. SPRAG exposes those through Python authoring stubs:
+
+### Socket clients
+
+Ragot does not bundle Socket.IO or open a socket connection on its own. Its socket helpers bind handlers to a client object and clean those handlers up with the Module lifecycle.
+
+In normal SPRAG apps, `Module.on_socket(...)`, `Module.off_socket(...)`, `Module.emit_socket(...)`, and topics use SPRAG's shared realtime bridge. That bridge is documented in [Realtime](/docs/framework/realtime/) and uses the browser's native `WebSocket` API.
+
+If you are writing browser-only Ragot code outside SPRAG's bridge, pass a client object with `on`, `off`, and `emit` methods to Ragot's socket helpers. A Socket.IO browser client can fit that shape, but it is an app-level dependency, not a Ragot or SPRAG runtime dependency.
 
 ### Module imports
 

@@ -114,7 +114,7 @@ app = App(
 )
 ```
 
-This starts a Socket.IO server alongside the WSGI app. The browser loads the Socket.IO client automatically.
+This serves SPRAG's native websocket endpoint alongside the WSGI app. Browser Modules that use `on_socket(...)`, `emit_socket(...)`, `join_topic(...)`, or `refetch_on_socket(...)` connect through SPRAG's shared runtime bridge.
 
 ## Environment variables
 

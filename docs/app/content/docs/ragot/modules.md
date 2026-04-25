@@ -111,6 +111,8 @@ For advanced ownership patterns, `adopt_component(...)` is also real on the unde
 
 ## Sockets
 
+These methods use SPRAG's shared realtime bridge when the page runs in websocket mode. They do not require a Socket.IO client.
+
 ```python
 def on_start(self):
     # Listen for socket events
