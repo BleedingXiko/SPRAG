@@ -1,6 +1,6 @@
 from sprag import ui
 
-from .urls import BLOG_BASE_URL, DOCS_BASE_URL
+from .urls import BLOG_BASE_URL, DOCS_BASE_URL, SEARCH_BASE_URL
 
 
 def card(title, href, description, meta=None):
@@ -28,6 +28,7 @@ def docs_sidebar(sections, current_path, id_=None):
     nav_links = ui.div(
         ui.a("Docs", href=DOCS_BASE_URL, class_="sidebar-nav-link"),
         ui.a("Blog", href=BLOG_BASE_URL, class_="sidebar-nav-link"),
+        ui.a("Search", href=SEARCH_BASE_URL, class_="sidebar-nav-link"),
         ui.a("GitHub", href="https://github.com/BleedingXiko/SPRAG",
              target="_blank", class_="sidebar-nav-link"),
         class_="sidebar-nav",
