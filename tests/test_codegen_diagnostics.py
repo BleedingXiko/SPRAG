@@ -2,7 +2,7 @@ import unittest
 import json
 import inspect
 
-from sprag import Component, Module, browser, imports, ui
+from sprag import Component, Module, browser, imports, ui, virtual_scroll
 from sprag.dev.codegen.components import compile_component_artifact, compile_component_class
 from sprag.dev.codegen.modules import compile_module_artifact, compile_module_class
 from sprag.dev.codegen.mappings import JSCodegenError
@@ -97,6 +97,29 @@ class DynamicMountsComponent(Component):
                 alt="Demo",
             ),
         )
+
+
+@virtual_scroll(chunk=20, axis="horizontal", root=".rail", container_class="rail-inner")
+class VirtualScrollCallbacksComponent(Component):
+    def render(self, props=None):
+        return ui.div(class_="rail")
+
+    def total(self):
+        return 1000
+
+    async def chunk(self, i, load_ctx):
+        if load_ctx and not load_ctx.is_current():
+            return None
+        return ui.div("chunk " + str(i), class_="chunk")
+
+    def measure(self, el, i):
+        return el.offset_width
+
+    def placeholder(self, i, px):
+        return ui.div(class_="placeholder")
+
+    def evicted(self, i):
+        return i
 
 
 class InvalidComponentSubscription(Component):
@@ -196,6 +219,17 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("setMetadata(metadata = {}, options = {})", compiled)
         self.assertIn("window.__SPRAG_SET_METADATA__", compiled)
         self.assertIn('this.setMetadata({ "og:title": "Updated OG title" });', compiled)
+
+    def test_compile_component_supports_virtual_scroll_callbacks(self):
+        compiled = compile_component_class(VirtualScrollCallbacksComponent)
+        self.assertIn("VirtualScroller", compiled)
+        self.assertIn('axis: "horizontal"', compiled)
+        self.assertIn("renderChunk: (i, loadCtx) => this.chunk(i, loadCtx)", compiled)
+        self.assertIn("measureChunk: (el, i) => this.measure(el, i)", compiled)
+        self.assertIn("buildPlaceholder: (i, px) => this.placeholder(i, px)", compiled)
+        self.assertIn("onChunkEvicted: (i) => this.evicted(i)", compiled)
+        self.assertIn("async chunk(i, load_ctx)", compiled)
+        self.assertIn("load_ctx.isCurrent()", compiled)
 
     def test_compile_module_artifact_emits_source_map_metadata(self):
         artifact = compile_module_artifact(SupportedModule)

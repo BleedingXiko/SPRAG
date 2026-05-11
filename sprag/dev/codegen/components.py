@@ -779,7 +779,7 @@ def _emit_virtual_scroll_setup(cfg: dict, component_class) -> list[str]:
         f"initialChunks: {cfg['initial_chunks']}",
         f"rootMargin: {json.dumps(cfg['root_margin'])}",
         f"axis: {json.dumps(cfg['axis'])}",
-        "renderChunk: (i) => this.chunk(i)",
+        "renderChunk: (i, loadCtx) => this.chunk(i, loadCtx)",
         "totalItems: () => this.total()",
     ]
     if cfg["root"]:

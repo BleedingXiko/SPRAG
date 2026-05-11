@@ -114,11 +114,17 @@ def virtual_scroll(
 
     The component must define:
 
-    - ``chunk(self, i)`` — returns the DOM element for chunk ``i``
+    - ``chunk(self, i)`` — returns the DOM element for chunk ``i``. It may
+      also accept Ragot's load context as ``chunk(self, i, load_ctx)`` for
+      async stale-load checks.
     - ``total(self)`` — returns the total item count
 
-    Optional methods: ``measure``, ``placeholder``, ``recycle`` (REQUIRED if
-    ``pool_size > 0``), ``evicted``.
+    Optional methods map to Ragot callbacks: ``measure`` ->
+    ``measureChunk``, ``placeholder`` -> ``buildPlaceholder``, ``recycle`` ->
+    ``onRecycle`` (REQUIRED if ``pool_size > 0``), and ``evicted`` ->
+    ``onChunkEvicted``. Ragot's default measurement is height-based; for
+    horizontal scrollers, define ``measure(self, el, i)`` and return the
+    chunk width.
 
     Decorated components get a public scroller handle at
     ``self.virtual_scroll`` in Python authoring code (emitted as
