@@ -99,3 +99,45 @@ class ChartModule(Module):
 ## Lower-level Ragot helpers
 
 If you need to drop below the `dom.*` helper surface, the shipped Ragot runtime also includes lower-level primitives such as `createLazyLoader(...)` and `createInfiniteScroll(...)`. SPRAG's normal authoring path usually reaches those through `ui.LazyImage`, `@infinite_scroll`, and virtual-scroll integration, but they are part of the underlying runtime.
+
+## Vanilla JavaScript with Ragot
+
+For complex browser-only behavior, put a normal JavaScript module in
+`app/static/` and import Ragot from the vendored runtime:
+
+```javascript
+// app/static/js/gallery.mjs
+import { Component, createElement, VirtualScroller } from "/vendor/ragot.esm.min.js";
+
+class GalleryRail extends Component {
+    render() {
+        return createElement("div", { className: "gallery-rail" });
+    }
+}
+
+export function mountGallery(root) {
+    const rail = new GalleryRail();
+    rail.mount(root);
+    return rail;
+}
+```
+
+Attach it to a page or mount as a module script:
+
+```python
+from sprag import page, script
+
+gallery = page(
+    path="/gallery",
+    controller=GalleryController,
+    screen=GalleryScreen,
+    mode="hybrid",
+    js=[script("app/static/js/gallery.mjs", module=True)],
+)
+```
+
+During builds, SPRAG copies `app/static/js/gallery.mjs` to
+`/static/js/gallery.mjs` and rewrites imports that point at
+`ragot.esm.min.js` to the emitted runtime location. That means the source can
+use `/vendor/ragot.esm.min.js`, while static and packaged builds still get the
+correct relative import path.

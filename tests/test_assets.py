@@ -117,11 +117,19 @@ class AssetContractTests(unittest.TestCase):
             )
             (root / "app" / "shell.css").write_text("body { color: red; }\n", encoding="utf-8")
             (root / "app" / "routes" / "docs" / "module-helper.mjs").write_text(
-                "window.__SPRAG_TEST_MODULE__ = true;\n",
+                "import { bus } from '/vendor/ragot.esm.min.js';\n"
+                "window.__SPRAG_TEST_MODULE__ = bus;\n",
                 encoding="utf-8",
             )
             (root / "app" / "static" / "vendor" / "dayjs.mjs").write_text(
                 "export default function dayjs() { return { format() { return '2026-04-12'; } }; }\n",
+                encoding="utf-8",
+            )
+            (root / "app" / "static" / "vendor" / "ragot-widget.mjs").write_text(
+                "import { Component } from '/vendor/ragot.esm.min.js';\n"
+                "import('./ragot.esm.min.js');\n"
+                "import('https://cdn.example.test/ragot.esm.min.js');\n"
+                "export { Component };\n",
                 encoding="utf-8",
             )
             (root / "app" / "static" / "vendor" / "widget.js").write_text(
@@ -173,13 +181,22 @@ class AssetContractTests(unittest.TestCase):
             self.assertTrue((root / "dist" / "assets" / "app" / "shell.css").exists())
             self.assertTrue((root / "dist" / "assets" / "app" / "routes" / "docs" / "module-helper.mjs").exists())
             self.assertTrue((root / "dist" / "static" / "vendor" / "dayjs.mjs").exists())
+            self.assertTrue((root / "dist" / "static" / "vendor" / "ragot-widget.mjs").exists())
             self.assertTrue((root / "dist" / "static" / "vendor" / "widget.js").exists())
             self.assertTrue((root / "dist" / "static" / "images" / "logo.svg").exists())
+
+            module_helper = (root / "dist" / "assets" / "app" / "routes" / "docs" / "module-helper.mjs").read_text(encoding="utf-8")
+            ragot_widget = (root / "dist" / "static" / "vendor" / "ragot-widget.mjs").read_text(encoding="utf-8")
+            self.assertIn("from '../../../../vendor/ragot.esm.min.js'", module_helper)
+            self.assertIn("from '../../vendor/ragot.esm.min.js'", ragot_widget)
+            self.assertIn("import('../../vendor/ragot.esm.min.js')", ragot_widget)
+            self.assertIn("import('https://cdn.example.test/ragot.esm.min.js')", ragot_widget)
 
             asset_paths = {asset["web_path"] for asset in manifest["assets"]}
             self.assertIn("/assets/app/shell.css", asset_paths)
             self.assertIn("/assets/app/routes/docs/module-helper.mjs", asset_paths)
             self.assertIn("/static/vendor/dayjs.mjs", asset_paths)
+            self.assertIn("/static/vendor/ragot-widget.mjs", asset_paths)
             self.assertIn("/static/vendor/widget.js", asset_paths)
             self.assertIn("/static/images/logo.svg", asset_paths)
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import html
 import importlib
+import posixpath
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -241,6 +243,46 @@ def emit_assets(output_dir: str | Path, assets: Iterable[Asset]):
         target_path = target_root / asset.web_path.lstrip("/")
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(asset.source_path, target_path)
+        _rewrite_copied_js_ragot_imports(target_path, asset.web_path)
+
+
+_JS_IMPORT_SPEC_RE = re.compile(
+    r"""(?P<head>\bimport\s*(?:\(\s*)?(?:[^'";]*?\s+from\s*)?)(?P<quote>['"])(?P<spec>[^'"]+)(?P=quote)""",
+    re.M,
+)
+
+
+def _rewrite_copied_js_ragot_imports(target_path: Path, web_path: str) -> None:
+    if target_path.suffix.lower() not in {".js", ".mjs"}:
+        return
+    try:
+        content = target_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return
+    rewritten = _rewrite_ragot_import_specs(content, web_path)
+    if rewritten != content:
+        target_path.write_text(rewritten, encoding="utf-8")
+
+
+def _rewrite_ragot_import_specs(content: str, web_path: str) -> str:
+    current_dir = posixpath.dirname(web_path.lstrip("/"))
+    if current_dir:
+        runtime_spec = posixpath.relpath("vendor/ragot.esm.min.js", current_dir)
+    else:
+        runtime_spec = "vendor/ragot.esm.min.js"
+    if not runtime_spec.startswith("."):
+        runtime_spec = "./" + runtime_spec
+
+    def replace(match: re.Match) -> str:
+        spec = match.group("spec")
+        if _is_external_path(spec):
+            return match.group(0)
+        spec_path = spec.split("#", 1)[0].split("?", 1)[0]
+        if posixpath.basename(spec_path) != "ragot.esm.min.js":
+            return match.group(0)
+        return f"{match.group('head')}{match.group('quote')}{runtime_spec}{match.group('quote')}"
+
+    return _JS_IMPORT_SPEC_RE.sub(replace, content)
 
 
 def render_css_links(assets: Iterable[Asset], *, document_path: str | None = None) -> str:

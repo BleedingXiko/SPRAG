@@ -1,0 +1,19 @@
+# Static Assets
+
+Files in `app/static/` are served at `/static/...` and copied into builds.
+Use this folder for images, fonts, vendored JavaScript, CSS, web workers,
+WASM, and small browser-only bridge modules.
+
+Examples:
+
+- `app/static/images/logo.png` -> `/static/images/logo.png`
+- `app/static/js/gallery.mjs` -> `/static/js/gallery.mjs`
+- `app/static/vendor/widget.js` -> `/static/vendor/widget.js`
+
+Use `page(js=[...])`, `mount(js=[...])`, or `modules={...}` to attach scripts
+from here to a surface. For vanilla JavaScript that needs Ragot directly,
+import from `/vendor/ragot.esm.min.js`; SPRAG rewrites that import to the
+correct emitted runtime path during builds.
+
+The project-root `public/` folder is different: it is copied to the build
+output root for files like `favicon.ico`, `robots.txt`, and `sitemap.xml`.
