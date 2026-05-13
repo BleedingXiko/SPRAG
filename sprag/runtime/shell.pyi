@@ -9,7 +9,12 @@ from .assets import ModuleImport, SurfaceAssets
 
 @dataclass(frozen=True)
 class Shell:
-    """Shared document chrome and surface assets for pages and mounts."""
+    """Shared HTML shell and assets for pages and mounts.
+
+    Use ``template`` for document chrome, ``css``/``js`` for global assets,
+    ``modules`` for global ESM aliases, and ``slot`` for where SPRAG inserts
+    rendered content.
+    """
 
     template: Optional[str] = ...
     css: tuple[str, ...] = ...
@@ -26,7 +31,13 @@ def shell(
     js: Any = ...,
     modules: Any = ...,
     slot: str = ...,
-) -> Shell: ...
+) -> Shell:
+    """Create or extend a SPRAG shell.
+
+    Pass an existing Shell as ``base`` to layer route-specific CSS/JS/modules
+    over app-wide document chrome.
+    """
+    ...
 def apply_shell(
     body_html: str,
     *,

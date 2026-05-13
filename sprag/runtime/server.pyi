@@ -49,7 +49,7 @@ TimerHandle = Any
 
 @dataclass(frozen=True)
 class ActionResult:
-    """Structured browser-action response payload."""
+    """Return payload from action dispatch and browser action calls."""
 
     ok: bool
     value: object = ...
@@ -59,7 +59,7 @@ class ActionResult:
 
 
 class Redirect(Exception):
-    """First-class redirect contract for page loads and browser actions."""
+    """Redirect response for page loads and browser actions."""
 
     location: str
     status: int
@@ -86,7 +86,9 @@ def redirect(
 
 
 @overload
-def action(fn: F, *, schema: Any = ..., name: Optional[str] = ..., defer: bool = ..., derive: bool = ...) -> F: ...
+def action(fn: F, *, schema: Any = ..., name: Optional[str] = ..., defer: bool = ..., derive: bool = ...) -> F:
+    """Expose a Controller method to browser ``call_action(...)``."""
+    ...
 @overload
 def action(fn: None = ..., *, schema: Any = ..., name: Optional[str] = ..., defer: bool = ..., derive: bool = ...) -> Callable[[F], F]: ...
 
@@ -120,7 +122,9 @@ def requires_auth(
     require_active_profile: bool = ...,
     redirect_to: str = ...,
     next_param: str = ...,
-) -> Callable[[F], F]: ...
+) -> Callable[[F], F]:
+    """Guard a Controller, ``load()``, or ``@action`` with auth requirements."""
+    ...
 
 
 def socket_target(
@@ -133,7 +137,13 @@ def socket_target(
 
 
 class Service(SPECTERService):
-    """SPRAG Service: Specter Service plus the cross-runtime bridge."""
+    """Server-side lifecycle service.
+
+    Use this for long-lived server state, timers, cleanup, bus events, and
+    store subscriptions. Common calls are ``self.set_state(...)``,
+    ``self.watch_state(...)``, ``self.subscribe(...)``, ``self.interval(...)``,
+    and ``self.add_cleanup(...)``.
+    """
 
     name: str
     state: dict[str, Any]
@@ -196,7 +206,7 @@ class Service(SPECTERService):
 
 
 class Watcher:
-    """SPECTER Watcher re-exported through SPRAG."""
+    """Server watcher for polling or streaming external state."""
 
     name: str
 
@@ -223,7 +233,12 @@ class Watcher:
 
 
 class QueueService(SPECTERQueueService):
-    """SPRAG queue convention layer on top of Specter's raw worker queue."""
+    """Background worker queue with job state and browser-friendly results.
+
+    Subclass this for server jobs. Use ``enqueue(...)`` from a Controller,
+    update jobs with ``progress_job(...)``, and expose state with
+    ``queue_snapshot()`` or ``job_status(...)``.
+    """
 
     signal_event: str
     job_history_limit: int
@@ -304,7 +319,12 @@ class QueueService(SPECTERQueueService):
 
 
 class Controller(SPECTERController):
-    """SPRAG controller with route/action/session/socket convenience."""
+    """Server-side route controller.
+
+    Implement ``load()`` to return JSON-safe page data. Decorate methods with
+    ``@action`` so browser Modules can call them with ``self.call_action(...)``.
+    Use ``self.request`` for params, query, form data, files, session, and auth.
+    """
 
     route: Optional[str]
 

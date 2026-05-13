@@ -36,7 +36,7 @@ class ProtectedAuthModule(Module):
             self.on_switch_profile,
         )
         payload = browser.window.__SPRAG_PAYLOAD__ or {}
-        client_auth = payload.auth or None
+        client_auth = payload.get("auth") or None
         self.set_state(
             {
                 "client_auth": client_auth,

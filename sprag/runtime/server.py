@@ -148,32 +148,12 @@ def _derive_schema_from_signature(action_name, method):
 
 
 def action(fn=None, *, schema=None, name=None, defer=False, derive=False):
-    """Mark a controller method as a route action.
+    """Expose a Controller method to browser ``call_action(...)``.
 
-    When ``defer=True`` the action body runs in a background greenlet and
-    the HTTP response returns immediately with ``{"deferred": True}``.
-    On completion the framework emits ``sprag:action.resolved`` (or
-    ``sprag:action.failed``) via the websocket transport targeted to the
-    requesting session.
-
-    When ``derive=True`` and no explicit ``schema`` is provided, the schema
-    is automatically derived from the method's type hints and default values::
-
-        @action(derive=True)
-        def save_draft(self, title: str, email: str, summary: str = ""):
-            ...
-
-    This is equivalent to::
-
-        @action(schema=Schema("save_draft", {
-            "title": Field(str, required=True),
-            "email": Field(str, required=True),
-            "summary": Field(str, required=False, default=""),
-        }))
-        def save_draft(self, title, email, summary=""):
-            ...
-
-    Explicit ``schema=Schema(...)`` always takes precedence over derivation.
+    Use ``@action`` on methods in a Controller. Add ``schema=...`` for
+    explicit validation, ``derive=True`` to infer a schema from type hints,
+    ``name=...`` to change the browser action name, and ``defer=True`` for a
+    background job-style action result.
     """
 
     def decorator(method):
@@ -303,24 +283,12 @@ def socket_target(*, route=None, client_id=None, session_id=None, topic=None):
 
 
 class Service(SPECTERService):
-    """SPRAG Service — Specter ``Service`` plus the cross-runtime bridge.
+    """Server-side lifecycle service.
 
-    SPRAG's pitch is "one Python language that mirrors both runtimes 1:1".
-    The intersection of ``sprag.Module`` and ``sprag.Service`` is the
-    canonical symmetric surface — the same call shape works on either side:
-
-    - ``self.listen(event, fn)`` / ``self.emit(event, data)``
-    - ``self.set_state(partial)`` / ``self.watch_state(fn)``
-    - ``self.subscribe(store, fn)``  (auto-cleanup-tied store subscription)
-    - ``self.timeout(fn, seconds)`` / ``self.interval(fn, seconds)``
-    - ``self.add_cleanup(fn)`` / ``self.adopt(child)``
-
-    Specter ``Service`` already provides all of those except ``set_state``,
-    ``watch_state``, and the 2-arg form of ``subscribe`` — which Specter
-    expresses by going through the underlying ``Store`` (``self.state.set``,
-    ``self.state.watch``, ``store.subscribe``). The shims below adapt those
-    to the Module-shaped surface so cross-runtime user code reads the same
-    on both sides.
+    Use this for long-lived server state, timers, cleanup, bus events, and
+    store subscriptions. Common calls are ``self.set_state(...)``,
+    ``self.watch_state(...)``, ``self.subscribe(...)``, ``self.interval(...)``,
+    and ``self.add_cleanup(...)``.
     """
 
     # ---- Cross-runtime state bridge (mirrors Module shape) ----------------
@@ -333,17 +301,7 @@ class Service(SPECTERService):
     # ``fn(snapshot)`` (one arg).
 
     def watch_state(self, fn):
-        """Watch local state changes. Mirrors ``Module.watch_state``.
-
-        Adapts Specter's ``watch(fn)`` (callback ``(state, service)``) to the
-        SPRAG one-arg ``fn(snapshot)`` shape used on the browser side. Fires
-        immediately with the current snapshot at registration time and is
-        auto-unsubscribed on Service teardown.
-
-        Goes through ``SPECTERService.subscribe`` directly rather than
-        ``self.watch`` so the SPRAG ``subscribe`` override below does not
-        recursively re-adapt the callback.
-        """
+        """Watch local state changes with ``fn(snapshot)``."""
         return SPECTERService.subscribe(
             self,
             lambda state, _service: fn(state),
@@ -352,18 +310,7 @@ class Service(SPECTERService):
         )
 
     def subscribe(self, target, fn=None, *, immediate=False, owner=None):
-        """Two shapes — pick whichever the situation needs:
-
-        - ``subscribe(fn)`` — subscribe to self-state changes. The callback
-          receives ``(snapshot)``, matching Module's one-arg convention.
-          (Specter's native callback shape is ``(state, service)``; the
-          adapter strips the second arg.)
-        - ``subscribe(store, fn)`` — subscribe to a separate store with
-          auto-cleanup tied to this Service. ``store`` may be a SPRAG
-          ``StoreBridge`` or any object with a ``.subscribe`` method (Specter
-          ``Store`` / ``Model``). This is the cross-runtime symmetry shape:
-          the same call works on ``sprag.Module``.
-        """
+        """Subscribe to this service state or to a separate store."""
         if fn is None:
             # 1-arg: self-state subscribe, adapted to fn(snapshot).
             user_fn = target
@@ -471,13 +418,11 @@ class _JobCancelled(RuntimeError):
 
 
 class QueueService(SPECTERQueueService):
-    """SPRAG queue convention layer on top of Specter's raw worker queue.
+    """Background worker queue with job state and browser-friendly results.
 
-    Specter's ``QueueService`` gives SPRAG the lifecycle-owned worker pool.
-    This subclass adds the author-facing conventions the framework was
-    missing: structured job records, progress updates, cancellation requests,
-    a stable action result shape, and optional targeted socket invalidation so
-    the browser can refetch authoritative job state.
+    Subclass this for server jobs. Use ``enqueue(...)`` from a Controller,
+    update jobs with ``progress_job(...)``, and expose state with
+    ``queue_snapshot()`` or ``job_status(...)``.
     """
 
     signal_event = "sprag:queue.job.changed"
@@ -987,7 +932,12 @@ class QueueService(SPECTERQueueService):
 
 
 class Controller(SPECTERController):
-    """SPRAG controller with route/action convenience."""
+    """Server-side route controller.
+
+    Implement ``load()`` to return JSON-safe page data. Decorate methods with
+    ``@action`` so browser Modules can call them with ``self.call_action(...)``.
+    Use ``self.request`` for params, query, form data, files, session, and auth.
+    """
 
     route = None
 

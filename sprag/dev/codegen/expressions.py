@@ -204,6 +204,28 @@ def _compile_expr(node, env, method_names=None):
                 ms_js = f"({_compile_expr(sec_arg, env, method_names=method_names)} * 1000)"
             js_method = node.func.attr  # timeout / interval map identity
             return f"this.{js_method}({fn_js}, {ms_js})"
+        # self.subscribe(store, fn) — lifecycle-managed store subscription.
+        # The Python API mirrors Specter's store.subscribe(fn, owner=self).
+        # In the browser this must compile to store.subscribe(fn) +
+        # this.addCleanup(unsub) so the subscription tears down with the Module.
+        # Ragot's Module.subscribe(fn, options) is for Module-local state only
+        # and silently no-ops when its first arg is not a function.
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "subscribe"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "self"
+            and len(node.args) == 2
+            and isinstance(node.args[0], ast.Name)
+            and (env.get("__sprag_stores__") or {}).get(node.args[0].id)
+        ):
+            store_refs = env["__sprag_stores__"]
+            store_js_name = store_refs[node.args[0].id]
+            fn_arg = node.args[1]
+            fn_js = _compile_expr(fn_arg, env, method_names=method_names)
+            if _is_bound_method_reference(fn_arg, method_names):
+                fn_js = f"{fn_js}.bind(this)"
+            return f"this.addCleanup({store_js_name}.subscribe({fn_js}))"
         # Store method translation. The Python local name is mapped to the
         # JS bridge name via env, and the SPRAG method name is translated
         # to its JS counterpart via the STORE_METHOD_JS table (nearly

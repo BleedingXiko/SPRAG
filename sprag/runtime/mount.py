@@ -10,7 +10,11 @@ from .assets import normalize_module_imports
 
 @dataclass(frozen=True)
 class Mount:
-    """Server-known URL that boots a Ragot-owned client app."""
+    """Client-owned app mounted at a server URL.
+
+    Use a Mount when the browser owns the whole surface from boot. Provide the
+    root Component and optional Module/boot Controller.
+    """
 
     path: str
     component: type
@@ -48,10 +52,10 @@ def mount(
     modules=None,
     providers=None,
 ):
-    """Declare a client app mount.
+    """Declare a client-owned app mount.
 
-    A mount is not a route mode. It is a server URL that returns a boot
-    document and lets Ragot create the root Component/Module in the browser.
+    Use this in ``app/mounts/.../mount.py`` with ``path`` and ``component``.
+    Add ``module`` for browser lifecycle logic and ``boot`` for server data.
     """
     if css is not None or js is not None:
         from .shell import shell as build_shell

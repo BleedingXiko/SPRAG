@@ -7,7 +7,11 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class Script:
-    """Author-facing script asset declaration."""
+    """Browser script asset declaration.
+
+    Use ``script("path.js")`` for classic scripts and
+    ``script("path.js", module=True)`` for module scripts.
+    """
 
     src: str
     module: bool = ...
@@ -15,7 +19,11 @@ class Script:
 
 @dataclass(frozen=True)
 class ModuleImport:
-    """Author-facing ESM import declaration."""
+    """ESM import alias for browser-authored Python.
+
+    Declare in ``page(..., modules={...})``, ``mount(..., modules={...})``, or
+    shell/app modules, then access it through ``imports.alias`` in Module code.
+    """
 
     src: str
     export: str = ...
@@ -55,5 +63,9 @@ class SurfaceAssets:
     def all(self) -> tuple[Asset, ...]: ...
 
 
-def script(src: str, *, module: bool = ...) -> Script: ...
-def module(src: str, export: str = ...) -> ModuleImport: ...
+def script(src: str, *, module: bool = ...) -> Script:
+    """Declare a JS file to load on a page, mount, or shell."""
+    ...
+def module(src: str, export: str = ...) -> ModuleImport:
+    """Declare an ESM import alias for ``imports.<alias>`` browser code."""
+    ...

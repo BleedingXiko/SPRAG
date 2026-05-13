@@ -17,27 +17,35 @@ from .urls import relative_url
 
 @dataclass(frozen=True)
 class Script:
-    """Author-facing script asset declaration."""
+    """Browser script asset declaration.
+
+    Use ``script("path.js")`` for classic scripts and
+    ``script("path.js", module=True)`` for module scripts.
+    """
 
     src: str
     module: bool = False
 
 
 def script(src, *, module: bool = False) -> Script:
-    """Declare a script asset for ``page(js=[...])`` / ``mount(js=[...])``."""
+    """Declare a JS file to load on a page, mount, or shell."""
     return Script(src=str(src), module=bool(module))
 
 
 @dataclass(frozen=True)
 class ModuleImport:
-    """Author-facing ESM import declaration."""
+    """ESM import alias for browser-authored Python.
+
+    Declare in ``page(..., modules={...})``, ``mount(..., modules={...})``, or
+    shell/app modules, then access it through ``imports.alias`` in Module code.
+    """
 
     src: str
     export: str = "default"
 
 
 def module(src, export: str = "default") -> ModuleImport:
-    """Declare an ESM import for ``modules={...}`` surfaces."""
+    """Declare an ESM import alias for ``imports.<alias>`` browser code."""
     export_name = str(export or "default")
     if not export_name:
         raise ValueError(

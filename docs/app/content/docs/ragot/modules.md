@@ -88,6 +88,18 @@ def on_save(self, event, target):
     result.then(self._on_saved)
 ```
 
+## Reading JSON payloads
+
+Browser payloads are plain JSON objects. Use dict-style access in Module code:
+
+```python
+payload = browser.window.__SPRAG_PAYLOAD__ or {}
+auth = payload.get("auth")
+count = payload.get("count", 0)
+```
+
+That spelling type-checks cleanly and compiles to JavaScript property access.
+
 ## DOM access
 
 - **`self.element`** — the DOM node this Module is attached to (passed from `hydrate()`)
@@ -168,6 +180,46 @@ def on_click(self, event, target):
     self.navigate("/other-page")
 ```
 
+## Page metadata
+
+Update the page title, description, or canonical URL dynamically from the browser:
+
+```python
+def on_start(self):
+    self.set_metadata({"title": "My Page — App"})
+
+def _on_article_loaded(self, result):
+    article = (result.value or {}).get("article") or {}
+    self.set_metadata({
+        "title": article.get("title", ""),
+        "description": article.get("summary", ""),
+    })
+```
+
+`set_metadata(metadata, options={})` merges the dict onto the active page head. The same keys supported in the static `page(metadata={...})` manifest work here: `title`, `description`, `canonical`, `og:*`. Use it for routes where the document title depends on data fetched after hydration.
+
+## Batching state updates
+
+`batch_state(fn)` calls `fn(state)` with the current mutable state and fires exactly one re-render when the mutator returns. Use it when you need multiple fields updated atomically, reading from the current state:
+
+```python
+class CounterModule(Module):
+    def on_start(self):
+        self.delegate(self.element, "click", "[data-role='reset']", self.on_reset)
+
+    def on_reset(self, event, target):
+        self.batch_state(self._reset)
+
+    def _reset(self, state):
+        self.set_state({
+            "count": 0,
+            "total": state.get("total", 0) + 1,
+            "last_reset": True,
+        })
+```
+
+Pass a method reference — nested `def` inside a method is not supported in browser codegen.
+
 ## Timers
 
 ```python
@@ -189,11 +241,11 @@ class MyModule(Module):
     def on_start(self):
         self.subscribe(counter_store, self._on_store)
 
-    def _on_store(self, state, meta, store):
+    def _on_store(self, state, meta, s):
         self.set_state({"count": state["count"]})
 ```
 
-Auto-cleaned on `on_stop()`.
+Auto-cleaned on `on_stop()`. The callback receives `(state, meta, store)` — trailing args can be omitted if unused.
 
 ## Page and Mount Providers
 

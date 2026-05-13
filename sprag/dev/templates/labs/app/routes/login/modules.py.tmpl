@@ -22,7 +22,7 @@ class LoginModule(Module):
     def on_start(self):
         self.delegate(self.element, "submit", "[data-role='login-form']", self.on_submit)
         payload = browser.window.__SPRAG_PAYLOAD__ or {}
-        client_auth = payload.auth or None
+        client_auth = payload.get("auth") or None
         self.set_state(
             {
                 "client_auth": client_auth,

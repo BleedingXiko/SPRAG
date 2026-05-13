@@ -24,10 +24,11 @@ ALT_SLOT = "<sprag-slot></sprag-slot>"
 
 @dataclass(frozen=True)
 class Shell:
-    """Shared document chrome and surface assets for pages and mounts.
+    """Shared HTML shell and assets for pages and mounts.
 
-    A shell is intentionally server-side document composition: it wraps
-    rendered route HTML or the mount root target before Ragot boots.
+    Use ``template`` for document chrome, ``css``/``js`` for global assets,
+    ``modules`` for global ESM aliases, and ``slot`` for where SPRAG inserts
+    rendered content.
     """
 
     template: str | None = None
@@ -40,10 +41,8 @@ class Shell:
 def shell(base=None, *, template=None, css=None, js=None, modules=None, slot=DEFAULT_SLOT) -> Shell:
     """Create or extend a SPRAG shell.
 
-    Usage::
-
-        base_shell = shell(template="app/shell.html", css=["app/shell.css"])
-        route_shell = shell(base_shell, css=["app/routes/counter/counter.css"])
+    Pass an existing Shell as ``base`` to layer route-specific CSS/JS/modules
+    over app-wide document chrome.
     """
     if isinstance(base, Shell):
         base_template = base.template

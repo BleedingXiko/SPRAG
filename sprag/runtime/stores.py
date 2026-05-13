@@ -93,12 +93,11 @@ STORE_METHODS_OPTIONS_KWARGS = {"subscribe"}
 
 
 class StoreBridge:
-    """Server-side handle to a SPRAG store. Browser-side this becomes a JS import.
+    """Shared state store handle for server and browser code.
 
-    Methods on this object delegate to a Specter ``Model`` lazily created on
-    first use. The same method calls, when seen by the codegen inside a
-    Module/Component file, are routed to the corresponding bridge method on
-    the JS side via ``STORE_METHOD_JS``.
+    Import the same store in Services, Controllers, Modules, or Components.
+    Use ``get/set/patch/update/delete/reset`` for state and
+    ``subscribe/listen/select`` for reactions and derived reads.
     """
 
     __slots__ = ("name", "initial", "debug", "_impl")
@@ -241,32 +240,11 @@ class StoreBridge:
 
 
 def store(name: str, *, initial: Optional[dict] = None, debug: bool = False) -> StoreBridge:
-    """Declare a SPRAG store: one Python object, mirrored on both runtimes.
+    """Declare a named shared state store.
 
-    Usage::
-
-        # app/stores.py
-        from sprag import store
-
-        session = store("session", initial={
-            "user": {"name": "alice"},
-            "counter": 0,
-        })
-
-        # later, in either a Service OR a Module — the same source compiles
-        # to a Specter Model call on the server and a Ragot bridge call in
-        # the browser:
-        from app.stores import session
-        session.set("user.name", "bob")
-        session.subscribe(
-            lambda user: print(user),
-            selector=lambda s: s["user"],
-            immediate=True,
-        )
-
-    Re-declaring the same name with the same initial state is idempotent
-    (returns the existing bridge); re-declaring with different initial state
-    raises ``ValueError`` so that drift between two declarations is loud.
+    Put declarations in ``app/stores.py`` and import them anywhere. The same
+    handle works on the server and in browser-authored Modules/Components.
+    Re-declaring the same name with different initial state raises ``ValueError``.
     """
     existing = _STORE_BY_NAME.get(name)
     if existing is not None:
@@ -290,13 +268,7 @@ def declared_stores() -> list[StoreBridge]:
 
 
 def store_fingerprint(stores: Optional[list[StoreBridge]] = None) -> str:
-    """Return a stable fingerprint for the declared store contract.
-
-    The fingerprint is intentionally derived from store names plus declared
-    initial snapshots, not the current live values. It is used by dev-time
-    hot reload restore logic to invalidate cached browser snapshots when the
-    store surface changes shape between rebuilds.
-    """
+    """Return a stable hash for declared store names and initial state."""
     stores = stores if stores is not None else declared_stores()
     payload = [
         {"name": bridge.name, "initial": bridge.initial}

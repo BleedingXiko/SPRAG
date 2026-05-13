@@ -70,7 +70,7 @@ class CounterService(Service):
 
 ## Browser-side usage
 
-In a `Module`, use `self.subscribe()` to bind store changes to your lifecycle:
+In a `Module`, use `self.subscribe(store, fn)` to bind store changes to your lifecycle:
 
 ```python
 from sprag import Module, store

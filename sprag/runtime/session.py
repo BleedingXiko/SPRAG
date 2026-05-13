@@ -42,6 +42,12 @@ def resolve_session_id(raw_cookie: str | None) -> tuple[str, bool]:
 
 @dataclass(frozen=True)
 class SessionPolicy:
+    """Cookie lifetime settings for SPRAG request sessions.
+
+    Set idle, absolute, and remember-me TTLs in seconds on ``App`` when the
+    default session cookie lifetime needs to change.
+    """
+
     idle_ttl_seconds: int | None = None
     absolute_ttl_seconds: int | None = None
     remember_me_ttl_seconds: int | None = None
@@ -68,7 +74,11 @@ def session_cookie_header(session_id: str, *, max_age: int | None = None) -> tup
 
 
 class RequestSession:
-    """Mutable server-side session state scoped to one request."""
+    """Mutable per-request session store.
+
+    Use ``get/set/patch/delete/clear`` for JSON-safe session values. Call
+    ``rotate()`` after login and ``invalidate()`` on logout.
+    """
 
     def __init__(
         self,
@@ -185,7 +195,11 @@ class RequestSession:
 
 
 class InMemorySessionStore:
-    """Default in-process session store for server-side auth demos."""
+    """Default in-process session persistence.
+
+    Good for local development and demos. Provide your own ``session_store``
+    provider on ``App`` when sessions must survive process restarts.
+    """
 
     name = "session_store"
 
@@ -223,7 +237,11 @@ class InMemorySessionStore:
 
 
 class AnonymousAuthService:
-    """Default auth adapter that exposes an anonymous public snapshot."""
+    """Fallback auth provider for anonymous apps.
+
+    Replace this with an ``auth`` provider on ``App`` to load users, profiles,
+    authorization rules, login sessions, and browser-safe auth snapshots.
+    """
 
     name = "auth"
 

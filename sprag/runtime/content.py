@@ -13,6 +13,13 @@ from .urls import join_url
 
 @dataclass(frozen=True)
 class ContentDocument:
+    """Markdown content document.
+
+    Use ``metadata`` for frontmatter, ``body`` for source markdown, ``html``
+    for rendered output, and ``url_path``/``slug``/``path_parts`` for routing.
+    Strip server-only fields before returning it from ``load()``.
+    """
+
     source_path: Path
     url_path: str
     slug: str
@@ -40,6 +47,7 @@ class ContentDocument:
 
 
 def load_markdown_document(path, *, url_path=None, slug=None, path_parts=None) -> ContentDocument:
+    """Load one Markdown file into a ``ContentDocument``."""
     source_path = Path(path)
     metadata, body = _split_frontmatter(source_path.read_text(encoding="utf-8"))
     resolved_slug = slug or slugify(source_path.stem)
@@ -60,6 +68,7 @@ def load_markdown_document(path, *, url_path=None, slug=None, path_parts=None) -
 
 
 def load_markdown_tree(root, *, base_url="/") -> list[ContentDocument]:
+    """Load every Markdown file under ``root`` as sorted content documents."""
     root_path = Path(root)
     docs = []
     for source_path in sorted(root_path.rglob("*.md")):

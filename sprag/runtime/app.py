@@ -24,7 +24,13 @@ class _AppRuntimeRoot(Service):
 
 @dataclass
 class App:
-    """Configured SPRAG application: providers, surfaces, build, and server runtime."""
+    """Application container for a SPRAG project.
+
+    Create this once in ``app/__init__.py``. Configure providers, route and
+    mount packages, the app shell, global ESM modules, metadata, sessions,
+    uploads, and server mode. Use ``build(...)`` for static output and
+    ``serve(...)`` for local/runtime serving.
+    """
 
     providers: dict = field(default_factory=dict)
     routes: str = "app.routes"

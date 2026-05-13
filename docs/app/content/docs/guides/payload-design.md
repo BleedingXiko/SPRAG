@@ -8,6 +8,15 @@ order: 35
 
 Everything returned from `load()` becomes `window.__SPRAG_PAYLOAD__` — a JSON blob inlined into every page's HTML. Keeping it lean directly reduces page weight, time-to-first-byte, and the size of your build output.
 
+In browser `Module` code, read payload fields with dict-style access:
+
+```python
+payload = browser.window.__SPRAG_PAYLOAD__ or {}
+doc = payload.get("doc")
+```
+
+SPRAG compiles `.get("key", default)` to JavaScript property access, and the spelling stays friendly to Python type checkers.
+
 ## What gets serialized
 
 SPRAG serializes the return value of `load()` using Python's standard JSON encoder. **Dataclasses, Pydantic models, and ORM objects serialize all their fields** — including ones you never intended to send to the browser.

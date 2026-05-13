@@ -1,6 +1,5 @@
-from sprag import Component, ui
-
 from app.site import blog_card
+from sprag import Component, ui
 
 
 class BlogIndexPage(Component):
@@ -16,6 +15,7 @@ class BlogIndexPage(Component):
             )
             for post in posts
         ]
+
         return ui.div(
             ui.header(
                 ui.h1("Blog"),

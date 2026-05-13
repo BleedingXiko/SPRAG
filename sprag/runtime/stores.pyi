@@ -7,7 +7,12 @@ Unsubscribe = Callable[[], Any]
 
 
 class StoreBridge:
-    """Server-side handle to a SPRAG store; browser-side this becomes a JS import."""
+    """Shared state store handle for server and browser code.
+
+    Import the same store in Services, Controllers, Modules, or Components.
+    Use ``get/set/patch/update/delete/reset`` for state and
+    ``subscribe/listen/select`` for reactions and derived reads.
+    """
 
     name: str
     initial: dict[str, Any]
@@ -25,7 +30,7 @@ class StoreBridge:
     def reset(self) -> dict[str, Any]: ...
     def subscribe(
         self,
-        fn: Callable[[Any], Any],
+        fn: Callable[..., Any],
         *,
         selector: Optional[Selector] = ...,
         immediate: bool = ...,
@@ -34,7 +39,16 @@ class StoreBridge:
     def select(self, selector: Selector, default: Any = ...) -> Any: ...
 
 
-def store(name: str, *, initial: Optional[dict[str, Any]] = ..., debug: bool = ...) -> StoreBridge: ...
+def store(name: str, *, initial: Optional[dict[str, Any]] = ..., debug: bool = ...) -> StoreBridge:
+    """Declare a named shared state store.
+
+    Put declarations in ``app/stores.py`` and import them anywhere. The same
+    handle works on the server and in browser-authored Modules/Components.
+    Re-declaring the same name with different initial state raises ``ValueError``.
+    """
+    ...
 def declared_stores() -> list[StoreBridge]: ...
-def store_fingerprint(stores: Optional[list[StoreBridge]] = ...) -> str: ...
+def store_fingerprint(stores: Optional[list[StoreBridge]] = ...) -> str:
+    """Return a stable hash for declared store names and initial state."""
+    ...
 def reset_store_registry() -> None: ...

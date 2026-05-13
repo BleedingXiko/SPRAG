@@ -8,7 +8,11 @@ from .assets import normalize_module_imports
 
 @dataclass(frozen=True)
 class Page:
-    """Route manifest that binds a URL path to a Controller and Screen."""
+    """Server-rendered route manifest.
+
+    Binds ``path`` to a Controller and Screen. Use ``mode="hybrid"`` for SSR
+    plus browser hydration, or ``mode="document"`` for static document output.
+    """
 
     path: str
     controller: type
@@ -46,7 +50,12 @@ def page(
     static_paths=None,
     providers=None,
 ):
-    """Create a route page manifest."""
+    """Declare a route page.
+
+    Use this in ``app/routes/.../page.py`` with ``path``, ``controller``, and
+    ``screen``. Add ``css``, ``js``, ``modules``, ``metadata``, or
+    ``providers`` when the route needs surface-specific assets or services.
+    """
     if css is not None or js is not None:
         from .shell import shell as build_shell
 

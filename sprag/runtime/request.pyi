@@ -7,7 +7,11 @@ from typing import Any, Optional, Union
 
 @dataclass(frozen=True)
 class UploadedFile:
-    """Uploaded multipart file exposed to SPRAG controllers."""
+    """Uploaded multipart file available in controller actions.
+
+    Use ``read()`` for bytes, ``text()`` for decoded text, ``save(path)`` to
+    persist it, and ``size`` for the byte count.
+    """
 
     name: str
     filename: str
@@ -33,7 +37,12 @@ class UploadedFile:
 
 @dataclass
 class Request:
-    """Request snapshot plus per-request runtime session/auth state."""
+    """Current HTTP request for ``Controller.load()`` and actions.
+
+    Read route params from ``params``, query values from ``query``, form fields
+    from ``form``, uploads from ``file(...)``/``files_list(...)``, and auth
+    context from ``session``, ``user``, and ``active_profile``.
+    """
 
     path: str
     params: dict[str, Any] = ...

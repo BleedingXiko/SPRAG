@@ -13,12 +13,7 @@ _URL_ATTR_RE = re.compile(
 
 
 def join_url(base_url: str = "/", *parts: object, trailing_slash: bool = False) -> str:
-    """Join a base URL/path and path parts without ad hoc slash handling.
-
-    ``join_url("/docs", "guides", "forms")`` returns
-    ``"/docs/guides/forms"``. Absolute ``http(s)`` and protocol-relative
-    bases are preserved, so the same helper can build canonical URLs.
-    """
+    """Join URL path parts without losing external schemes or anchors."""
     clean_parts = [str(part).strip("/") for part in parts if part is not None and str(part).strip("/")]
     base = str(base_url or "/").strip()
 

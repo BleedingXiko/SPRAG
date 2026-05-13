@@ -6,7 +6,11 @@ from typing import Any, Mapping, Optional, Union
 
 @dataclass(frozen=True)
 class Page:
-    """Route manifest that binds a URL path to a Controller and Screen."""
+    """Server-rendered route manifest.
+
+    Binds ``path`` to a Controller and Screen. Use ``mode="hybrid"`` for SSR
+    plus browser hydration, or ``mode="document"`` for static document output.
+    """
 
     path: str
     controller: type
@@ -34,4 +38,11 @@ def page(
     modules: Optional[Mapping[str, Any]] = ...,
     static_paths: Any = ...,
     providers: Optional[Mapping[str, Any]] = ...,
-) -> Page: ...
+) -> Page:
+    """Declare a route page.
+
+    Use this in ``app/routes/.../page.py`` with ``path``, ``controller``, and
+    ``screen``. Add ``css``, ``js``, ``modules``, ``metadata``, or
+    ``providers`` when the route needs surface-specific assets or services.
+    """
+    ...

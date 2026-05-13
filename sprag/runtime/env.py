@@ -70,7 +70,11 @@ def parse_env_file(path: str | Path) -> dict[str, str]:
 
 
 def env(name: str, default=_MISSING, *, cast=None, required: bool = False):
-    """Read an environment variable with optional casting."""
+    """Read an environment variable.
+
+    Use ``default`` for missing values, ``required=True`` to fail loudly, and
+    ``cast=...`` to convert the string before returning it.
+    """
     if name in os.environ:
         raw_value = os.environ[name]
     elif required or default is _MISSING:
@@ -91,7 +95,7 @@ def env(name: str, default=_MISSING, *, cast=None, required: bool = False):
 
 
 def public_env(prefix: str = DEFAULT_PUBLIC_PREFIX) -> dict[str, str]:
-    """Return opt-in browser-safe env vars."""
+    """Return env vars safe to expose to the browser by prefix."""
     return {
         key: value
         for key, value in os.environ.items()

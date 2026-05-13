@@ -1,25 +1,7 @@
-"""Web authoring primitives that compile to Ragot.
+"""Browser-side SPRAG authoring primitives.
 
-SPRAG mirrors two runtimes 1:1 — Specter (server-side ``Service``/``Controller``)
-and Ragot (browser-side ``Module``/``Component``). The same imperative API
-surface — ``self.listen``, ``self.emit``, ``self.on``, ``self.timeout``,
-``self.set_state``, ``self.subscribe``, ``self.add_cleanup``, etc. — is
-written in Python and routed to the right runtime by the codegen.
-
-The classes in this module are the **browser-side** authoring stubs. Their
-methods do nothing useful when called in plain Python: they raise
-``RuntimeError``. They exist so that:
-
-1. IDE autocomplete and type-checking work for SPRAG authors.
-2. The codegen has a stable surface to compile against.
-3. The "one language, two runtimes" symmetry is visible in the source.
-
-Decorators in this module exist **only** when they encode a transformation
-that neither runtime provides as a primitive. They never duplicate an
-imperative method that already exists on ``Module`` / ``Component`` /
-``Service``.
-
-Type declarations for the public surface live in ``browser.pyi``.
+These classes are Python stubs for code that SPRAG compiles to JavaScript.
+Runtime signatures live beside them in ``browser.pyi`` for editor support.
 """
 
 from __future__ import annotations
@@ -34,21 +16,7 @@ from typing import Any, Callable, Optional
 
 
 def debounce(seconds):
-    """Decorator: coalesce rapid calls into a single call after ``seconds`` of quiet.
-
-    Compiles to a trailing-edge debounce wrapper that uses Ragot's
-    ``this.timeout(...)`` so the pending timer is auto-cancelled on module
-    teardown. Per-method state is stored on ``this._sprDebounce`` keyed by
-    method name.
-
-    The Python signature takes **seconds** (float) — matching ``time.sleep``,
-    ``datetime.timedelta``, and the Specter convention. The codegen multiplies
-    by 1000 when emitting the Ragot ``timeout`` call.
-
-    Justification: neither runtime provides debounce as a primitive. The
-    decorator wraps the method body with state tracking + auto-cancelling
-    cleanup, which the imperative API cannot express in one line.
-    """
+    """Run the decorated method after ``seconds`` of quiet."""
     if not isinstance(seconds, (int, float)) or seconds < 0:
         raise ValueError(
             "debounce(seconds) expects a non-negative int or float number of seconds; "
@@ -62,18 +30,7 @@ def debounce(seconds):
 
 
 def throttle(seconds):
-    """Decorator: leading-edge throttle — fires at most once per ``seconds``.
-
-    Compiles to a timestamp-based guard; no timer is scheduled, so there is
-    nothing to clean up. State is stored on ``this._sprThrottle`` keyed by
-    method name.
-
-    The Python signature takes **seconds** (float). The codegen multiplies by
-    1000 when emitting the Ragot ``Date.now()`` comparison.
-
-    Justification: same as ``@debounce`` — neither runtime provides this as a
-    primitive.
-    """
+    """Run the decorated method at most once per ``seconds``."""
     if not isinstance(seconds, (int, float)) or seconds < 0:
         raise ValueError(
             "throttle(seconds) expects a non-negative int or float number of seconds; "
@@ -87,12 +44,7 @@ def throttle(seconds):
 
 
 def animate(class_name="is-visible"):
-    """Component class decorator: wrap ``mount``/``unmount`` with Ragot ``animateIn``/``animateOut``.
-
-    Justification: structural mount/unmount transformation. ``animateIn``
-    schedules an rAF class toggle, ``animateOut`` returns a promise that
-    resolves on ``transitionend``. There is no imperative one-liner equivalent.
-    """
+    """Animate a Component by toggling ``class_name`` on mount/unmount."""
     def decorator(cls):
         cls._sprag_animate = {"class_name": class_name}
         return cls
@@ -111,33 +63,7 @@ def virtual_scroll(
     child_pool_size=0,
     axis="auto",
 ):
-    """Component class decorator: wrap the component in a Ragot ``VirtualScroller``.
-
-    Justification: structural component transformation. The decorated class
-    authors a normal SPRAG ``Component`` whose ``render`` returns a plain
-    container; the codegen synthesises an ``onStart`` that instantiates a
-    ``VirtualScroller`` against ``this.element`` and binds the user's
-    ``chunk`` / ``total`` / ``measure`` / ``placeholder`` / ``recycle`` /
-    ``evicted`` methods as the scroller's callbacks.
-
-    The component must define:
-
-    - ``chunk(self, i)`` — returns the DOM element for chunk ``i``. It may
-      also accept Ragot's load context as ``chunk(self, i, load_ctx)`` for
-      async stale-load checks.
-    - ``total(self)`` — returns the total item count
-
-    Optional methods map to Ragot callbacks: ``measure`` ->
-    ``measureChunk``, ``placeholder`` -> ``buildPlaceholder``, ``recycle`` ->
-    ``onRecycle`` (REQUIRED if ``pool_size > 0``), and ``evicted`` ->
-    ``onChunkEvicted``. Ragot's default measurement is height-based; for
-    horizontal scrollers, define ``measure(self, el, i)`` and return the
-    chunk width.
-
-    Decorated components get a public scroller handle at
-    ``self.virtual_scroll`` in Python authoring code (emitted as
-    ``this.virtualScroll`` in JS). Framework-private storage stays internal.
-    """
+    """Virtualize a Component list. Define ``chunk(i)`` and ``total()``."""
     if not isinstance(chunk, int) or chunk <= 0:
         raise ValueError(
             "virtual_scroll(chunk=...) expects a positive integer chunk size; "
@@ -168,27 +94,7 @@ def infinite_scroll(
     top_at=None,
     visible_chunks=None,
 ):
-    """Method decorator: wire ``createInfiniteScroll`` for the host class.
-
-    Works on both ``Module`` methods and ``Component`` methods. The decorated
-    method becomes the ``onLoadMore`` callback. The host's synthesised
-    ``onStart`` instantiates ``createInfiniteScroll`` against the host
-    (auto-cleanup via ``addCleanup``).
-
-    Justification: mount-time install with cleanup wiring. The imperative
-    ``self.add_cleanup`` is available, but the install is structural enough —
-    sentinel resolution, observer setup, and the bidirectional ``top_at``
-    case — that wrapping it in a decorator removes a real footgun.
-
-    Args:
-        at: Sentinel selector. Either a CSS string (resolved at mount time
-            via ``this.element.querySelector(...)``) or a string referencing
-            a ``ref()`` descriptor name on the host class.
-        root: Optional CSS selector for the scroll root.
-        root_margin: IntersectionObserver rootMargin (default ``"600px"``).
-        top_at: Optional top sentinel for bidirectional scrolling.
-        visible_chunks: Optional explicit visible-chunks set.
-    """
+    """Call the decorated method when the ``at`` sentinel enters view."""
     if not isinstance(at, str) or not at:
         raise ValueError(
             "infinite_scroll(at=...) expects a non-empty CSS selector or ref name string; "
@@ -208,13 +114,7 @@ def infinite_scroll(
 
 
 class RefDescriptor:
-    """Class-level descriptor that captures a DOM element into ``self.refs.X`` on mount.
-
-    Justification: declarative ref capture tied to mount lifecycle. Removes a
-    class of bugs around *when* the lookup happens (before vs after the
-    component is in the DOM). Not a method-duplicating decorator — there is
-    no ``self.ref(name)`` imperative equivalent that runs at mount time.
-    """
+    """Descriptor behind ``ref(selector)``."""
 
     def __init__(self, selector):
         if not isinstance(selector, str) or not selector:
@@ -238,17 +138,7 @@ class RefDescriptor:
 
 
 def ref(selector):
-    """Class-level descriptor: capture a DOM element into ``self.refs.X`` on mount.
-
-    Usage::
-
-        class SearchModule(Module):
-            input = ref(".search-input")
-            results = ref(".search-results")
-
-            def on_start(self):
-                dom.show(self.refs.results)
-    """
+    """Capture a DOM element into ``self.refs.<name>`` on mount."""
     return RefDescriptor(selector)
 
 
@@ -275,13 +165,16 @@ def _browser_only(name):
 
 
 class _JSNamespaceStub:
-    """Chainable stub for generated-only browser/import namespaces."""
+    """Generated-only browser/import namespace."""
 
     def __init__(self, path: str):
         self._path = path
 
     def __getattr__(self, name):
         return _JSNamespaceStub(f"{self._path}.{name}")
+
+    def __getitem__(self, key):
+        return _JSNamespaceStub(f"{self._path}[{key!r}]")
 
     def __call__(self, *args, **kwargs):
         _browser_only(self._path)
@@ -298,64 +191,26 @@ imports = _JSNamespaceStub("imports")
 
 
 def createStateStore(initial_state=None, options=None):
-    """Create a proxy-tracked mutable state store (Ragot ``createStateStore``).
-
-    Browser-only stub. In compiled JS this creates a Ragot state store with
-    proxy-based change detection and microtask-batched subscriber notifications.
-
-    Returns a store object with: ``get_state``, ``get``, ``set``, ``set_state``,
-    ``patch``, ``batch``, ``compare_and_set``, ``subscribe``,
-    ``register_actions``, ``dispatch``, ``create_selector``.
-    """
+    """Create a browser state store with proxy-tracked updates."""
     _browser_only("createStateStore")
 
 
 def createSelector(input_selectors, result_func):
-    """Create a memoised derived selector (Ragot ``createSelector``).
-
-    Browser-only stub. In compiled JS this creates a selector that recomputes
-    only when one of the input selector outputs changes by ``Object.is``.
-    """
+    """Create a memoized selector from store-derived inputs."""
     _browser_only("createSelector")
 
 
 @dataclass
 class Module:
-    """Browser-side Module — Python mirror of Ragot ``Module``.
+    """Browser-side logic for an interactive surface.
 
-    A SPRAG ``Module`` subclass is compiled into a Ragot ``Module`` subclass
-    by the codegen. The methods below mirror Ragot's lifecycle/event/state
-    surface; calling them in plain Python raises ``RuntimeError`` — they only
-    do real work in the emitted JS.
+    Subclass this when you need DOM events, server actions, sockets, timers,
+    stores, or non-visual state. Put setup in ``on_start()`` and cleanup in
+    ``on_stop()``. The usual first calls are ``self.delegate(...)``,
+    ``self.set_state(...)``, ``self.call_action(...)``, and ``self.on_socket(...)``.
 
-    Methods that share a name with ``sprag.Service`` (``listen``, ``emit``,
-    ``add_cleanup``, ``adopt``, ``set_state``, ``subscribe``) are SPRAG's
-    cross-runtime symmetry surface: write the same call in Python, run on
-    either side.
-
-    **Hybrid ownership model.** When a Module is attached to a Component via
-    SPRAG's ``hydrate(...)`` mount, the SPRAG runtime wires them up using
-    Ragot's canonical ``adoptComponent(component, { sync })`` pattern: the
-    Module becomes the lifecycle owner, the Component is mounted as an
-    adopted child, and a ``watchState`` subscription is registered so that
-    every ``self.set_state(...)`` automatically flows into
-    ``self.component.set_state(...)``. **User code should only call
-    ``self.set_state(...)`` — never dual-call set_state on both sides.**
-
-    The runtime also sets:
-
-    - ``self.element`` — the DOM element hosting the adopted component. This
-      is what ``self.delegate(self.element, ...)`` should target when you
-      want to bubble events up from the component's subtree.
-    - ``self.component`` — back-reference to the adopted Component. Use for
-      imperative access (refs, direct method calls); do NOT use it to push
-      state, which is what the automatic sync handles.
-
-    **Custom state sync.** If you need a non-trivial mapping between module
-    state and component state, define a ``sync_component(self, component,
-    state)`` method on your Module subclass. The runtime detects it and
-    routes every state change through it instead of the default
-    ``component.set_state(state)`` shallow merge.
+    In ``Screen.render()``, get the typed instance with
+    ``module = self.module(MyModule)`` and return ``hydrate(MyComponent, module=module)``.
     """
 
     screen: Optional["Screen"] = None
@@ -505,14 +360,15 @@ class Module:
 
 @dataclass
 class Component:
-    """Browser-side Component — Python mirror of Ragot ``Component``.
+    """Browser-side DOM renderer for an interactive surface.
 
-    A SPRAG ``Component`` subclass is compiled into a Ragot ``Component``
-    subclass by the codegen. ``render(self, props)`` is the only method the
-    user **must** implement; the rest are stubs.
+    Subclass this for markup and local DOM behavior. Implement
+    ``render(props=None)`` to return a ``ui.*`` tree. Use ``self.props`` for
+    inputs, ``self.state`` for local state, ``self.refs`` for ``ref(...)``
+    captures, and ``self.set_state(...)`` to re-render.
 
-    Note that ``Component`` does not have ``on_socket``, ``watch_state``, or
-    ``adopt_component`` — those live on ``Module``. This matches Ragot exactly.
+    Pair with a ``Module`` when server calls, sockets, timers, or shared
+    state belong outside the visual component.
     """
 
     props: dict = field(default_factory=dict)
@@ -535,7 +391,8 @@ class Component:
         _browser_only("Component.mount_before")
 
     def unmount(self):
-        """Tear down this component (override to add cleanup)."""
+        """Programmatically remove this component from the DOM."""
+        _browser_only("Component.unmount")
 
     # -- State --------------------------------------------------------------
     def set_state(self, new_state):
@@ -629,6 +486,14 @@ class Component:
 
 @dataclass
 class Screen:
+    """Server-rendered view class for a page.
+
+    Declare browser modules with ``modules = [MyModule]``. In ``render(data)``,
+    call ``self.module(MyModule)`` to get the typed instance, seed it with
+    ``module.set_state(data)``, then return ``hydrate(Component, module=module)``
+    or plain ``ui.*`` markup.
+    """
+
     data: dict = field(default_factory=dict)
     modules: list = field(default_factory=list)
 
@@ -667,6 +532,11 @@ def ssr(component, **props):
 
 
 def hydrate(component, *, module=None, props=None):
+    """Mount a browser Component, optionally owned by a Module.
+
+    If ``props`` is omitted and ``module`` is provided, the component starts
+    with the module's current state.
+    """
     if props is None and module is not None:
         props = dict(getattr(module, "state", {}) or {})
     return HydrateMount(component=component, module=module, props=props or {})

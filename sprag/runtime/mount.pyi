@@ -6,7 +6,11 @@ from typing import Any, Mapping, Optional, Union
 
 @dataclass(frozen=True)
 class Mount:
-    """Server-known URL that boots a Ragot-owned client app."""
+    """Client-owned app mounted at a server URL.
+
+    Use a Mount when the browser owns the whole surface from boot. Provide the
+    root Component and optional Module/boot Controller.
+    """
 
     path: str
     component: type
@@ -32,4 +36,10 @@ def mount(
     js: Optional[Union[str, list]] = ...,
     modules: Optional[Mapping[str, Any]] = ...,
     providers: Optional[Mapping[str, Any]] = ...,
-) -> Mount: ...
+) -> Mount:
+    """Declare a client-owned app mount.
+
+    Use this in ``app/mounts/.../mount.py`` with ``path`` and ``component``.
+    Add ``module`` for browser lifecycle logic and ``boot`` for server data.
+    """
+    ...
