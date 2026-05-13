@@ -81,7 +81,9 @@ class LabsAuthService:
         ]
 
     def default_profile_for(self, user):
-        profiles = self._profiles_by_user_id.get((user or {}).get("id"), [])
+        if not user:
+            return None
+        profiles = self._profiles_by_user_id.get(user["id"], [])
         return dict(profiles[0]) if profiles else None
 
     def resolve_profile(self, user, profile):

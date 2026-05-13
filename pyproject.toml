@@ -50,4 +50,4 @@ version = {attr = "sprag.__version__"}
 include = ["sprag", "sprag.*"]
 
 [tool.setuptools.package-data]
-sprag = ["assets/**/*", "dev/templates/**/*.tmpl"]
+sprag = ["assets/**/*", "dev/templates/**/*.tmpl", "py.typed", "**/*.pyi"]

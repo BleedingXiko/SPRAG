@@ -40,7 +40,10 @@ def module(src, export: str = "default") -> ModuleImport:
     """Declare an ESM import for ``modules={...}`` surfaces."""
     export_name = str(export or "default")
     if not export_name:
-        raise ValueError("SPRAG module(..., export=...) requires a non-empty export name.")
+        raise ValueError(
+            "module(src, export=...) expects a non-empty export name string; "
+            f"got {export!r}."
+        )
     return ModuleImport(src=str(src), export=export_name)
 
 
@@ -157,7 +160,8 @@ def normalize_module_imports(
     for alias, value in modules.items():
         if not isinstance(alias, str) or not alias or not alias.isidentifier():
             raise ValueError(
-                f"SPRAG modules aliases must be valid Python identifiers, got {alias!r}."
+                "modules={...} expects aliases to be valid Python identifiers; "
+                f"got {alias!r}."
             )
         if isinstance(value, ModuleImport):
             normalized[alias] = value
@@ -165,7 +169,8 @@ def normalize_module_imports(
             normalized[alias] = ModuleImport(src=str(value), export="default")
         else:
             raise TypeError(
-                f"Unsupported SPRAG module import for alias {alias!r}: {value!r}"
+                "modules={...} values must be str, pathlib.Path, or ModuleImport; "
+                f"alias {alias!r} got {type(value).__name__}: {value!r}."
             )
     return normalized
 

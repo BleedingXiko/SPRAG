@@ -45,6 +45,7 @@ _SUBCOMMAND_HELP = {
     "build": "Build the app into a deployable artifact (pass 'static' for SSG-only output)",
     "pack": "Optimize a built dist for production deployment",
     "routes": "List all discovered routes with actions and schemas",
+    "types": "Generate .sprag/types.pyi from the current build manifest",
     "dev": "Start the dev server with file watching",
     "doctor": "Run structural diagnostics against the current SPRAG app",
 }
@@ -378,6 +379,20 @@ def cmd_build(args):
         print(f"[SPRAG] app: {app_target}")
         print(json.dumps(dist, indent=2, sort_keys=True))
         _print_payload_warnings(dist.get("payload_warnings", []))
+
+
+def cmd_types(args):
+    from .typegen import emit_project_types
+
+    project_root = Path(args.project_root).resolve()
+    output_dir = _resolve_cli_path(args.output, project_root)
+    manifest_path = output_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise SystemExit(
+            f"[SPRAG] types could not find {manifest_path}. Run 'sprag dev' or 'sprag build' first."
+        )
+    types_path = emit_project_types(manifest_path, output_dir / "types.pyi")
+    print(f"[SPRAG] wrote {types_path}")
 
 
 def cmd_dev(args):

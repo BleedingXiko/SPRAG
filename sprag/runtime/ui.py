@@ -23,6 +23,8 @@ HTML on the server side:
 These primitives are deliberately small wrappers over Ragot's primitives:
 SPRAG's job is to make the *authoring* feel native to Python, not to
 reinvent the rendering engine.
+
+Type declarations for the public surface live in ``ui.pyi``.
 """
 
 from __future__ import annotations
@@ -104,7 +106,12 @@ class UIFactory:
     # ----- Rendering primitives (special-cased before __getattr__) -----
 
     def For(self, items, *, key=None, render=None, pool_key=None):
-        """Keyed list. Compiles to Ragot's ``renderList`` on the client."""
+        """Keyed list. Compiles to Ragot's ``renderList`` on the client.
+
+        Example:
+            ui.For(items, key="id", render=lambda item: ui.li(item["label"]))
+            ui.For(todos, key=lambda todo: todo["id"], render=TodoRow)
+        """
         return ForNode(items=items, key=key, render=render, pool_key=pool_key)
 
     def Grid(
@@ -119,7 +126,12 @@ class UIFactory:
         gap=None,
         apply_grid_styles=True,
     ):
-        """Keyed grid. Compiles to Ragot's ``renderGrid`` on the client."""
+        """Keyed grid. Compiles to Ragot's ``renderGrid`` on the client.
+
+        Example:
+            ui.Grid(cards, key="id", columns=3, gap="1rem", render=Card)
+            ui.Grid(products, column_width="16rem", render=ProductTile)
+        """
         return ForNode(
             items=items,
             key=key,
@@ -134,7 +146,12 @@ class UIFactory:
         )
 
     def LazyImage(self, src, *, placeholder=None, **attrs):
-        """Lazy-loaded image. Compiles to a ``createLazyLoader`` install."""
+        """Lazy-loaded image. Compiles to a ``createLazyLoader`` install.
+
+        Example:
+            ui.LazyImage("/hero.jpg", placeholder="/hero-blur.jpg", alt="Hero")
+            ui.LazyImage(article["image"], class_="article-image")
+        """
         return LazyImageNode(src=src, placeholder=placeholder, attrs=attrs)
 
     def HTML(self, html):

@@ -24,6 +24,8 @@ class _AppRuntimeRoot(Service):
 
 @dataclass
 class App:
+    """Configured SPRAG application: providers, surfaces, build, and server runtime."""
+
     providers: dict = field(default_factory=dict)
     routes: str = "app.routes"
     mounts_package: str = "app.mounts"

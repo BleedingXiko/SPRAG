@@ -105,9 +105,15 @@ class StoreBridge:
 
     def __init__(self, name: str, initial: Optional[dict] = None, *, debug: bool = False):
         if not isinstance(name, str) or not name:
-            raise ValueError("store(name=...) requires a non-empty string")
+            raise ValueError(
+                "store(name=...) expects a non-empty string store name; "
+                f"got {name!r}."
+            )
         if initial is not None and not isinstance(initial, dict):
-            raise TypeError("store(initial=...) must be a dict")
+            raise TypeError(
+                "store(initial=...) expects a dict or None; "
+                f"got {type(initial).__name__}: {initial!r}."
+            )
         self.name = name
         self.initial = dict(initial or {})
         self.debug = bool(debug)

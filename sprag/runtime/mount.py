@@ -24,7 +24,10 @@ class Mount:
 
     def __post_init__(self):
         if not isinstance(self.path, str) or not self.path.startswith("/"):
-            raise ValueError("Mount.path must start with '/'.")
+            raise ValueError(
+                "Mount(path=...) expects a string starting with '/'; "
+                f"got {self.path!r}."
+            )
         normalized = self.path.rstrip("/") or "/"
         object.__setattr__(self, "path", normalized)
         object.__setattr__(self, "metadata", dict(self.metadata or {}))

@@ -18,6 +18,8 @@ Decorators in this module exist **only** when they encode a transformation
 that neither runtime provides as a primitive. They never duplicate an
 imperative method that already exists on ``Module`` / ``Component`` /
 ``Service``.
+
+Type declarations for the public surface live in ``browser.pyi``.
 """
 
 from __future__ import annotations
@@ -48,7 +50,10 @@ def debounce(seconds):
     cleanup, which the imperative API cannot express in one line.
     """
     if not isinstance(seconds, (int, float)) or seconds < 0:
-        raise ValueError("debounce(seconds) requires a non-negative number")
+        raise ValueError(
+            "debounce(seconds) expects a non-negative int or float number of seconds; "
+            f"got {seconds!r}."
+        )
 
     def decorator(fn):
         fn._sprag_debounce_ms = int(seconds * 1000)
@@ -70,7 +75,10 @@ def throttle(seconds):
     primitive.
     """
     if not isinstance(seconds, (int, float)) or seconds < 0:
-        raise ValueError("throttle(seconds) requires a non-negative number")
+        raise ValueError(
+            "throttle(seconds) expects a non-negative int or float number of seconds; "
+            f"got {seconds!r}."
+        )
 
     def decorator(fn):
         fn._sprag_throttle_ms = int(seconds * 1000)
@@ -131,7 +139,10 @@ def virtual_scroll(
     ``this.virtualScroll`` in JS). Framework-private storage stays internal.
     """
     if not isinstance(chunk, int) or chunk <= 0:
-        raise ValueError("virtual_scroll(chunk=...) must be a positive integer")
+        raise ValueError(
+            "virtual_scroll(chunk=...) expects a positive integer chunk size; "
+            f"got {chunk!r}."
+        )
 
     def decorator(cls):
         cls._sprag_virtual_scroll = {
@@ -179,7 +190,10 @@ def infinite_scroll(
         visible_chunks: Optional explicit visible-chunks set.
     """
     if not isinstance(at, str) or not at:
-        raise ValueError("infinite_scroll(at=...) requires a non-empty selector or ref name")
+        raise ValueError(
+            "infinite_scroll(at=...) expects a non-empty CSS selector or ref name string; "
+            f"got {at!r}."
+        )
 
     def decorator(fn):
         fn._sprag_infinite_scroll = {
@@ -204,7 +218,10 @@ class RefDescriptor:
 
     def __init__(self, selector):
         if not isinstance(selector, str) or not selector:
-            raise ValueError("ref() requires a non-empty CSS selector string")
+            raise ValueError(
+                "ref(selector) expects a non-empty CSS selector string; "
+                f"got {selector!r}."
+            )
         self.selector = selector
         self._name = None
 

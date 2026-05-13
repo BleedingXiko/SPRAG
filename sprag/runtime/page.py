@@ -8,6 +8,8 @@ from .assets import normalize_module_imports
 
 @dataclass(frozen=True)
 class Page:
+    """Route manifest that binds a URL path to a Controller and Screen."""
+
     path: str
     controller: type
     screen: type

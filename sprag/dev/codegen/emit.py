@@ -468,4 +468,9 @@ def _serializable_manifest(manifest):
                 if key not in {"root_component_class", "root_module_class", "_provider_classes"}
             }
         )
-    return {"errors": manifest.get("errors", []), "mounts": mounts, "routes": routes}
+    return {
+        "errors": manifest.get("errors", []),
+        "mounts": mounts,
+        "routes": routes,
+        "stores": manifest.get("stores", []),
+    }

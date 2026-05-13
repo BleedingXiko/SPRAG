@@ -74,6 +74,13 @@ class ActionErrorHelpersModule(Module):
         self.set_state({"message": self.action_error_message(None, "Fallback message")})
 
 
+class GetattrHelpersModule(Module):
+    def on_error(self, error):
+        response = getattr(error, "response", None)
+        message = response["error"] if response else str(error)
+        self.set_state({"message": message})
+
+
 class MetadataHelpersComponent(Component):
     def render(self, props=None):
         return ui.button("Update metadata")
@@ -213,6 +220,11 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("actionErrorMessage(error, fallback = '')", compiled)
         self.assertIn("window.__SPRAG_ACTION_ERROR_MESSAGE__", compiled)
         self.assertIn('this.actionErrorMessage(null, "Fallback message")', compiled)
+
+    def test_compile_module_lowers_getattr_builtin(self):
+        compiled = compile_module_class(GetattrHelpersModule)
+        self.assertIn('let response = ((error)?.["response"] ?? null);', compiled)
+        self.assertIn('String(error)', compiled)
 
     def test_compile_component_supports_set_metadata_helper(self):
         compiled = compile_component_class(MetadataHelpersComponent)

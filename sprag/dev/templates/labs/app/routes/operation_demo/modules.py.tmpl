@@ -17,13 +17,13 @@ class OperationDemoModule(Module):
         self.delegate(self.element, "click", "[data-role='run-valid']", self.on_run_valid)
         self.delegate(self.element, "click", "[data-role='run-invalid']", self.on_run_invalid)
 
-    def on_run_valid(self, event):
+    async def on_run_valid(self, event):
         event.prevent_default()
-        self.submit("Quiet Signal")
+        await self.submit("Quiet Signal")
 
-    def on_run_invalid(self, event):
+    async def on_run_invalid(self, event):
         event.prevent_default()
-        self.submit("x")
+        await self.submit("x")
 
     async def submit(self, label):
         self.set_state(
@@ -46,8 +46,8 @@ class OperationDemoModule(Module):
                 }
             )
         except Exception as error:
-            response = error.response
-            message = response["error"] if response else error.message
+            response = getattr(error, "response", None)
+            message = response["error"] if response else str(error)
             self.set_state(
                 {
                     "status": "error",

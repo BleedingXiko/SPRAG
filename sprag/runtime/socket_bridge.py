@@ -100,7 +100,10 @@ class SpragSocketIngress(SocketIngress):
     def dispatch_message(self, message: dict, *, connection=None):
         event_name = message.get("event")
         if not isinstance(event_name, str) or not event_name.strip():
-            raise ValueError("SPRAG socket messages require a non-empty 'event'.")
+            raise ValueError(
+                "socket message field 'event' expects a non-empty string; "
+                f"got {event_name!r}."
+            )
 
         route = message.get("route") or getattr(connection, "route", None) or "/"
         headers = {}
@@ -300,7 +303,10 @@ class SpragSocketBridge:
     ):
         """Emit a server event to connected SPRAG websocket clients."""
         if not isinstance(event_name, str) or not event_name.strip():
-            raise TypeError("socket_transport.emit(event_name, ...) requires a non-empty string.")
+            raise TypeError(
+                "socket_transport.emit(event_name, ...) expects a non-empty string event name; "
+                f"got {event_name!r}."
+            )
 
         target = self._resolve_target(
             target=target,
@@ -356,13 +362,19 @@ class SpragSocketBridge:
             if value is None:
                 return None
             if not isinstance(value, str):
-                raise TypeError("socket target filters must be strings when provided.")
+                raise TypeError(
+                    "socket target filters route/client_id/session_id/topic must be strings or None; "
+                    f"got {type(value).__name__}: {value!r}."
+                )
             value = value.strip()
             return value or None
 
         if target is not None:
             if not isinstance(target, dict):
-                raise TypeError("socket target must be a dict returned by socket_target(...).")
+                raise TypeError(
+                    "socket target expects a dict returned by socket_target(...); "
+                    f"got {type(target).__name__}: {target!r}."
+                )
             route = target.get("route") if route is None else route
             client_id = target.get("client_id") if client_id is None else client_id
             session_id = target.get("session_id") if session_id is None else session_id

@@ -370,6 +370,7 @@ _BUILTIN_CALLS = {
     "print": lambda args: f"console.log({', '.join(args)})",
     "range": lambda args: _range_to_js(args),
     "sum": lambda args: _sum_to_js(args),
+    "getattr": lambda args: _getattr_to_js(args),
 }
 
 _BROWSER_ENV_CASTS = {
@@ -464,6 +465,16 @@ def _sum_to_js(args):
     else:
         raise JSCodegenError("sum() expects 1-2 arguments")
     return f"(({args[0]}) || []).reduce((__sum, __value) => __sum + __value, {start})"
+
+
+def _getattr_to_js(args):
+    if len(args) == 2:
+        default = "undefined"
+    elif len(args) == 3:
+        default = args[2]
+    else:
+        raise JSCodegenError("getattr() expects 2-3 arguments")
+    return f"(({args[0]})?.[{args[1]}] ?? {default})"
 
 
 def _compile_comprehension_chain(node, env, *, method_names):

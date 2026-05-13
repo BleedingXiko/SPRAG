@@ -87,6 +87,7 @@ sprag dev [--port 8000]
 sprag build               # full app (server + client)
 sprag build static        # pre-rendered static site
 sprag pack                # minify, bytecode-compile, optimize images
+sprag types               # generate .sprag/types.pyi from the build manifest
 sprag add route|mount|content <name>
 sprag routes              # list all surfaces
 sprag inspect /path       # show compiled output for a route

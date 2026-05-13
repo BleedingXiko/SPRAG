@@ -18,6 +18,7 @@ from .codegen import (
 )
 from .codegen.dependencies import used_browser_class_refs, used_js_import_aliases
 from .codegen.mappings import JSCodegenError
+from .typegen import emit_project_types
 from ..runtime.assets import (
     AssetRegistry,
     render_css_links,
@@ -333,6 +334,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
     manifest = {
         "routes": route_manifest,
         "mounts": mount_manifest,
+        "stores": _serializable_stores(declared_stores()),
         "assets": _serializable_assets(asset_registry.assets()),
         "errors": build_errors,
         "payload_warnings": payload_warnings,
@@ -340,6 +342,7 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
     (output_dir / "manifest.json").write_text(
         json.dumps(_serializable_manifest(manifest), indent=2, sort_keys=True), encoding="utf-8"
     )
+    emit_project_types(output_dir / "manifest.json", output_dir / "types.pyi")
     emit_generated_files(
         output_dir,
         _collect_hydration_entries(route_manifest),
@@ -416,6 +419,7 @@ def _serializable_manifest(manifest):
     return {
         "errors": manifest["errors"],
         "assets": manifest.get("assets", []),
+        "stores": manifest.get("stores", []),
         "mounts": [
             {
                 key: value
@@ -454,6 +458,16 @@ def _serializable_assets(assets) -> list[dict]:
             "module": asset.module,
         }
         for asset in assets
+    ]
+
+
+def _serializable_stores(stores) -> list[dict]:
+    return [
+        {
+            "name": store.name,
+            "initial": store.initial,
+        }
+        for store in sorted(stores, key=lambda item: item.name)
     ]
 
 

@@ -1,0 +1,16 @@
+---
+description: SPRAG framework conventions
+globs: **/*.py
+alwaysApply: true
+---
+
+# SPRAG Conventions
+
+- Route server logic belongs in `app/routes/**/server.py`.
+- Browser UI and behavior belong in `web.py`, `components.py`, and `modules.py`.
+- Use `Controller.load()` for route data and `@action` for mutations.
+- Use `self.call_action("action_name", payload)` from browser `Module` classes.
+- Return `ui.*` nodes from `Screen.render()` and `Component.render()`.
+- Use `store("name", initial={...})` for shared state.
+- Use `emit_socket_refetch(...)` when the client should refetch authoritative action state.
+- Do not call browser-only APIs from server-side Python.

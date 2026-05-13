@@ -27,6 +27,7 @@ TEMPLATE_SUFFIX = ".tmpl"
 ROUTE_TEMPLATES_ROOT = TEMPLATES_ROOT / "_route"
 MOUNT_TEMPLATES_ROOT = TEMPLATES_ROOT / "_mount"
 CONTENT_TEMPLATES_ROOT = TEMPLATES_ROOT / "_content"
+SHARED_TEMPLATES_ROOT = TEMPLATES_ROOT / "_shared"
 ROUTE_MODES = ("document", "hybrid")
 DEFAULT_ROUTE_MODE = "document"
 
@@ -44,6 +45,8 @@ def _render_template_dir(
     template_dir: Path,
     target_dir: Path,
     variables: dict[str, str],
+    *,
+    merge_existing: bool = False,
 ) -> list[Path]:
     """Walk ``template_dir``, materialise every ``*.tmpl`` file into ``target_dir``.
 
@@ -65,16 +68,42 @@ def _render_template_dir(
 
         relative = source.relative_to(template_dir)
         out_name = relative.name[: -len(TEMPLATE_SUFFIX)]
-        destination = target_dir / relative.parent / out_name
+        output_relative = relative.parent / out_name
+        destination = target_dir / output_relative
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         content = source.read_text(encoding="utf-8")
         for key, value in variables.items():
             content = content.replace("{{" + key + "}}", value)
+        if merge_existing and destination.exists():
+            if output_relative.as_posix() == ".gitignore":
+                if _merge_gitignore(destination, content):
+                    created.append(destination)
+                continue
+            continue
         destination.write_text(content, encoding="utf-8")
         created.append(destination)
 
     return created
+
+
+def _merge_gitignore(destination: Path, content: str) -> bool:
+    existing = destination.read_text(encoding="utf-8")
+    existing_lines = existing.splitlines()
+    seen = {line.strip() for line in existing_lines if line.strip()}
+    additions = [
+        line
+        for line in content.splitlines()
+        if line.strip() and line.strip() not in seen
+    ]
+    if not additions:
+        return False
+    separator = "" if existing.endswith("\n") or not existing else "\n"
+    destination.write_text(
+        existing + separator + "\n".join(additions) + "\n",
+        encoding="utf-8",
+    )
+    return True
 
 
 def scaffold_project(
@@ -89,7 +118,17 @@ def scaffold_project(
             f"[SPRAG] unknown template: {template!r} "
             f"(available: {', '.join(available_templates()) or 'none'})"
         )
-    return _render_template_dir(template_dir, target_dir, {"project_name": project_name})
+    variables = {"project_name": project_name}
+    created = _render_template_dir(template_dir, target_dir, variables)
+    created.extend(
+        _render_template_dir(
+            SHARED_TEMPLATES_ROOT,
+            target_dir,
+            variables,
+            merge_existing=True,
+        )
+    )
+    return created
 
 
 # ---------------------------------------------------------------------------
