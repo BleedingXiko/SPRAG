@@ -950,6 +950,12 @@ details[open] > .sidebar-section-header::after {
   border: none;
 }
 
+.prose pre code.hljs {
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+}
+
 .prose blockquote {
   margin: 1.25rem 0;
   padding: 0.85rem 1.15rem;
