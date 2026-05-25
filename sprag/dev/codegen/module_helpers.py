@@ -231,6 +231,21 @@ def _compile_one_helper(node: ast.AST, name: str, *, seed_env: Callable[..., dic
         params = [arg.arg for arg in node.args.args]
         for param in params:
             env[param] = param
+        # `*args` -> JS rest param `...name`. ``def f(*children)`` becomes
+        # ``function f(...children)`` and ``children`` resolves to a real
+        # JS array inside the body.
+        rest_param = node.args.vararg.arg if node.args.vararg else None
+        if rest_param:
+            env[rest_param] = rest_param
+        # `**kwargs` on a helper is rejected — JS has no direct analog for a
+        # kwargs-style positional capture, and faking it via "treat last arg
+        # as object" surprises both authors and call sites.
+        if node.args.kwarg is not None:
+            raise JSCodegenError(
+                f"`**{node.args.kwarg.arg}` parameter is not supported in "
+                "browser codegen — accept a single dict argument instead "
+                f"(e.g. `def {name}(opts):` and call with `{name}({{...}})`).",
+            )
         body, body_mappings = _compile_statements_with_mappings(
             node.body,
             env=env,
@@ -238,7 +253,10 @@ def _compile_one_helper(node: ast.AST, name: str, *, seed_env: Callable[..., dic
             source_line_offset=node.lineno - 1,
             source_name=name,
         )
-        header = f"function {name}({', '.join(params)}) {{"
+        param_decls = list(params)
+        if rest_param:
+            param_decls.append(f"...{rest_param}")
+        header = f"function {name}({', '.join(param_decls)}) {{"
         footer = "}\n"
         text = f"{header}\n{body}\n{footer}"
         out_mappings: list = []

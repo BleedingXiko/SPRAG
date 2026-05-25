@@ -283,10 +283,11 @@ def _compile_expr(node, env, method_names=None):
         args = []
         for arg in node.args:
             if isinstance(arg, ast.Starred):
-                raise JSCodegenError(
-                    "`*args` unpack in a function call is not supported in "
-                    "browser codegen — pass positional arguments individually."
-                )
+                # `f(*xs)` -> `f(...xs)`. JS spread on iterables matches
+                # Python's positional unpack semantics.
+                inner = _compile_expr(arg.value, env, method_names=method_names)
+                args.append(f"...{inner}")
+                continue
             compiled = _compile_expr(arg, env, method_names=method_names)
             if _is_bound_method_reference(arg, method_names):
                 compiled = f"{compiled}.bind(this)"
@@ -666,13 +667,16 @@ def _compile_ui_call(node, env, *, method_names=None):
             f'"data-sprag-mount-kind": "{kind}" }})'
         )
 
+    child_args = []
     for arg in node.args:
         if isinstance(arg, ast.Starred):
-            raise JSCodegenError(
-                f"`*args` unpack is not supported in ui.{tag}(...) — spell the "
-                "child elements out individually.",
-            )
-    child_args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
+            # `ui.div(*children, ...)` -> `createElement("div", {...},
+            # ...children)`. JS createElement accepts a variadic children
+            # tail, and spread maps directly.
+            inner = _compile_expr(arg.value, env, method_names=method_names)
+            child_args.append(f"...{inner}")
+        else:
+            child_args.append(_compile_expr(arg, env, method_names=method_names))
     option_chunks = []
     for keyword in node.keywords:
         if keyword.arg is None:
@@ -724,13 +728,13 @@ def _compile_dom_call(node, env, *, method_names=None):
     """Compile ``dom.X(...)`` into a bare Ragot helper call."""
     attr = node.func.attr
     js_name = _DOM_METHOD_MAP.get(attr, attr)
+    pos_args = []
     for arg in node.args:
         if isinstance(arg, ast.Starred):
-            raise JSCodegenError(
-                f"`*args` unpack is not supported in dom.{attr}(...) — pass "
-                "positional arguments individually.",
-            )
-    pos_args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
+            inner = _compile_expr(arg.value, env, method_names=method_names)
+            pos_args.append(f"...{inner}")
+        else:
+            pos_args.append(_compile_expr(arg, env, method_names=method_names))
     option_chunks = []
     for keyword in node.keywords:
         if keyword.arg is None:

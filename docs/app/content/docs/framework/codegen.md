@@ -198,6 +198,30 @@ if (count := self.state.get("count", 0)) > 10:
 
 Works in statements. Not supported inside comprehensions or lambdas.
 
+### `*args` — positional splat (param and call)
+
+Both the parameter form and the call form compile to JS rest / spread:
+
+```python
+def _icon_svg(*children):
+    return ui.svg(*children, viewBox="0 0 24 24", fill="none")
+
+
+def icon_copy():
+    return _icon_svg(
+        ui.path(d="M16 4H8a2 2 0 0 0-2 2v10"),
+        ui.path(d="M20 8h-8a2 2 0 0 0-2 2v10"),
+    )
+```
+
+```js
+function _icon_svg(...children) {
+    return createElement("svg", { "viewBox": "0 0 24 24", "fill": "none" }, ...children);
+}
+```
+
+Works in helper defs, calls, `ui.*` factories, `dom.*` helpers, and arbitrary method calls. `**kwargs` is intentionally not supported — see the unsupported-constructs table below for the alternative.
+
 ## Builtin functions
 
 | Python | JavaScript |
@@ -346,9 +370,8 @@ These Python constructs will raise `JSCodegenError` at compile time:
 | `isinstance()` checks | Not supported in browser code |
 | Subscript assignment: `self.state["k"] = v` | Use `self.set_state({...})` or `self.patch({...})` |
 | `ui.For()` / `ui.Grid()` / `ui.LazyImage()` outside `render()` | Move the call directly into `render()` — helper methods aren't scanned for mount-point wiring |
-| `f(*args)` — positional splat in a call | Pass arguments individually |
 | `f(**kwargs)` — keyword splat in a call | Spread into a dict literal first: `f({**kwargs, ...})` and have the callee accept a dict |
-| `def f(*args, **kwargs)` — splat parameters | Use explicit named parameters; positional/keyword variadics aren't lowered to JS |
+| `def f(**kwargs)` — keyword splat parameter | Accept a single dict argument instead (`def f(opts):`) and pass `f({...})` from the call site |
 
 Every error includes the source file, class name, line number, and a suggestion.
 
