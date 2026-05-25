@@ -20,15 +20,23 @@ sprag new <name> [--output-dir PATH] [--template default|bare|labs]
 
 **Flags**
 
-- `name` — project directory name to create
+- `name` — project directory name to create. Pass `.` (or an empty string) to scaffold into the current directory.
 - `--output-dir` — parent directory for the new project
 - `--template` — scaffold template; current options are `default`, `bare`, and `labs`
 
-**Example**
+**Examples**
 
 ```bash
+# Scaffold a new project in a subdirectory
 sprag new myapp --template bare
+
+# Scaffold into the current directory
+mkdir my-project && cd my-project
+python -m venv .venv          # editor / pre-existing infrastructure is fine
+sprag new .
 ```
+
+Scaffolding into a non-empty current directory works as long as the only existing entries are infrastructure files (`.venv`, `venv`, `.git`, `.gitignore`, `.idea`, `.vscode`, `.zed`, `.DS_Store`, `node_modules`, `.python-version`, `.env`, `.env.local`, `pyrightconfig.json`, `__pycache__`). Anything else will abort the command with a clear message naming the offending file. When `.` is used, the project name is derived from the current directory's basename (slugified — `my app/` becomes `my-app`).
 
 ## `sprag dev`
 

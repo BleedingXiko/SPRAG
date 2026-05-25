@@ -10,7 +10,51 @@ When you write `Component` and `Module` subclasses in Python, `sprag build` comp
 
 ## The rule
 
-If it's in a `Component` or `Module` subclass, it compiles to JS. Everything else runs as Python on the server. The compile boundary is at the class level — there's no ambiguity.
+If it's in a `Component` or `Module` subclass — or at the top level of a browser source file alongside one — it compiles to JS. Everything else runs as Python on the server. The compile boundary is at the file's class boundary.
+
+## Module-level helpers
+
+Top-level `def` and simple `name = expr` / `name: T = expr` declarations in browser source files (`components.py`, `modules.py`, `web.py`) compile to JS alongside the class that uses them. Useful when two classes in the same file want to share a small helper without spinning up a whole `Module` for one or two functions.
+
+```python
+# app/routes/cart/modules.py
+from sprag import Module
+
+
+CURRENCY = "$"
+
+
+def format_price(cents):
+    return CURRENCY + str(cents / 100)
+
+
+def line_total(item):
+    return format_price(item["price_cents"] * item["qty"])
+
+
+class CartModule(Module):
+    def on_result(self, result):
+        self.set_state({
+            "items": result.value["items"],
+            "subtotal_label": format_price(result.value["subtotal_cents"]),
+        })
+
+
+class CheckoutModule(Module):
+    def on_render_line(self, item):
+        return line_total(item)
+```
+
+Both classes get a `function format_price` / `const CURRENCY` prelude in their generated JS, ordered so dependencies appear first. Each generated class file gets its own copy of just the helpers it actually references — unused helpers are dropped.
+
+**Rules and limits:**
+
+- Top-level `def` becomes a JS `function`. `async def` is not collected — make it a method on the class instead.
+- Top-level `name = expr` and `name: T = expr` become `const name = ...`. Decorated helpers are skipped (decorators apply to methods, not free functions).
+- Helpers can reference each other, the stores declared in `app/stores.py`, `imports.foo` aliases, `dom.*` / `ui.*` factories, and other compiled browser classes — same as a class method.
+- Helper names must not collide with imported stores or imported browser classes — both end up at file scope in the generated JS, so a clash would be a duplicate declaration. The build fails with a clear "rename the helper" message.
+- `from .x import helper` doesn't surface `helper` as compilable — you either duplicate the helper or share via a JS shim plugged in through `page(modules={...})`.
+- A helper that uses Python the codegen can't lower (e.g. `**kwargs` unpack) raises `JSCodegenError` with the file path and helper name.
 
 ## Statements
 
@@ -74,6 +118,27 @@ def render(self, props=None):
         )
     )
 ```
+
+Render-locals declared above the `return` work naturally inside `ui.For` / `ui.Grid` / `ui.LazyImage` callbacks and arguments — the codegen captures them so the mount machinery sees the same values render() saw:
+
+```python
+def render(self, props=None):
+    tabs = props.get("tabs", [])           # render-local
+    active = props.get("active_tab", "home")  # render-local
+    return ui.div(
+        ui.For(
+            tabs,                              # captured
+            key="id",
+            render=lambda tab: ui.button(
+                tab["label"],
+                aria_selected=(tab["id"] == active),  # captured
+                class_="tab is-active" if tab["id"] == active else "tab",
+            ),
+        ),
+    )
+```
+
+Each render() refreshes the captured values, so updates from `self.set_state(...)` flow through correctly.
 
 ## Expressions
 
@@ -267,11 +332,11 @@ These Python constructs will raise `JSCodegenError` at compile time:
 
 | Construct | Alternative |
 |---|---|
-| Type annotations: `x: int = 5` | Use `x = 5` |
+| Type annotations inside a method body: `x: int = 5` | Drop the annotation — `x = 5` works. (Module-level `RATE: float = 0.5` IS supported as a helper constant.) |
 | `with` statement | Use explicit try/finally |
 | `del x` | Assign `None` or use `store.delete()` |
 | `assert x` | Use `if not x:` |
-| Nested function/class defs | Lift to module scope |
+| Nested function/class defs *inside* a method | Lift to module scope — module-level `def`s compile to JS automatically |
 | `for/else`, `while/else` | Remove the else branch |
 | `yield` / `yield from` | Materialise eagerly |
 | Set literals: `{1, 2, 3}` | Use list or set comprehension |
@@ -281,6 +346,9 @@ These Python constructs will raise `JSCodegenError` at compile time:
 | `isinstance()` checks | Not supported in browser code |
 | Subscript assignment: `self.state["k"] = v` | Use `self.set_state({...})` or `self.patch({...})` |
 | `ui.For()` / `ui.Grid()` / `ui.LazyImage()` outside `render()` | Move the call directly into `render()` — helper methods aren't scanned for mount-point wiring |
+| `f(*args)` — positional splat in a call | Pass arguments individually |
+| `f(**kwargs)` — keyword splat in a call | Spread into a dict literal first: `f({**kwargs, ...})` and have the callee accept a dict |
+| `def f(*args, **kwargs)` — splat parameters | Use explicit named parameters; positional/keyword variadics aren't lowered to JS |
 
 Every error includes the source file, class name, line number, and a suggestion.
 

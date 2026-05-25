@@ -515,11 +515,58 @@ def _join_base_url(base_url: str, path: str) -> str:
     return join_url(base_url, path)
 
 
+# Filenames/directories that are commonly present before `sprag new .`
+# is run (editor metadata, pre-created venvs, git state). Their presence
+# does not mean the project has already been scaffolded, so they don't
+# count toward the "directory is non-empty" check.
+_SCAFFOLD_IGNORED_ENTRIES = {
+    ".venv",
+    "venv",
+    ".git",
+    ".gitignore",
+    ".hg",
+    ".svn",
+    ".idea",
+    ".vscode",
+    ".zed",
+    ".DS_Store",
+    ".python-version",
+    ".env",
+    ".env.local",
+    "node_modules",
+    "__pycache__",
+    "pyrightconfig.json",
+}
+
+
+def _slugify_project_name(raw: str) -> str:
+    slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in raw.strip())
+    slug = slug.strip("-_") or "sprag-app"
+    return slug
+
+
 def cmd_new(args):
-    target_dir = Path(args.output_dir).resolve() / args.name
-    if target_dir.exists() and any(target_dir.iterdir()):
-        raise SystemExit(f"[SPRAG] target directory already exists and is not empty: {target_dir}")
-    created = scaffold_project(target_dir, args.name, template=args.template)
+    name_arg = args.name
+    if name_arg in (".", ""):
+        target_dir = Path(args.output_dir).resolve()
+        project_name = _slugify_project_name(target_dir.name)
+    else:
+        target_dir = Path(args.output_dir).resolve() / name_arg
+        project_name = name_arg
+
+    if target_dir.exists():
+        meaningful = [
+            entry for entry in target_dir.iterdir()
+            if entry.name not in _SCAFFOLD_IGNORED_ENTRIES
+        ]
+        if meaningful:
+            preview = ", ".join(sorted(p.name for p in meaningful)[:5])
+            raise SystemExit(
+                f"[SPRAG] target directory already contains project files: {target_dir} "
+                f"(saw: {preview})"
+            )
+
+    created = scaffold_project(target_dir, project_name, template=args.template)
     print(f"[SPRAG] created project at {target_dir} (template: {args.template})")
     for path in created:
         print(path.relative_to(target_dir))

@@ -282,11 +282,22 @@ def _compile_expr(node, env, method_names=None):
         callee = _compile_expr(node.func, env, method_names=method_names)
         args = []
         for arg in node.args:
+            if isinstance(arg, ast.Starred):
+                raise JSCodegenError(
+                    "`*args` unpack in a function call is not supported in "
+                    "browser codegen — pass positional arguments individually."
+                )
             compiled = _compile_expr(arg, env, method_names=method_names)
             if _is_bound_method_reference(arg, method_names):
                 compiled = f"{compiled}.bind(this)"
             args.append(compiled)
         for keyword in node.keywords:
+            if keyword.arg is None:
+                raise JSCodegenError(
+                    "`**kwargs` unpack in a function call is not supported in "
+                    "browser codegen — spread into a dict literal first, e.g. "
+                    "`f({**kwargs, ...})` and have the callee accept a single dict."
+                )
             args.append(_compile_expr(keyword.value, env, method_names=method_names))
         return f"{callee}({', '.join(args)})"
     if isinstance(node, ast.Await):
@@ -548,6 +559,56 @@ def _compile_comp_target(target):
     raise JSCodegenError(f"Unsupported target: {ast.dump(target)}")
 
 
+def _compile_mount_args_in_render_env(node, env, *, method_names=None) -> dict:
+    """Eagerly compile a ui.For / ui.Grid / ui.LazyImage's argument expressions
+    in the render env, so render-local variables flow into the stash.
+
+    Returned dict has only the args relevant to the mount kind; the caller
+    (``compile_component_artifact``) stitches them into a
+    ``this._sprMountArgs[N] = {...}`` line that runs as part of render(),
+    and ``__spragSyncMounts`` reads the values back.
+    """
+    tag = node.func.attr
+    out: dict = {}
+
+    if tag == "LazyImage":
+        if not node.args:
+            return out
+        out["src"] = _compile_expr(node.args[0], env, method_names=method_names)
+        for kw in node.keywords:
+            if kw.arg is None:
+                # **kwargs unpack — let the LazyImage compiler raise the proper
+                # error when it runs over the same AST. Skip here.
+                continue
+            if kw.arg == "placeholder":
+                out["placeholder"] = _compile_expr(kw.value, env, method_names=method_names)
+            else:
+                out[f"attr_{kw.arg}"] = _compile_expr(kw.value, env, method_names=method_names)
+        return out
+
+    # ui.For / ui.Grid
+    if not node.args:
+        return out
+    out["items"] = _compile_expr(node.args[0], env, method_names=method_names)
+
+    for kw in node.keywords:
+        if kw.arg is None:
+            continue  # let the main compiler raise on **kwargs
+        if kw.arg == "key":
+            if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                field = json.dumps(kw.value.value)
+                out["key"] = f"(item) => item[{field}]"
+            else:
+                out["key"] = _compile_expr(kw.value, env, method_names=method_names)
+        elif kw.arg == "render":
+            out["render"] = _compile_expr(kw.value, env, method_names=method_names)
+        elif kw.arg == "pool_key":
+            out["pool_key"] = _compile_expr(kw.value, env, method_names=method_names)
+        elif tag == "Grid" and kw.arg in ("columns", "column_width", "gap", "apply_grid_styles"):
+            out[f"grid_{kw.arg}"] = _compile_expr(kw.value, env, method_names=method_names)
+    return out
+
+
 def _compile_ui_call(node, env, *, method_names=None):
     tag = node.func.attr
 
@@ -574,12 +635,18 @@ def _compile_ui_call(node, env, *, method_names=None):
                 ),
             )
         mount_index = len(ctx)
-        # Store the raw AST nodes -- compile_component_class will re-compile
-        # them in the onStart env (where ``props`` resolves to ``this.props``).
+        # Store the AST node *and* eagerly-compiled args. Args are compiled
+        # here, in the render env (which sees render-local vars), then
+        # stashed on `this._sprMountArgs[N]` from render() before the return.
+        # __spragSyncMounts reads them back — that's how render-locals like
+        # ``items = self.state["items"]`` reach the renderList call.
         entry = {
             "tag": tag,
             "index": mount_index,
             "node": node,
+            "render_env_args": _compile_mount_args_in_render_env(
+                node, env, method_names=method_names
+            ),
         }
         ctx.append(entry)
 
@@ -599,9 +666,20 @@ def _compile_ui_call(node, env, *, method_names=None):
             f'"data-sprag-mount-kind": "{kind}" }})'
         )
 
+    for arg in node.args:
+        if isinstance(arg, ast.Starred):
+            raise JSCodegenError(
+                f"`*args` unpack is not supported in ui.{tag}(...) — spell the "
+                "child elements out individually.",
+            )
     child_args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
     option_chunks = []
     for keyword in node.keywords:
+        if keyword.arg is None:
+            raise JSCodegenError(
+                f"`**kwargs` unpack is not supported in ui.{tag}(...) — pass "
+                "attributes by name (e.g. `class_=`, `data_role=`).",
+            )
         key = normalize_attr_key(keyword.arg)
         option_chunks.append(
             f'"{key}": {_compile_expr(keyword.value, env, method_names=method_names)}'
@@ -624,6 +702,11 @@ def _compile_lazy_image(node, env, *, method_names=None):
     placeholder_expr = None
     other_attrs = []
     for kw in node.keywords:
+        if kw.arg is None:
+            raise JSCodegenError(
+                "`**kwargs` unpack is not supported in ui.LazyImage(...) — "
+                "pass attributes by name.",
+            )
         if kw.arg == "placeholder":
             placeholder_expr = _compile_expr(kw.value, env, method_names=method_names)
         else:
@@ -641,9 +724,20 @@ def _compile_dom_call(node, env, *, method_names=None):
     """Compile ``dom.X(...)`` into a bare Ragot helper call."""
     attr = node.func.attr
     js_name = _DOM_METHOD_MAP.get(attr, attr)
+    for arg in node.args:
+        if isinstance(arg, ast.Starred):
+            raise JSCodegenError(
+                f"`*args` unpack is not supported in dom.{attr}(...) — pass "
+                "positional arguments individually.",
+            )
     pos_args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
     option_chunks = []
     for keyword in node.keywords:
+        if keyword.arg is None:
+            raise JSCodegenError(
+                f"`**kwargs` unpack is not supported in dom.{attr}(...) — pass "
+                "options by name.",
+            )
         option_chunks.append(
             f"{keyword.arg}: {_compile_expr(keyword.value, env, method_names=method_names)}"
         )

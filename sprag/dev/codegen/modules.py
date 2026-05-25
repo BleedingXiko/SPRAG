@@ -34,6 +34,13 @@ from .expressions import _compile_expr  # noqa: F401  (re-export for tests)
 from .dependencies import used_browser_class_refs, used_js_import_aliases
 from .imports import _detect_ragot_imports
 from .mappings import JSCodegenError, _map_name
+from .module_helpers import (
+    check_helper_name_collisions,
+    collect_module_helpers,
+    compile_module_helpers_prelude,
+    referenced_helper_names_in_class,
+    select_used_helpers,
+)
 from .source_maps import GeneratedArtifact, GeneratedLineMapping, build_source_map, count_lines, mappings_for_text
 from .statements import _compile_statements, _compile_statements_with_mappings
 from .stores_scan import collect_store_refs_for_class
@@ -325,28 +332,53 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
 
     method_code = [chunk for chunk, _, _, _ in method_chunks]
     methods_block = "\n\n".join(method_code) if method_code else "    onStart() {}\n"
-    extra_imports = _detect_ragot_imports(methods_block)
+
+    # Compile the module-level helper prelude BEFORE running the import
+    # detectors below — helpers can reference stores, ragot primitives,
+    # other browser classes, joinUrl, and env helpers just like methods,
+    # and the file needs the matching import lines.
+    source_file = inspect.getsourcefile(module_class) or inspect.getfile(module_class)
+    module_helpers = collect_module_helpers(source_file)
+    check_helper_name_collisions(
+        module_helpers,
+        store_names=set(store_refs.keys()),
+        class_names=set(browser_class_refs.keys()),
+        source_file=source_file,
+    )
+    helper_seed = referenced_helper_names_in_class(module_class, module_helpers)
+    used_helpers = select_used_helpers(module_helpers, helper_seed)
+    module_helpers_prelude, module_helpers_mappings = compile_module_helpers_prelude(
+        module_helpers,
+        used_helpers,
+        seed_env=_seed_env,
+        source_file=source_file,
+    )
+
+    # Run import/runtime detection over both method bodies and helper prelude
+    # so a store/class/imports reference inside a helper still triggers the
+    # matching import line.
+    import_scan_source = methods_block + "\n" + module_helpers_prelude
+
+    extra_imports = _detect_ragot_imports(import_scan_source)
     base_imports = "Module, ragotRegistry"
     if extra_imports:
         base_imports += ", " + ", ".join(sorted(extra_imports))
 
-    used_stores = _detect_used_stores(methods_block, store_refs)
+    used_stores = _detect_used_stores(import_scan_source, store_refs)
     store_import_line = ""
     if used_stores:
         names = ", ".join(sorted(used_stores))
         store_import_line = f"import {{ {names} }} from '../stores.js';\n"
     sprag_runtime_import_line = ""
-    if _references_joinUrl(methods_block):
+    if _references_joinUrl(import_scan_source):
         sprag_runtime_import_line = "import { joinUrl } from '../../runtime/urls.js';\n"
     class_import_lines = _browser_class_imports(
-        methods_block,
+        import_scan_source,
         browser_class_refs,
         current_class=module_class,
         kind="modules",
     )
-    env_helper_prelude = _emit_env_helper_prelude(methods_block)
-
-    source_file = inspect.getsourcefile(module_class) or inspect.getfile(module_class)
+    env_helper_prelude = _emit_env_helper_prelude(import_scan_source)
     source_content = Path(source_file).read_text(encoding="utf-8")
     generated_filename = f"{module_class.__name__}.js"
     line_mappings: list[GeneratedLineMapping | None] = []
@@ -373,6 +405,8 @@ def compile_module_artifact(module_class, *, declared_import_aliases=None) -> Ge
     _append("\n")
     _append(class_import_lines)
     _append(env_helper_prelude)
+    if module_helpers_prelude:
+        _append(module_helpers_prelude, explicit_mappings=module_helpers_mappings)
     _append(f"export class {module_class.__name__} extends Module {{\n")
     _append("    constructor(initialState = {}) {\n")
     _append("        super(initialState);\n")

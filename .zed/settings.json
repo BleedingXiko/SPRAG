@@ -1,0 +1,13 @@
+{
+  "lsp": {
+    "pyright": {
+      "initialization_options": {
+        "python": {
+          "analysis": {
+            "typeCheckingMode": "off"
+          }
+        }
+      }
+    }
+  }
+}

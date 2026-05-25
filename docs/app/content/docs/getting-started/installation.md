@@ -51,4 +51,14 @@ cd hello
 sprag dev
 ```
 
+Or scaffold into the current directory (useful if you already created the directory and a venv):
+
+```bash
+mkdir hello && cd hello
+python -m venv .venv && source .venv/bin/activate
+pip install spragkit
+sprag new .
+sprag dev
+```
+
 Open `http://localhost:8000` in your browser. You should see the default SPRAG app with a working counter.

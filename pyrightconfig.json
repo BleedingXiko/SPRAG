@@ -1,0 +1,4 @@
+{
+  "include": ["sprag"],
+  "typeCheckingMode": "off"
+}

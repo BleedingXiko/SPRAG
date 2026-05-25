@@ -32,6 +32,13 @@ from .expressions import _compile_expr
 from .dependencies import used_browser_class_refs, used_js_import_aliases
 from .imports import _detect_ragot_imports
 from .mappings import JSCodegenError, _map_name
+from .module_helpers import (
+    check_helper_name_collisions,
+    collect_module_helpers,
+    compile_module_helpers_prelude,
+    referenced_helper_names_in_class,
+    select_used_helpers,
+)
 from .modules import (
     _browser_class_imports,
     _detect_used_stores,
@@ -355,7 +362,14 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
     # createLazyLoader install if any ui.LazyImage was used). These need to
     # run on initial mount *and* after any later component re-render so the
     # placeholder nodes regain their client-side owners.
-    mount_setup_lines, mount_imports = _emit_mount_setup(mounts, method_names=method_names)
+    # Render-locals are not a worry here: mount args were eagerly compiled in
+    # the render env by _compile_mount_args_in_render_env and stashed on
+    # ``this._sprMountArgs[N]`` from the render() body, so __spragSyncMounts
+    # just reads them back. The lambdas closed over render-locals naturally.
+    mount_setup_lines, mount_imports = _emit_mount_setup(
+        mounts,
+        method_names=method_names,
+    )
     if mount_setup_lines:
         extra_methods.extend(
             [
@@ -483,28 +497,48 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
         methods_block = "\n\n" + methods_block + "\n"
 
     all_code = "\n".join(body_lines) + "\n" + return_expr + "\n" + "\n".join(method_code)
-    extra_imports = _detect_ragot_imports(all_code) | mount_imports
+
+    # Compile the module-level helper prelude BEFORE running the import
+    # detectors below — helpers can reference stores, ragot primitives,
+    # other browser classes, joinUrl, and env helpers just like methods.
+    source_file = inspect.getsourcefile(component_class) or inspect.getfile(component_class)
+    module_helpers = collect_module_helpers(source_file)
+    check_helper_name_collisions(
+        module_helpers,
+        store_names=set(store_refs.keys()),
+        class_names=set(browser_class_refs.keys()),
+        source_file=source_file,
+    )
+    helper_seed = referenced_helper_names_in_class(component_class, module_helpers)
+    used_helpers = select_used_helpers(module_helpers, helper_seed)
+    module_helpers_prelude, module_helpers_mappings = compile_module_helpers_prelude(
+        module_helpers,
+        used_helpers,
+        seed_env=_seed_env,
+        source_file=source_file,
+    )
+
+    import_scan_source = all_code + "\n" + module_helpers_prelude
+    extra_imports = _detect_ragot_imports(import_scan_source) | mount_imports
     base_imports = "Component, createElement"
     if extra_imports:
         base_imports += ", " + ", ".join(sorted(extra_imports))
 
-    used_stores = _detect_used_stores(all_code, store_refs)
+    used_stores = _detect_used_stores(import_scan_source, store_refs)
     store_import_line = ""
     if used_stores:
         names = ", ".join(sorted(used_stores))
         store_import_line = f"import {{ {names} }} from '../stores.js';\n"
     sprag_runtime_import_line = ""
-    if _references_joinUrl(all_code):
+    if _references_joinUrl(import_scan_source):
         sprag_runtime_import_line = "import { joinUrl } from '../../runtime/urls.js';\n"
     class_import_lines = _browser_class_imports(
-        all_code,
+        import_scan_source,
         browser_class_refs,
         current_class=component_class,
         kind="components",
     )
-    env_helper_prelude = _emit_env_helper_prelude(all_code)
-
-    source_file = inspect.getsourcefile(component_class) or inspect.getfile(component_class)
+    env_helper_prelude = _emit_env_helper_prelude(import_scan_source)
     source_content = Path(source_file).read_text(encoding="utf-8")
     generated_filename = f"{component_class.__name__}.js"
     line_mappings: list[GeneratedLineMapping | None] = []
@@ -531,6 +565,8 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
     _append("\n")
     _append(class_import_lines)
     _append(env_helper_prelude)
+    if module_helpers_prelude:
+        _append(module_helpers_prelude, explicit_mappings=module_helpers_mappings)
     _append(f"export class {component_class.__name__} extends Component {{\n")
     _append(
         "    constructor(initialState = {}, options = {}) {\n"
@@ -587,10 +623,28 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
     )
     render_start_generated = len(line_mappings) + 1
     render_body = "\n".join(body_lines)
+    # Stash mount args (compiled in render env via
+    # _compile_mount_args_in_render_env) so __spragSyncMounts can read them
+    # after re-render. The lambdas close over render-locals naturally, so
+    # ``tabs = props.get("tabs", [])`` followed by ``ui.For(tabs, ...)``
+    # just works.
+    mount_stash_lines: list[str] = []
+    for entry in mounts:
+        args = entry.get("render_env_args") or {}
+        if not args:
+            continue
+        index = entry["index"]
+        chunks = [f"{k}: {v}" for k, v in args.items()]
+        mount_stash_lines.append(
+            f"        (this._sprMountArgs = this._sprMountArgs || {{}})[{index}] = "
+            f"{{ {', '.join(chunks)} }};"
+        )
+    mount_stash_block = "\n".join(mount_stash_lines)
     render_method = (
         "    render(propsOverride = null) {\n"
         "        const props = propsOverride || this.props || {};\n"
         + (render_body + "\n" if render_body else "")
+        + (mount_stash_block + "\n" if mount_stash_block else "")
         + f"        return {return_expr};\n"
         "    }"
     )
@@ -650,12 +704,23 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
 # ---------------------------------------------------------------------------
 
 
-def _emit_mount_setup(mounts: list[dict], *, method_names) -> tuple[list[str], set[str]]:
+def _emit_mount_setup(
+    mounts: list[dict],
+    *,
+    method_names,
+) -> tuple[list[str], set[str]]:
     """Emit the renderList / renderGrid / createLazyLoader prologue lines.
 
     Returns ``(lines, extra_imports)`` so the caller can merge the
     additional Ragot imports needed by the synthesised JS into the file's
     import set without re-scanning the prologue afterwards.
+
+    The args (items, key, render, etc.) were eagerly compiled in render()'s
+    env by ``_compile_mount_args_in_render_env`` and stashed onto the
+    Component instance as ``this._sprMountArgs[N]`` via a line emitted
+    just before render's return. This method just reads them back and
+    calls renderList / renderGrid — render-locals stay in scope because
+    the lambdas closed over them when render() ran.
     """
     if not mounts:
         return [], set()
@@ -663,69 +728,48 @@ def _emit_mount_setup(mounts: list[dict], *, method_names) -> tuple[list[str], s
     lines: list[str] = []
     imports: set[str] = set()
 
-    # Recompile env: in onStart we resolve ``props`` against ``this.props``
-    # because the render() locals are out of scope at this point. The
-    # throwaway ``__sprag_mounts__`` collector lets nested ui.LazyImage
-    # calls inside a render lambda compile (their <img> emit is what we
-    # want; the loader install is handled below by ``has_lazy``).
-    nested_mounts: list[dict] = []
-    onstart_env = {"props": "this.props", "__sprag_mounts__": nested_mounts}
-
     has_lazy = False
     for entry in mounts:
         if entry["tag"] == "LazyImage":
             has_lazy = True
             continue
 
-        node = entry["node"]
         index = entry["index"]
         kind = entry["tag"]  # "For" or "Grid"
 
-        # ui.For / ui.Grid signature: positional items + keyword key/render/pool_key/grid options.
-        if not node.args:
+        args = entry.get("render_env_args") or {}
+        if "items" not in args:
             raise JSCodegenError(f"ui.{kind}(...) requires the items argument")
-        items_expr = _compile_expr(node.args[0], onstart_env, method_names=method_names)
 
-        key_expr = "(item, i) => String(i)"
-        render_expr = "(item) => item"
-        pool_key_expr = None
-        grid_options: dict[str, str] = {}
-
-        for kw in node.keywords:
-            if kw.arg == "key":
-                key_expr = _compile_key_argument(kw.value, onstart_env, method_names=method_names)
-            elif kw.arg == "render":
-                render_expr = _compile_expr(kw.value, onstart_env, method_names=method_names)
-            elif kw.arg == "pool_key":
-                pool_key_expr = _compile_expr(kw.value, onstart_env, method_names=method_names)
-            elif kind == "Grid" and kw.arg in ("columns", "column_width", "gap", "apply_grid_styles"):
-                js_key = {
-                    "columns": "columns",
-                    "column_width": "columnWidth",
-                    "gap": "gap",
-                    "apply_grid_styles": "applyGridStyles",
-                }[kw.arg]
-                grid_options[js_key] = _compile_expr(kw.value, onstart_env, method_names=method_names)
-            else:
-                raise JSCodegenError(f"Unknown ui.{kind}(...) argument: {kw.arg}")
-
+        stash_ref = f'(this._sprMountArgs && this._sprMountArgs[{index}])'
         opts_chunks: list[str] = []
-        if pool_key_expr is not None:
-            opts_chunks.append(f"poolKey: {pool_key_expr}")
-        for k, v in grid_options.items():
-            opts_chunks.append(f"{k}: {v}")
+        if "pool_key" in args:
+            opts_chunks.append(f"poolKey: {stash_ref}.pool_key")
+        if kind == "Grid":
+            grid_map = {
+                "grid_columns": "columns",
+                "grid_column_width": "columnWidth",
+                "grid_gap": "gap",
+                "grid_apply_grid_styles": "applyGridStyles",
+            }
+            for source_key, js_key in grid_map.items():
+                if source_key in args:
+                    opts_chunks.append(f"{js_key}: {stash_ref}.{source_key}")
         opts_block = "{ " + ", ".join(opts_chunks) + " }" if opts_chunks else "{}"
 
         target_query = f'this.element.querySelector(\'[data-sprag-mount="{index}"]\')'
         fn = "renderGrid" if kind == "Grid" else "renderList"
         imports.add(fn)
+        items_ref = f"{stash_ref}.items"
+        key_ref = f"({stash_ref}.key || ((item, i) => String(i)))"
+        render_ref = f"({stash_ref}.render || ((item) => item))"
         lines.append(
-            f"        {fn}({target_query}, {items_expr}, {key_expr}, {render_expr}, undefined, {opts_block});"
+            f"        {fn}({target_query}, {items_ref}, {key_ref}, {render_ref}, undefined, {opts_block});"
         )
 
-    # Lazy images may also appear nested inside For/Grid render lambdas.
-    if any(e["tag"] == "LazyImage" for e in nested_mounts):
-        has_lazy = True
+    # Lazy images inside For/Grid render lambdas now feed the same mounts
+    # collector during eager render-env compilation, so they're covered by
+    # the LazyImage skip-and-flag inside the loop above.
 
     if has_lazy:
         # One createLazyLoader install per component; the loader observes
