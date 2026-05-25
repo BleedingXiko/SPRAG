@@ -18,10 +18,13 @@ import { Module, createElement, attr, append, remove } from '../vendor/ragot.esm
 
 const OVERLAY_ID = '__sprag_dev_overlay__';
 const MAX_ERRORS = 50;
+const STACK_FRAME_RE = /^\s*at\s+(?:(.*?)\s+\()?(.+?\.js):(\d+):(\d+)\)?\s*$/;
+const SAFARI_STACK_FRAME_RE = /^\s*(.*?)@(.+?\.js):(\d+):(\d+)\s*$/;
 
 let _activeOverlay = null;
 let _pendingErrors = [];
 let _globalListenersInstalled = false;
+const _sourceMapCache = new Map();
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -201,19 +204,28 @@ class DevOverlayModule extends Module {
     }
 
     pushError(entry) {
-        this.errors.push({
+        const normalized = {
             timestamp: Date.now(),
             kind: entry.kind || 'runtime',
             title: entry.title || 'Error',
             message: entry.message || '',
             stack: entry.stack || '',
             source: entry.source || null,
-        });
+            mappedFrames: [],
+            mappedStack: '',
+            sourceLineText: '',
+        };
+        this.errors.push(normalized);
         if (this.errors.length > MAX_ERRORS) {
             this.errors = this.errors.slice(-MAX_ERRORS);
         }
         this.dismissed = false;
         this._render();
+        void _enrichError(normalized).then((changed) => {
+            if (changed && this.errors.includes(normalized) && !this.dismissed) {
+                this._render();
+            }
+        });
     }
 
     clearErrors() {
@@ -296,6 +308,290 @@ function _isDevMode() {
 }
 
 // ---------------------------------------------------------------------------
+// Source-map enrichment
+// ---------------------------------------------------------------------------
+
+async function _enrichError(entry) {
+    if (!entry || !entry.stack || entry.mappedStack) {
+        return false;
+    }
+    const mapped = await _mapStack(entry.stack);
+    if (!mapped.frames.length) {
+        return false;
+    }
+    entry.mappedFrames = mapped.frames;
+    entry.mappedStack = mapped.stack;
+    const firstFrame = mapped.frames.find((frame) => frame.mapped) || null;
+    if (firstFrame && firstFrame.sourceLineText) {
+        entry.sourceLineText = firstFrame.sourceLineText;
+    }
+    return true;
+}
+
+async function _mapStack(stack) {
+    const lines = String(stack || '').split('\n');
+    const mappedFrames = [];
+    const mappedLines = [];
+
+    for (const line of lines) {
+        const frame = _parseStackFrame(line);
+        if (!frame) {
+            mappedLines.push(line);
+            continue;
+        }
+
+        const mapped = await _mapFrame(frame);
+        if (!mapped) {
+            mappedLines.push(line);
+            continue;
+        }
+
+        mappedFrames.push(mapped);
+        mappedLines.push(_formatMappedStackLine(mapped));
+    }
+
+    return {
+        frames: mappedFrames,
+        stack: mappedLines.join('\n'),
+    };
+}
+
+function _parseStackFrame(line) {
+    const chrome = String(line || '').match(STACK_FRAME_RE);
+    if (chrome) {
+        return {
+            raw: line,
+            prefix: line.match(/^\s*/)[0] || '',
+            functionName: chrome[1] || '',
+            url: chrome[2],
+            line: Number(chrome[3]),
+            column: Number(chrome[4]),
+            style: 'chrome',
+        };
+    }
+
+    const safari = String(line || '').match(SAFARI_STACK_FRAME_RE);
+    if (safari) {
+        return {
+            raw: line,
+            prefix: line.match(/^\s*/)[0] || '',
+            functionName: safari[1] || '',
+            url: safari[2],
+            line: Number(safari[3]),
+            column: Number(safari[4]),
+            style: 'safari',
+        };
+    }
+
+    return null;
+}
+
+async function _mapFrame(frame) {
+    const sourceMap = await _loadSourceMap(frame.url);
+    if (!sourceMap) {
+        return null;
+    }
+    const original = _lookupOriginalLocation(sourceMap, frame.line);
+    if (!original) {
+        return null;
+    }
+
+    const method = _methodForGeneratedLine(sourceMap, frame.line);
+    const functionName = original.name || method || frame.functionName || '';
+    return {
+        ...frame,
+        mapped: true,
+        functionName,
+        source: original.source,
+        sourceLine: original.line,
+        sourceColumn: original.column,
+        sourceLineText: original.sourceLineText,
+        method,
+    };
+}
+
+async function _loadSourceMap(generatedUrl) {
+    if (typeof fetch !== 'function') {
+        return null;
+    }
+
+    const href = _absoluteURL(generatedUrl);
+    if (!href) {
+        return null;
+    }
+    if (_sourceMapCache.has(href)) {
+        return _sourceMapCache.get(href);
+    }
+
+    const promise = _fetchSourceMap(href).catch(() => null);
+    _sourceMapCache.set(href, promise);
+    return promise;
+}
+
+async function _fetchSourceMap(generatedHref) {
+    let mapHref = `${generatedHref}.map`;
+    let response = await fetch(mapHref, { cache: 'no-store' });
+    if (!response.ok) {
+        const sourceResponse = await fetch(generatedHref, { cache: 'no-store' });
+        if (!sourceResponse.ok) {
+            return null;
+        }
+        const sourceText = await sourceResponse.text();
+        const match = sourceText.match(/\/\/[#@]\s*sourceMappingURL=([^\s]+)/);
+        if (!match) {
+            return null;
+        }
+        mapHref = new URL(match[1], generatedHref).href;
+        response = await fetch(mapHref, { cache: 'no-store' });
+        if (!response.ok) {
+            return null;
+        }
+    }
+
+    const payload = await response.json();
+    if (!payload || payload.version !== 3 || typeof payload.mappings !== 'string') {
+        return null;
+    }
+    payload.__spragDecodedMappings = _decodeMappings(payload.mappings);
+    return payload;
+}
+
+function _absoluteURL(value) {
+    try {
+        return new URL(value, window.location.href).href.split('#')[0];
+    } catch (_error) {
+        return null;
+    }
+}
+
+function _lookupOriginalLocation(sourceMap, generatedLine) {
+    const decoded = sourceMap.__spragDecodedMappings || [];
+    const mapping = decoded[generatedLine - 1];
+    if (!mapping) {
+        return null;
+    }
+    const source = (sourceMap.sources || [])[mapping.sourceIndex] || '';
+    const sourceContent = (sourceMap.sourcesContent || [])[mapping.sourceIndex] || '';
+    const sourceLineText = sourceContent
+        ? (sourceContent.split('\n')[mapping.sourceLine] || '').trim()
+        : '';
+    return {
+        source,
+        line: mapping.sourceLine + 1,
+        column: mapping.sourceColumn + 1,
+        name: mapping.nameIndex === null ? '' : (sourceMap.names || [])[mapping.nameIndex] || '',
+        sourceLineText,
+    };
+}
+
+function _methodForGeneratedLine(sourceMap, generatedLine) {
+    const methods = sourceMap.x_sprag && Array.isArray(sourceMap.x_sprag.methods)
+        ? sourceMap.x_sprag.methods
+        : [];
+    const method = methods.find((entry) => (
+        generatedLine >= entry.generated_start_line
+        && generatedLine <= entry.generated_end_line
+    ));
+    if (!method) {
+        return '';
+    }
+    const className = sourceMap.x_sprag && sourceMap.x_sprag.class
+        ? sourceMap.x_sprag.class
+        : '';
+    return className ? `${className}.${method.name}` : method.name;
+}
+
+function _decodeMappings(mappings) {
+    const decoded = [];
+    let previousSourceIndex = 0;
+    let previousSourceLine = 0;
+    let previousSourceColumn = 0;
+    let previousNameIndex = 0;
+
+    for (const line of String(mappings || '').split(';')) {
+        if (!line) {
+            decoded.push(null);
+            continue;
+        }
+        const segment = line.split(',')[0];
+        const fields = _decodeVlqSegment(segment);
+        if (fields.length < 4) {
+            decoded.push(null);
+            continue;
+        }
+        previousSourceIndex += fields[1];
+        previousSourceLine += fields[2];
+        previousSourceColumn += fields[3];
+        let nameIndex = null;
+        if (fields.length >= 5) {
+            previousNameIndex += fields[4];
+            nameIndex = previousNameIndex;
+        }
+        decoded.push({
+            sourceIndex: previousSourceIndex,
+            sourceLine: previousSourceLine,
+            sourceColumn: previousSourceColumn,
+            nameIndex,
+        });
+    }
+
+    return decoded;
+}
+
+function _decodeVlqSegment(segment) {
+    const values = [];
+    let value = 0;
+    let shift = 0;
+
+    for (const char of segment) {
+        let digit = _BASE64_CHARS.indexOf(char);
+        if (digit < 0) {
+            continue;
+        }
+        const continuation = (digit & 32) !== 0;
+        digit &= 31;
+        value += digit << shift;
+        if (continuation) {
+            shift += 5;
+            continue;
+        }
+        values.push(_fromVlqSigned(value));
+        value = 0;
+        shift = 0;
+    }
+
+    return values;
+}
+
+const _BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function _fromVlqSigned(value) {
+    const negative = (value & 1) === 1;
+    const shifted = value >> 1;
+    return negative ? -shifted : shifted;
+}
+
+function _formatMappedStackLine(frame) {
+    const fn = frame.functionName ? `${frame.functionName} ` : '';
+    return `${frame.prefix}at ${fn}(${frame.source}:${frame.sourceLine}:${frame.sourceColumn})`;
+}
+
+function _formatMappedSource(frame) {
+    if (!frame) {
+        return '';
+    }
+    const fn = frame.functionName ? ` in ${frame.functionName}` : '';
+    return `${frame.source}:${frame.sourceLine}:${frame.sourceColumn}${fn}`;
+}
+
+export const __spragDevOverlayInternals = {
+    decodeMappings: _decodeMappings,
+    parseStackFrame: _parseStackFrame,
+    lookupOriginalLocation: _lookupOriginalLocation,
+    methodForGeneratedLine: _methodForGeneratedLine,
+};
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
@@ -338,14 +634,31 @@ function _buildHTML(errors) {
     </div>
     <pre style="margin: 0; white-space: pre-wrap; word-break: break-word; color: #ddd; line-height: 1.5;">${_escapeHTML(err.message)}</pre>`;
 
+        const firstMappedFrame = err.mappedFrames && err.mappedFrames.length
+            ? err.mappedFrames[0]
+            : null;
+        if (firstMappedFrame) {
+            html += `
+    <div style="margin-top: 0.85rem; padding: 0.75rem; border: 1px solid #365f45; border-radius: 6px; background: #102018;">
+      <div style="color: #7ee0a3; font-size: 11px; letter-spacing: 0; text-transform: uppercase; margin-bottom: 0.35rem;">Source mapped location</div>
+      <div style="color: #f0fff5; font-weight: 600; word-break: break-word;">${_escapeHTML(_formatMappedSource(firstMappedFrame))}</div>
+      ${err.sourceLineText ? `<pre style="margin: 0.6rem 0 0; white-space: pre-wrap; word-break: break-word; color: #c8f5d7; font-size: 12px; line-height: 1.45;">${_escapeHTML(err.sourceLineText)}</pre>` : ''}
+    </div>`;
+        }
+
         if (err.source) {
             html += `
     <div style="margin-top: 0.5rem; color: #888; font-size: 12px;">Source: ${_escapeHTML(err.source)}</div>`;
         }
+        if (err.mappedStack) {
+            html += `
+    <div style="margin-top: 0.75rem; color: #aaa; font-size: 12px;">Mapped stack</div>
+    <pre style="margin: 0.35rem 0 0; white-space: pre-wrap; word-break: break-word; color: #b8d7ff; font-size: 12px; line-height: 1.45;">${_escapeHTML(err.mappedStack)}</pre>`;
+        }
         if (err.stack) {
             html += `
     <details style="margin-top: 0.5rem;">
-      <summary style="cursor: pointer; color: #888; font-size: 12px;">Stack trace</summary>
+      <summary style="cursor: pointer; color: #888; font-size: 12px;">${err.mappedStack ? 'Raw stack trace' : 'Stack trace'}</summary>
       <pre style="margin: 0.5rem 0 0; white-space: pre-wrap; word-break: break-word; color: #999; font-size: 12px; line-height: 1.4;">${_escapeHTML(err.stack)}</pre>
     </details>`;
         }

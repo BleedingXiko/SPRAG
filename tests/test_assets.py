@@ -8,6 +8,7 @@ from pathlib import Path
 import sprag
 from sprag import Component, Module, Screen, module, mount, page, script, ui
 from sprag.dev.codegen import build_browser_entry, compile_module_class
+from sprag.dev.codegen.components import compile_component_artifact
 from sprag.dev.codegen.emit import emit_stores_shim
 from sprag.dev.build import build_web_preview
 from sprag.runtime.rendering import render_mount
@@ -277,6 +278,62 @@ class AssetContractTests(unittest.TestCase):
             component_payload = json.loads(component_map.read_text(encoding="utf-8"))
             self.assertEqual(component_payload["x_sprag"]["class"], "AssetRootComponent")
             self.assertEqual(component_payload["x_sprag"]["methods"][0]["name"], "render")
+
+    def test_dev_overlay_can_decode_generated_source_map_locations(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is required for JS runtime validation")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build_web_preview(
+                [],
+                root / "dist",
+                app=DummyApp(root),
+                mounts=[
+                    (
+                        "app.mounts.lab",
+                        mount(
+                            "/lab",
+                            component=AssetRootComponent,
+                        ),
+                    )
+                ],
+            )
+
+            payload = json.loads(compile_component_artifact(AssetRootComponent).source_map)
+            script = f"""
+const mod = await import({json.dumps((root / "dist" / "runtime" / "dev_overlay.js").as_uri())});
+const internals = mod.__spragDevOverlayInternals;
+const payload = {json.dumps(payload)};
+payload.__spragDecodedMappings = internals.decodeMappings(payload.mappings);
+const span = payload.x_sprag.methods[0];
+const location = internals.lookupOriginalLocation(payload, span.generated_start_line);
+if (!location || !location.source.endsWith('test_assets.py')) {{
+  throw new Error(`unexpected source: ${{location && location.source}}`);
+}}
+if (!location.sourceLineText.includes('def render')) {{
+  throw new Error(`unexpected source line: ${{location.sourceLineText}}`);
+}}
+const method = internals.methodForGeneratedLine(payload, span.generated_start_line);
+if (method !== 'AssetRootComponent.render') {{
+  throw new Error(`unexpected method: ${{method}}`);
+}}
+const frame = internals.parseStackFrame('    at AssetRootComponent.render (http://localhost/generated/components/AssetRootComponent.js:23:9)');
+if (!frame || frame.functionName !== 'AssetRootComponent.render' || frame.line !== 23 || frame.column !== 9) {{
+  throw new Error(`unexpected frame: ${{JSON.stringify(frame)}}`);
+}}
+"""
+            result = subprocess.run(
+                [node, "--input-type=module", "-e", script],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"Dev overlay source-map helpers failed:\n{result.stderr}\n{result.stdout}",
+            )
 
     def test_build_web_preview_emits_thin_surface_entries_and_runtime_modules(self):
         with tempfile.TemporaryDirectory() as tmp:

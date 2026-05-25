@@ -103,14 +103,14 @@ class BootModule extends Module {
             window.__SPRAG_UPLOADS__ = uploadClient;
 
             navigation.rewriteInternalLinks();
+
+            if (surface.dev_reload) {
+                this._ensureDevOverlay();
+            }
+
             await resolveSurfaceImports(surface, navigation.resolveJSImportSrc);
 
             if (surface.dev_reload) {
-                if (!this._devOverlay) {
-                    this._devOverlay = createDevOverlay();
-                    this._devOverlay.start();
-                    this.adopt(this._devOverlay);
-                }
                 for (const [name, cls] of Object.entries(this._componentRegistry)) {
                     guardClass(cls, name);
                 }
@@ -169,6 +169,14 @@ class BootModule extends Module {
             renderBootError(error);
             console.error(error);
             return null;
+        }
+    }
+
+    _ensureDevOverlay() {
+        if (!this._devOverlay) {
+            this._devOverlay = createDevOverlay();
+            this._devOverlay.start();
+            this.adopt(this._devOverlay);
         }
     }
 

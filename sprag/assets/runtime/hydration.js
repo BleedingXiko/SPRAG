@@ -32,6 +32,7 @@ export async function resolveSurfaceImports(currentSurface, resolveJSImportSrc) 
 
 export function renderBootError(error) {
     const message = error && error.message ? error.message : String(error);
+    const stack = error && error.stack ? error.stack : '';
     const target = $('#app-root') || document.body;
     if (!target) {
         return;
@@ -59,6 +60,21 @@ export function renderBootError(error) {
                 style: { margin: '0', whiteSpace: 'pre-wrap' },
                 textContent: message,
             }),
+            stack ? createElement('pre', {
+                style: {
+                    margin: '1rem 0 0',
+                    padding: '0.75rem',
+                    overflowX: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    borderRadius: '8px',
+                    background: '#3b1111',
+                    color: '#ffe6e6',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    fontSize: '0.8rem',
+                    lineHeight: '1.45',
+                },
+                textContent: stack,
+            }) : null,
         ),
     );
 }
