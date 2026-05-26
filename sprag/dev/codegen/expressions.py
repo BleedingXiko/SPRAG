@@ -538,6 +538,9 @@ def _compile_python_method_call(node, env, *, method_names):
     if receiver_type == "list" and attr == "remove":
         _expect_arg_count(attr, args, 1)
         return f"{obj}.splice({obj}.indexOf({args[0]}), 1)"
+    if receiver_type == "list" and attr == "join":
+        _expect_arg_count(attr, args, 1)
+        return f"{obj}.join({args[0]})"
 
     if receiver_type == "str" and attr == "startswith":
         if len(args) not in {1, 2}:

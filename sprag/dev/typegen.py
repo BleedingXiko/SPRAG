@@ -36,7 +36,48 @@ def emit_project_types(
     if stale_types_file != output_file and stale_types_file.exists():
         stale_types_file.unlink()
     output_file.write_text(render_project_types(manifest), encoding="utf-8")
+    _ensure_pyrightconfig(output_file.parent.parent)
     return output_file
+
+
+def _ensure_pyrightconfig(project_root: Path) -> None:
+    """Make sure pyright can resolve ``from sprag_project_types import ...``.
+
+    The generated stub lives in ``.sprag/`` so it has to be on the import
+    path. We create a minimal ``pyrightconfig.json`` if none exists; if one
+    already exists we merge ``.sprag`` into ``extraPaths`` without touching
+    anything else.
+    """
+    config_path = project_root / "pyrightconfig.json"
+    if not config_path.exists():
+        config_path.write_text(
+            json.dumps(
+                {
+                    "include": ["app"],
+                    "extraPaths": [".", ".sprag"],
+                    "typeCheckingMode": "basic",
+                    "reportMissingImports": "warning",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(config, dict):
+        return
+    extra_paths = config.get("extraPaths")
+    if not isinstance(extra_paths, list):
+        extra_paths = []
+    if ".sprag" in extra_paths:
+        return
+    extra_paths.append(".sprag")
+    config["extraPaths"] = extra_paths
+    config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
 
 def render_project_types(manifest: dict) -> str:
