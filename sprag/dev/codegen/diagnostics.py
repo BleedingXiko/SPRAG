@@ -8,7 +8,6 @@ from .mappings import JSCodegenError
 
 
 _STATEMENT_HINTS = {
-    ast.AnnAssign: "Use a plain assignment inside browser methods; keep type annotations on signatures or class fields.",
     ast.With: (
         "Python `with` statements cannot be compiled to JavaScript. "
         "Acquire the resource in on_start() and release it in on_stop() or via self.add_cleanup(fn), "
@@ -35,7 +34,6 @@ if hasattr(ast, "AsyncFor"):
 
 _EXPRESSION_HINTS = {
     ast.Set: "Rewrite this as a list/tuple for now; set literals are not supported in browser codegen yet.",
-    ast.Slice: "Rewrite slices using explicit helper logic; Python slice syntax is not supported in browser codegen yet.",
     ast.Yield: "Move generator logic to server code or materialise the iterable eagerly.",
     ast.YieldFrom: "Move generator logic to server code or materialise the iterable eagerly.",
 }
@@ -123,6 +121,35 @@ def _lint_disallowed_component_calls(
 
 
 def _lint_stmt(node, *, source, source_file, class_name, method_name, line_offset):
+    if isinstance(node, ast.AnnAssign):
+        if node.value is None:
+            _raise(
+                "Annotation-only local variables are not supported in browser codegen.",
+                node,
+                source=source,
+                source_file=source_file,
+                class_name=class_name,
+                method_name=method_name,
+                line_offset=line_offset,
+                suggestion="Give the variable an initial value, e.g. `items: list[str] = []`.",
+            )
+        _lint_assign_target(
+            node.target,
+            source=source,
+            source_file=source_file,
+            class_name=class_name,
+            method_name=method_name,
+            line_offset=line_offset,
+        )
+        _lint_expr(
+            node.value,
+            source=source,
+            source_file=source_file,
+            class_name=class_name,
+            method_name=method_name,
+            line_offset=line_offset,
+        )
+        return
     if isinstance(node, ast.Assign):
         for target in node.targets:
             _lint_assign_target(
@@ -356,6 +383,29 @@ def _lint_assign_target(node, *, source, source_file, class_name, method_name, l
 
 def _lint_expr(node, *, source, source_file, class_name, method_name, line_offset):
     if isinstance(node, (ast.Constant, ast.Name)):
+        return
+    if isinstance(node, ast.Slice):
+        if node.step is not None:
+            _raise(
+                "Slice steps are not supported in browser codegen.",
+                node,
+                source=source,
+                source_file=source_file,
+                class_name=class_name,
+                method_name=method_name,
+                line_offset=line_offset,
+                suggestion="Use start/end slicing only, e.g. `items[start:end]`.",
+            )
+        for part in (node.lower, node.upper):
+            if part is not None:
+                _lint_expr(
+                    part,
+                    source=source,
+                    source_file=source_file,
+                    class_name=class_name,
+                    method_name=method_name,
+                    line_offset=line_offset,
+                )
         return
     if isinstance(node, ast.Attribute):
         _lint_expr(

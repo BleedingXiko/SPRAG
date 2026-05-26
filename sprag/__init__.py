@@ -1,6 +1,6 @@
 """Public SPRAG framework surface."""
 
-__version__ = "0.1.22"
+__version__ = "0.1.23"
 
 from .runtime import dom
 from .runtime.app import App

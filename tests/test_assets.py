@@ -279,6 +279,36 @@ class AssetContractTests(unittest.TestCase):
             self.assertEqual(component_payload["x_sprag"]["class"], "AssetRootComponent")
             self.assertEqual(component_payload["x_sprag"]["methods"][0]["name"], "render")
 
+    def test_build_web_preview_emits_project_types_under_sprag_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = DummyApp(root)
+            dist_dir = root / "dist"
+
+            build_web_preview(
+                [
+                    (
+                        "app.routes.docs.page",
+                        page(
+                            path="/docs",
+                            controller=AssetController,
+                            screen=AssetScreen,
+                            mode="document",
+                        ),
+                    )
+                ],
+                dist_dir,
+                app=app,
+                mounts=[],
+            )
+
+            generated = root / ".sprag" / "sprag_project_types.pyi"
+            self.assertTrue(generated.exists())
+            self.assertTrue((root / ".sprag" / "__init__.py").exists())
+            self.assertTrue((root / ".sprag" / "py.typed").exists())
+            self.assertFalse((dist_dir / "types.pyi").exists())
+            self.assertIn("RoutePath = Literal['/docs']", generated.read_text(encoding="utf-8"))
+
     def test_dev_overlay_can_decode_generated_source_map_locations(self):
         node = shutil.which("node")
         if node is None:

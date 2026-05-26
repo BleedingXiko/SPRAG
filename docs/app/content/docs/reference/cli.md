@@ -128,7 +128,7 @@ sprag pack --dist dist --zip --skip-images
 
 ## `sprag types`
 
-Generate a `.sprag/types.pyi` file from the current build manifest. The generated file
+Generate a `.sprag/sprag_project_types.pyi` file from the current build manifest. The generated file
 contains type aliases for routes, mounts, actions, stores, and module aliases — useful for
 IDE autocompletion and type-safe dispatch.
 
@@ -140,7 +140,7 @@ sprag types [--output PATH]
 
 **Flags**
 
-- `--output` — directory where `types.pyi` will be written (default: `.sprag`)
+- `--output` — directory to read `manifest.json` from (default: `.sprag`)
 - `--app` — explicit app import target
 - `--project-root` — project root to load from
 
@@ -150,8 +150,9 @@ sprag types [--output PATH]
 sprag types
 ```
 
-The command reads `manifest.json` from the output directory and writes `types.pyi` alongside
-it. It is also run automatically as part of `sprag build` and `sprag dev`.
+The command reads `manifest.json` from the output directory and writes
+`.sprag/sprag_project_types.pyi`. It is also run automatically as part of
+`sprag build` and `sprag dev`.
 
 ## `sprag add route`
 

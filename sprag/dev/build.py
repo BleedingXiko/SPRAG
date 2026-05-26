@@ -342,7 +342,10 @@ def build_web_preview(pages, output_dir: Path, *, app=None, mounts=None) -> dict
     (output_dir / "manifest.json").write_text(
         json.dumps(_serializable_manifest(manifest), indent=2, sort_keys=True), encoding="utf-8"
     )
-    emit_project_types(output_dir / "manifest.json", output_dir / "types.pyi")
+    emit_project_types(
+        output_dir / "manifest.json",
+        resolve_project_root(app) / ".sprag" / "sprag_project_types.pyi",
+    )
     emit_generated_files(
         output_dir,
         _collect_hydration_entries(route_manifest),

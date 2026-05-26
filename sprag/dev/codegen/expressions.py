@@ -49,8 +49,11 @@ def _compile_expr(node, env, method_names=None):
             return special_js_namespace
         return f"{_compile_expr(node.value, env, method_names=method_names)}.{_map_name(node.attr)}"
     if isinstance(node, ast.Subscript):
+        value = _compile_expr(node.value, env, method_names=method_names)
+        if isinstance(node.slice, ast.Slice):
+            return f"{value}.slice({_compile_slice_args(node.slice, env, method_names=method_names)})"
         return (
-            f"{_compile_expr(node.value, env, method_names=method_names)}"
+            f"{value}"
             f"[{_compile_slice(node.slice, env, method_names=method_names)}]"
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -156,6 +159,14 @@ def _compile_expr(node, env, method_names=None):
         # no one-liner that's correct in every case.
         if isinstance(node.func, ast.Name) and node.func.id in _BUILTIN_CALLS:
             return _compile_builtin_call(node, env, method_names=method_names)
+        if isinstance(node.func, ast.Attribute):
+            python_method = _compile_python_method_call(
+                node,
+                env,
+                method_names=method_names,
+            )
+            if python_method is not None:
+                return python_method
         if isinstance(node.func, ast.Name) and node.func.id in (env.get("__sprag_classes__") or {}):
             args = []
             for arg in node.args:
@@ -489,6 +500,155 @@ def _compile_builtin_call(node, env, *, method_names):
     return handler(args)
 
 
+def _compile_python_method_call(node, env, *, method_names):
+    attr = node.func.attr
+    if node.keywords:
+        return None
+    receiver_type = infer_expr_py_type(node.func.value, env)
+    if receiver_type not in {"list", "str"}:
+        return None
+    obj = _compile_expr(node.func.value, env, method_names=method_names)
+    args = [_compile_expr(arg, env, method_names=method_names) for arg in node.args]
+
+    if receiver_type == "list" and attr == "append":
+        _expect_arg_count(attr, args, 1)
+        return f"{obj}.push({args[0]})"
+    if receiver_type == "list" and attr == "extend":
+        _expect_arg_count(attr, args, 1)
+        return f"{obj}.push(...{args[0]})"
+    if receiver_type == "list" and attr == "insert":
+        _expect_arg_count(attr, args, 2)
+        return f"{obj}.splice({args[0]}, 0, {args[1]})"
+    if receiver_type == "list" and attr == "pop" and not args:
+        return f"{obj}.pop()"
+    if receiver_type == "list" and attr == "pop" and len(args) == 1:
+        return f"{obj}.splice({args[0]}, 1)[0]"
+    if receiver_type == "list" and attr == "clear" and not args:
+        return f"{obj}.splice(0, {obj}.length)"
+    if receiver_type == "list" and attr == "index":
+        if len(args) not in {1, 2}:
+            raise JSCodegenError("index() expects 1-2 arguments in browser codegen.")
+        return f"{obj}.indexOf({', '.join(args)})"
+    if receiver_type == "list" and attr == "count":
+        _expect_arg_count(attr, args, 1)
+        return f"(({obj}) || []).filter((__value) => __value === {args[0]}).length"
+    if receiver_type == "list" and attr == "copy":
+        _expect_arg_count(attr, args, 0)
+        return f"{obj}.slice()"
+    if receiver_type == "list" and attr == "remove":
+        _expect_arg_count(attr, args, 1)
+        return f"{obj}.splice({obj}.indexOf({args[0]}), 1)"
+
+    if receiver_type == "str" and attr == "startswith":
+        if len(args) not in {1, 2}:
+            raise JSCodegenError("startswith() expects 1-2 arguments in browser codegen.")
+        return f"{obj}.startsWith({', '.join(args)})"
+    if receiver_type == "str" and attr == "endswith":
+        if len(args) not in {1, 2}:
+            raise JSCodegenError("endswith() expects 1-2 arguments in browser codegen.")
+        return f"{obj}.endsWith({', '.join(args)})"
+    if receiver_type == "str" and attr == "find":
+        if len(args) not in {1, 2}:
+            raise JSCodegenError("find() expects 1-2 arguments in browser codegen.")
+        return f"{obj}.indexOf({', '.join(args)})"
+    if receiver_type == "str" and attr == "rfind":
+        if len(args) not in {1, 2}:
+            raise JSCodegenError("rfind() expects 1-2 arguments in browser codegen.")
+        return f"{obj}.lastIndexOf({', '.join(args)})"
+    if receiver_type == "str" and attr == "lstrip":
+        _expect_arg_count(attr, args, 0)
+        return f"{obj}.trimStart()"
+    if receiver_type == "str" and attr == "rstrip":
+        _expect_arg_count(attr, args, 0)
+        return f"{obj}.trimEnd()"
+    if receiver_type == "str" and attr == "replace" and len(args) == 2:
+        return f"{obj}.replaceAll({args[0]}, {args[1]})"
+    if receiver_type == "str" and attr == "replace" and len(args) > 2:
+        raise JSCodegenError("replace(old, new, count) is not supported in browser codegen.")
+    if receiver_type == "str" and attr == "join":
+        _expect_arg_count(attr, args, 1)
+        return f"{args[0]}.join({obj})"
+
+    return None
+
+
+def _expect_arg_count(name, args, count):
+    if len(args) != count:
+        raise JSCodegenError(f"{name}() expects {count} argument(s) in browser codegen.")
+
+
+def assign_inferred_py_type(env, target, value_node, annotation_node=None):
+    types = env.setdefault("__sprag_py_types__", {})
+    py_type = infer_annotation_py_type(annotation_node) or infer_expr_py_type(value_node, env)
+    if py_type is None:
+        types.pop(target, None)
+        return
+    types[target] = py_type
+
+
+def infer_annotation_py_type(node):
+    if node is None:
+        return None
+    if isinstance(node, ast.Name):
+        if node.id in {"list", "List"}:
+            return "list"
+        if node.id == "str":
+            return "str"
+    if isinstance(node, ast.Subscript):
+        return infer_annotation_py_type(node.value)
+    if isinstance(node, ast.Attribute):
+        if node.attr in {"list", "List"}:
+            return "list"
+        if node.attr == "str":
+            return "str"
+    return None
+
+
+def infer_expr_py_type(node, env):
+    if isinstance(node, ast.Name):
+        return (env.get("__sprag_py_types__") or {}).get(node.id)
+    if isinstance(node, (ast.List, ast.Tuple, ast.ListComp, ast.GeneratorExp)):
+        return "list"
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return "str"
+    if isinstance(node, ast.JoinedStr):
+        return "str"
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+        return infer_expr_py_type(node.value, env)
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name):
+            if node.func.id in {"list", "range"}:
+                return "list"
+            if node.func.id == "str":
+                return "str"
+        if isinstance(node.func, ast.Attribute):
+            receiver_type = infer_expr_py_type(node.func.value, env)
+            if receiver_type == "str":
+                if node.func.attr in {
+                    "strip",
+                    "lower",
+                    "upper",
+                    "lstrip",
+                    "rstrip",
+                    "replace",
+                    "replace_all",
+                    "slice",
+                    "substring",
+                    "toLowerCase",
+                    "toUpperCase",
+                    "trim",
+                    "trimStart",
+                    "trimEnd",
+                }:
+                    return "str"
+                if node.func.attr == "split":
+                    return "list"
+            if receiver_type == "list":
+                if node.func.attr in {"copy", "slice", "filter", "map"}:
+                    return "list"
+    return None
+
+
 def _sum_to_js(args):
     # Python's sum(iterable, start=0) shape maps cleanly enough to a JS
     # reduce for the common numeric cases that survive into browser code.
@@ -754,6 +914,19 @@ def _compile_slice(node, env, *, method_names=None):
     if isinstance(node, ast.Constant):
         return json.dumps(node.value)
     return _compile_expr(node, env, method_names=method_names)
+
+
+def _compile_slice_args(node, env, *, method_names=None):
+    if node.step is not None:
+        raise JSCodegenError("Slice steps are not supported in browser codegen.")
+    args = []
+    if node.lower is not None:
+        args.append(_compile_expr(node.lower, env, method_names=method_names))
+    elif node.upper is not None:
+        args.append("0")
+    if node.upper is not None:
+        args.append(_compile_expr(node.upper, env, method_names=method_names))
+    return ", ".join(args)
 
 
 def _is_bound_method_reference(node, method_names):

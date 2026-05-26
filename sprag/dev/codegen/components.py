@@ -28,7 +28,7 @@ import json
 from pathlib import Path
 
 from .diagnostics import lint_browser_method
-from .expressions import _compile_expr
+from .expressions import _compile_expr, assign_inferred_py_type
 from .dependencies import used_browser_class_refs, used_js_import_aliases
 from .imports import _detect_ragot_imports
 from .mappings import JSCodegenError, _map_name
@@ -135,13 +135,23 @@ def compile_component_artifact(component_class, *, declared_import_aliases=None)
 
     for stmt in function_def.body:
         stmt_line = render_start_line + getattr(stmt, "lineno", 1) - 1
+        target_node = None
+        value_node = None
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
-            target = stmt.targets[0].id
+            target_node = stmt.targets[0]
+            value_node = stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None and isinstance(stmt.target, ast.Name):
+            target_node = stmt.target
+            value_node = stmt.value
+        if target_node is not None and value_node is not None:
+            target = target_node.id
             if target == "props":
                 render_env[target] = "props"
                 continue
-            compiled_value = _compile_expr(stmt.value, render_env)
+            compiled_value = _compile_expr(value_node, render_env)
             render_env[target] = target
+            annotation_node = stmt.annotation if isinstance(stmt, ast.AnnAssign) else None
+            assign_inferred_py_type(render_env, target, value_node, annotation_node)
             line = f"        const {target} = {compiled_value};"
             body_lines.append(line)
             render_line_mappings.extend(mappings_for_text(line, source_line=stmt_line, name="render"))

@@ -10,7 +10,7 @@ from __future__ import annotations
 import ast
 from itertools import count
 
-from .expressions import _compile_comp_target, _compile_expr
+from .expressions import _compile_comp_target, _compile_expr, assign_inferred_py_type
 from .mappings import JSCodegenError, _compile_binop
 from .source_maps import mappings_for_text
 
@@ -64,6 +64,25 @@ def _compile_statements_with_mappings(
         stmt_line = source_line_offset + getattr(stmt, "lineno", 1)
         for binding in _declare_namedexpr_bindings(stmt, env, pad):
             _append(binding, source_line=stmt_line)
+        if isinstance(stmt, ast.AnnAssign) and stmt.value is not None and isinstance(stmt.target, ast.Name):
+            target = stmt.target.id
+            compiled_value = _compile_expr(stmt.value, env, method_names=method_names)
+            if target in env:
+                _append(f"{pad}{target} = {compiled_value};", source_line=stmt_line)
+            else:
+                env[target] = target
+                _append(f"{pad}let {target} = {compiled_value};", source_line=stmt_line)
+            assign_inferred_py_type(env, target, stmt.value, stmt.annotation)
+            continue
+        if (
+            isinstance(stmt, ast.AnnAssign)
+            and stmt.value is not None
+            and isinstance(stmt.target, ast.Attribute)
+        ):
+            target = _compile_expr(stmt.target, env, method_names=method_names)
+            compiled_value = _compile_expr(stmt.value, env, method_names=method_names)
+            _append(f"{pad}{target} = {compiled_value};", source_line=stmt_line)
+            continue
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             target = stmt.targets[0].id
             compiled_value = _compile_expr(stmt.value, env, method_names=method_names)
@@ -78,6 +97,7 @@ def _compile_statements_with_mappings(
             else:
                 env[target] = target
                 _append(f"{pad}let {target} = {compiled_value};", source_line=stmt_line)
+            assign_inferred_py_type(env, target, stmt.value)
             continue
         if (
             isinstance(stmt, ast.Assign)

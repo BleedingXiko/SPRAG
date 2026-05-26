@@ -63,6 +63,7 @@ Both classes get a `function format_price` / `const CURRENCY` prelude in their g
 | Python | JavaScript |
 |---|---|
 | `x = value` | `let x = value` (first use) or `x = value` (reassign) |
+| `x: T = value` | same as `x = value`; the annotation is for Python tooling |
 | `a, b = pair` | `const [a, b] = pair` |
 | `self.foo = value` | `this.foo = value` |
 | `x += 5` | `x += 5` |
@@ -81,7 +82,7 @@ Both classes get a `function format_price` / `const CURRENCY` prelude in their g
 
 Component `render()` methods are more restricted — only these statements are allowed:
 
-- Variable assignments: `x = expression`
+- Variable assignments: `x = expression` and `x: T = expression`
 - Attribute assignments: `self.foo = value`
 - `if`/`elif`/`else` blocks
 - Return statements: `return ui.div(...)`
@@ -155,6 +156,9 @@ Each render() refreshes the captured values, so updates from `self.set_state(...
 | `(1, 2, 3)` | `[1, 2, 3]` (tuples become arrays) |
 | `{"key": value}` | `{"key": value}` |
 | `{**a, **b}` | `{...a, ...b}` |
+| `items[start:end]` | `items.slice(start, end)` |
+
+Slice steps are intentionally unsupported in browser code: write the loop or helper explicitly.
 
 ### Operators
 
@@ -238,6 +242,46 @@ Works in helper defs, calls, `ui.*` factories, `dom.*` helpers, and arbitrary me
 | `print(...)` | `console.log(...)` |
 | `range(n)` | Materialized array (but `for i in range(n)` optimizes to C-style loop) |
 | `sum(items)` | `.reduce((a, b) => a + b, 0)` |
+
+## Python collection and string methods
+
+SPRAG lowers common Python list/string spellings when it can see the receiver is a Python list or string local. You do not need JS wrapper helpers for normal values.
+
+```python
+def on_start(self):
+    tokens: list[str] = []
+    tokens.append("ready")
+    tokens.extend(["steady"])
+
+    title = " Hello "
+    self.set_state({
+        "tokens": tokens[:1],
+        "title": title.strip().lower(),
+    })
+```
+
+| Python | JavaScript |
+|---|---|
+| `items.append(x)` | `items.push(x)` |
+| `items.extend(xs)` | `items.push(...xs)` |
+| `items.insert(i, x)` | `items.splice(i, 0, x)` |
+| `items.pop()` | `items.pop()` |
+| `items.pop(i)` | `items.splice(i, 1)[0]` |
+| `items.clear()` | `items.splice(0, items.length)` |
+| `items.copy()` | `items.slice()` |
+| `items.remove(x)` | `items.splice(items.indexOf(x), 1)` |
+| `items.index(x)` | `items.indexOf(x)` |
+| `items.count(x)` | filter count |
+| `text.startswith(x)` | `text.startsWith(x)` |
+| `text.endswith(x)` | `text.endsWith(x)` |
+| `text.find(x)` | `text.indexOf(x)` |
+| `text.rfind(x)` | `text.lastIndexOf(x)` |
+| `text.lstrip()` | `text.trimStart()` |
+| `text.rstrip()` | `text.trimEnd()` |
+| `text.replace(old, new)` | `text.replaceAll(old, new)` |
+| `sep.join(items)` | `items.join(sep)` |
+
+Existing JS-shaped APIs still compile when you are intentionally working with browser objects, but framework examples use Python spelling whenever there is a clear equivalent.
 
 ## Name mapping
 

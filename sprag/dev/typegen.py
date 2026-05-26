@@ -18,20 +18,29 @@ def emit_project_types(
     manifest_path: Union[str, Path] = ".sprag/manifest.json",
     output_path: Optional[Union[str, Path]] = None,
 ) -> Path:
-    """Read a SPRAG manifest and emit a project-local ``types.pyi`` file."""
+    """Read a SPRAG manifest and emit project-local type aliases."""
     manifest_file = Path(manifest_path)
     if output_path is None:
-        output_file = manifest_file.with_name("types.pyi")
+        output_file = manifest_file.with_name("sprag_project_types.pyi")
     else:
         output_file = Path(output_path)
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     output_file.parent.mkdir(parents=True, exist_ok=True)
+    package_init = output_file.parent / "__init__.py"
+    if not package_init.exists():
+        package_init.write_text("", encoding="utf-8")
+    package_marker = output_file.parent / "py.typed"
+    if not package_marker.exists():
+        package_marker.write_text("", encoding="utf-8")
+    stale_types_file = output_file.with_name("types.pyi")
+    if stale_types_file != output_file and stale_types_file.exists():
+        stale_types_file.unlink()
     output_file.write_text(render_project_types(manifest), encoding="utf-8")
     return output_file
 
 
 def render_project_types(manifest: dict) -> str:
-    """Return the ``types.pyi`` content for a manifest dictionary."""
+    """Return the generated project type content for a manifest dictionary."""
     routes = manifest.get("routes", [])
     mounts = manifest.get("mounts", [])
     route_paths = _unique(entry.get("path") for entry in routes)

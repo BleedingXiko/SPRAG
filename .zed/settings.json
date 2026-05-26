@@ -1,4 +1,5 @@
 {
+  "format_on_save": "off",
   "lsp": {
     "pyright": {
       "initialization_options": {

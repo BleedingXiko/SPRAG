@@ -1,9 +1,11 @@
 import unittest
 import json
 import inspect
+import ast
 
 from sprag import Component, Module, browser, imports, ui, virtual_scroll
 from sprag.dev.codegen.components import compile_component_artifact, compile_component_class
+from sprag.dev.codegen.expressions import _compile_expr
 from sprag.dev.codegen.modules import compile_module_artifact, compile_module_class
 from sprag.dev.codegen.mappings import JSCodegenError
 
@@ -150,6 +152,36 @@ class UnsupportedAnnotatedComponent(Component):
     def render(self, props=None):
         count: int = 1
         return ui.div(str(count))
+
+
+class UnsupportedAnnotationOnlyComponent(Component):
+    def render(self, props=None):
+        count: int
+        return ui.div(str(count))
+
+
+class PythonCollectionMethodsModule(Module):
+    def on_start(self):
+        tokens: list[str] = []
+        tokens.append("ready")
+        tokens.extend(["steady"])
+        tokens.insert(1, "set")
+        first = tokens.pop(0)
+        copied = tokens.copy()
+        tokens.remove("steady")
+        title = " Hello "
+        self.set_state(
+            {
+                "first": first,
+                "copy": copied,
+                "tokens": tokens[:1],
+                "ready_index": tokens.index("ready"),
+                "ready_count": tokens.count("ready"),
+                "title": title.strip().lower(),
+                "starts": title.lstrip().startswith("He"),
+                "joined": ", ".join(tokens),
+            }
+        )
 
 
 class HelperMountPointComponent(Component):
@@ -323,14 +355,43 @@ class CodegenDiagnosticsTests(unittest.TestCase):
         self.assertIn("with open(", message)
         self.assertIn("Python `with` statements cannot be compiled to JavaScript.", message)
 
-    def test_component_diagnostic_includes_context_and_hint(self):
+    def test_component_supports_local_annotations_with_values(self):
+        compiled = compile_component_class(UnsupportedAnnotatedComponent)
+        self.assertIn("const count = 1;", compiled)
+        self.assertIn("String(count)", compiled)
+
+    def test_component_annotation_only_diagnostic_includes_context_and_hint(self):
         with self.assertRaises(JSCodegenError) as ctx:
-            compile_component_class(UnsupportedAnnotatedComponent)
+            compile_component_class(UnsupportedAnnotationOnlyComponent)
         message = str(ctx.exception)
-        self.assertIn("Unsupported statement in browser codegen: AnnAssign.", message)
-        self.assertIn("UnsupportedAnnotatedComponent.render", message)
-        self.assertIn("count: int = 1", message)
-        self.assertIn("Hint: Use a plain assignment inside browser methods", message)
+        self.assertIn("Annotation-only local variables are not supported in browser codegen.", message)
+        self.assertIn("UnsupportedAnnotationOnlyComponent.render", message)
+        self.assertIn("count: int", message)
+        self.assertIn("Give the variable an initial value", message)
+
+    def test_compile_module_supports_python_collection_and_string_methods(self):
+        compiled = compile_module_class(PythonCollectionMethodsModule)
+        self.assertIn('let tokens = [];', compiled)
+        self.assertIn('tokens.push("ready");', compiled)
+        self.assertIn('tokens.push(...["steady"]);', compiled)
+        self.assertIn('tokens.splice(1, 0, "set");', compiled)
+        self.assertIn('let first = tokens.splice(0, 1)[0];', compiled)
+        self.assertIn('let copied = tokens.slice();', compiled)
+        self.assertIn('tokens.splice(tokens.indexOf("steady"), 1);', compiled)
+        self.assertIn('let title = " Hello ";', compiled)
+        self.assertIn('"first": first', compiled)
+        self.assertIn('"copy": copied', compiled)
+        self.assertIn('"tokens": tokens.slice(0, 1)', compiled)
+        self.assertIn('"ready_index": tokens.indexOf("ready")', compiled)
+        self.assertIn('"ready_count": ((tokens) || []).filter((__value) => __value === "ready").length', compiled)
+        self.assertIn('"title": title.trim().toLowerCase()', compiled)
+        self.assertIn('"starts": title.trimStart().startsWith("He")', compiled)
+        self.assertIn('"joined": tokens.join(", ")', compiled)
+
+    def test_python_method_lowering_does_not_steal_store_methods(self):
+        expr = ast.parse("counter.clear()", mode="eval").body
+        compiled = _compile_expr(expr, {"__sprag_stores__": {"counter": "counter"}})
+        self.assertEqual(compiled, "counter.clear()")
 
     def test_mount_point_diagnostic_includes_context_and_render_guidance(self):
         with self.assertRaises(JSCodegenError) as ctx:
