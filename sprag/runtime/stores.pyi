@@ -2,11 +2,6 @@
 
 from typing import Any, Callable, Optional, Union
 
-try:
-    from sprag_project_types import StoreName
-except ImportError:
-    StoreName = str  # type: ignore
-
 Selector = Union[str, Callable[[dict[str, Any]], Any]]
 Unsubscribe = Callable[[], Any]
 
@@ -44,7 +39,7 @@ class StoreBridge:
     def select(self, selector: Selector, default: Any = ...) -> Any: ...
 
 
-def store(name: StoreName, *, initial: Optional[dict[str, Any]] = ..., debug: bool = ...) -> StoreBridge:
+def store(name: str, *, initial: Optional[dict[str, Any]] = ..., debug: bool = ...) -> StoreBridge:
     """Declare a named shared state store.
 
     Put declarations in ``app/stores.py`` and import them anywhere. The same

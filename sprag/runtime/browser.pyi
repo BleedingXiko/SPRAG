@@ -9,18 +9,11 @@ can read the surface every SPRAG user actually writes against.
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, List, Optional, Type, TypeVar
 
-try:
-    from sprag_project_types import ActionName, MountPath, RoutePath, StoreName
-except ImportError:
-    ActionName = str  # type: ignore
-    MountPath = str  # type: ignore
-    RoutePath = str  # type: ignore
-    StoreName = str  # type: ignore
-
 F = TypeVar("F", bound=Callable[..., Any])
 C = TypeVar("C", bound=type)
 M = TypeVar("M", bound="Module")
 T = TypeVar("T")
+ComponentT = TypeVar("ComponentT", bound="Component")
 
 EventHandler = Callable[..., Any]
 """DOM / bus / socket event callback."""
@@ -304,8 +297,8 @@ class Module:
 
     # Lifecycle ownership
     def add_cleanup(self, fn: Cleanup) -> None: ...
-    def adopt(self, child: Any) -> Any: ...
-    def adopt_component(self, component: "Component", options: Optional[dict[str, Any]] = ...) -> "Component": ...
+    def adopt(self, child: T) -> T: ...
+    def adopt_component(self, component: ComponentT, options: Optional[dict[str, Any]] = ...) -> ComponentT: ...
 
     # State
     def set_state(self, new_state: dict[str, Any]) -> dict[str, Any]: ...
@@ -334,7 +327,7 @@ class Module:
     def leave_topic(self, topic: str) -> None: ...
 
     # Actions
-    def call_action(self, name: ActionName, payload: Optional[dict[str, Any]] = ...) -> Any: ...
+    def call_action(self, name: str, payload: Optional[dict[str, Any]] = ...) -> Any: ...
     def action_error_message(
         self, error: Any, fallback: Optional[str] = ...
     ) -> str: ...
